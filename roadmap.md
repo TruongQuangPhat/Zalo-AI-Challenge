@@ -6,10 +6,10 @@
 > **Lần rà soát:** 01/11/2026 — bổ sung hợp đồng dữ liệu, query plan, acceptance cases và thứ tự triển khai trước Phase 0.  
 > **Mục tiêu:** Xây dựng **một baseline chạy được từ đầu đến cuối**, tự động trả lời câu hỏi tiếng Việt trên CSV/XLSX/SQLite, hoạt động hoàn toàn offline, có thể đánh giá bằng đáp án train và đóng gói Docker để nộp thi.  
 > **Phạm vi:** Tập trung vào một giải pháp **đúng quy định, tổng quát hóa được, có thể tái lập và đo lường được**. Các kỹ thuật tối ưu PA nâng cao, fine-tuning, ensemble hay multi-agent **để sau khi baseline hoàn chỉnh**.  
-> **Trạng thái:** `PHASE_0_REVERIFY_PENDING` — M0 đã từng đạt full acceptance trên host ngày 01/11/2026. Sau khi dọn project, cần verify lại bản hiện tại bằng `uv run --no-sync python -m scripts.check_phase0 --scope all`; chỉ đóng lại khi mọi gate passed. Report duy nhất: [reports/phase0.json](reports/phase0.json). Các phase sau chưa bắt đầu.  
+> **Trạng thái:** `PHASE_0_COMPLETE` — bản dọn gọn đã được full reverify trên host ngày 01/11/2026 lúc 21:02 giờ Việt Nam: quality, CPU, Docker và GPU runtime đều passed; `phase0_complete=true`. Phase 0/M0 đã nghiệm thu theo report mới: [reports/phase0.json](reports/phase0.json). Các phase sau chưa bắt đầu.
 > **Thiết lập hiện có (theo xác nhận của người thực hiện):** dự án đang có thư mục `dataset/` và đã đưa `dataset/` vào `.gitignore`; **không tạo lại bước gitignore dataset**. Mã nguồn dùng trực tiếp `src/`, **không có lớp thư mục `src/datamate/`**. Cần kiểm tra trạng thái Git thực tế trước khi kết luận dữ liệu chưa từng được track.
 
-**Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu trước cleanup, bản dọn gọn đang chờ reverify; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
+**Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu lại sau cleanup; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
 
 ---
 
@@ -129,10 +129,10 @@ Preparation nạp quy ước nguồn và các luật ảnh hưởng phân loại
 - [x] `predict.sh` / `src/cli.py` stub đã chạy train 3.000 câu và public 1.000 câu, mỗi split hai lần; ID/output giống nhau, đủ log, 0 lỗi. Chỉ mock abstain, không có LLM hay execution nghiệp vụ.
 - [x] Evaluator nội bộ có fixtures cho mọi type/alias/list/table, +1/−1/0, số tiền lớn lệch 1 đồng, mẫu số đầy đủ và 90 đúng/10 sai/2.900 bỏ. Mock train được chấm 0 đúng/0 sai/3.000 abstain, PA=0, coverage=0, accuracy answered=null. **Tương đương evaluator BTC vẫn chưa xác minh** và đã ghi rõ trong report/docs.
 - [x] CLI inference/evaluation tách biệt, mock adapter ghi `is_mock=true`; test chặn mở labels và network trong inference, per-question failure tiếp tục batch, output ngoài input, 259 source files giữ nguyên hash trước/sau acceptance.
-- [ ] Reverify Docker của bản dọn gọn: một verifier Python build/run với network none, input/root read-only, output writable; kiểm tra predictions/logs/scoring và tự xóa artifact tạm. Bản trước cleanup đã đạt; không dùng kết quả cũ chứng nhận code verifier/Dockerfile vừa thay đổi.
+- [x] Reverify Docker của bản dọn gọn đã đạt trên host ngày 01/11/2026: verifier Python build/run với network none, input/root read-only, output writable; đủ 3.000 predictions/logs, scoring all-abstain PA=0, coverage=0 và không missing/malformed. Verifier kiểm tra mount/root và thử ghi input bị từ chối; artifact tạm đã tự xóa. Đã đối chiếu hash Docker/source context hiện tại với report mới `reports/phase0.json`; không dùng kết quả trước cleanup để nghiệm thu.
 - [x] Host đã xác nhận `.venv` Python 3.11.18, torch 2.6.0+cu124/CUDA 12.4 chạy tensor cuda:0, synchronize/readback thành công; GTX 1650 4.096 MiB, driver 555.97. Cleanup giữ nguyên môi trường này; full verifier kiểm tra lại GPU. Tương thích BTC/Blackwell vẫn thuộc gate image cuối.
 
-**Lịch sử và trạng thái sau cleanup:** lượt host ngày 01/11/2026 đã đạt quality/CPU/Docker/GPU, 77 tests và `phase0_complete=true`. Bản dọn gọn đã qua lint/format, 58 test cốt lõi và CPU smoke train/public; 259 file nguồn giữ nguyên hash, không còn artifact tạm sau verify. Đã bỏ wrapper `.sh`, test chẩn đoán môi trường, config mô tả chưa dùng, docs/decisions và report/log/cache lặp; giữ ba nhóm test, một verifier và một report. M0 lịch sử không bị phủ nhận, nhưng bản hiện tại chỉ được nghiệm thu lại sau full check trên host; CPU-only không thay gate Docker/GPU. Các nội dung nghiên cứu G–H giữ nguyên.
+**Nghiệm thu sau cleanup:** người dùng chạy full verifier trên host ngày 01/11/2026 lúc 21:02 giờ Việt Nam; report mới ghi `phase0_complete=true`, mọi gate passed. Bản dọn gọn đạt lint/format, 58 test cốt lõi, train/public mỗi split hai lượt ổn định, 259 file nguồn giữ nguyên hash, Docker offline/mount/output/scoring và CUDA tensor trong `.venv` đạt; không còn artifact verify tạm. Đã đối chiếu Docker/source context hiện tại với hash trong report. Các lỗi socket/GPU từ phiên agent bị giới hạn không phải kết quả host và đã được thay thế bằng lượt nghiệm thu mới này. Phase 0/M0 hoàn thành cho bản sau cleanup; Phụ lục G–H vẫn là kế hoạch nghiên cứu, không phải kết quả thực nghiệm.
 
 **Deliverables:** Repo hiện có được chuẩn hóa, Git/Docker ignore được xác minh, local checks, `src/cli.py`, `predict.sh`, Docker stub, evaluator tối thiểu đã kiểm chứng và trạng thái quy định cần xác minh trong roadmap.  
 **Exit criteria:** Chạy `predict.sh` offline trên sample split, tạo JSONL/logs đủ số câu; all-abstain được evaluator báo đúng `PA_full=0`, coverage bằng 0 và accuracy trên answered là N/A. Fixture có câu đúng/sai/bỏ kiểm tra đúng mẫu số và kiểu. Không ghi nhận các bước này đã hoàn tất trước khi chạy thực tế.
@@ -506,7 +506,7 @@ Các acceptance cases ở Phụ lục F là **yêu cầu test khi triển khai**
 
 | Milestone | Nội dung nghiệm thu | Trạng thái |
 |---|---|---|
-| M0 | Repo + Docker stub + output/logs hợp lệ + evaluator fixture có chấm thật | ⏳ Đã đạt trước cleanup; bản gọn cần full reverify trên host, xem reports/phase0.json |
+| M0 | Repo + Docker stub + output/logs hợp lệ + evaluator fixture có chấm thật | ✅ Hoàn thành sau cleanup: full host reverify 01/11/2026 đạt quality/CPU/Docker/GPU; xem reports/phase0.json |
 | M1 | Một câu train đi qua LLM thật → execution → đáp án → evaluator | ⬜ Chưa thực hiện |
 | M2 | Mở rộng normalization/semantic metrics + `PA_full` trên train/validation | ⬜ Chưa thực hiện |
 | M3 | Cải thiện planner/ranking và coverage nhiều cấu trúc có kiểm chứng | ⬜ Chưa thực hiện |

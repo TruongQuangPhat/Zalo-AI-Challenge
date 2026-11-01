@@ -22,7 +22,7 @@ uv run --no-sync python -m scripts.check_phase0 --scope all
 
 Lệnh ghi đè **một report** tại [reports/phase0.json](reports/phase0.json). Predictions/logs/context dùng khi verify nằm trong thư mục tạm và tự xóa sau lượt chạy, kể cả khi kiểm tra lỗi. Không sinh JUnit, nhật ký hoặc thư mục runs tích lũy.
 
-Nếu chỉ kiểm tra phần CPU, dùng `--scope cpu`; kết quả này không nghiệm thu Docker/CUDA. Chỉ ghi nhận hoàn thành bản hiện tại khi `phase0_complete=true` và mọi gate `passed`. Bản trước khi dọn đã được host nghiệm thu; bản sau khi dọn cần chạy lại full check trên terminal WSL có quyền Docker/GPU.
+Nếu chỉ kiểm tra phần CPU, dùng `--scope cpu`; kết quả này không nghiệm thu Docker/CUDA. Chỉ ghi nhận hoàn thành bản hiện tại khi `phase0_complete=true` và mọi gate `passed`. Bản sau cleanup đã được full reverify trên host ngày 01/11/2026: 58 tests, quality/CPU/Docker/GPU đều đạt; Phase 0/M0 hoàn thành theo report mới.
 
 Docker cần daemon truy cập được và base image `python:3.11-slim-bookworm` đã có ở máy. Verifier không pull ngầm; có thể chọn image local khác bằng `DATAMATE_BASE_IMAGE`. Image này là bootstrap CPU; tương thích image BTC/Blackwell vẫn cần xác minh ở bước đóng gói model.
 
