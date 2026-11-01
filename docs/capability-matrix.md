@@ -1,0 +1,29 @@
+# Capability matrix — Phase 1
+
+Mỗi dòng là cấu trúc + metric, không phải allowlist business IDs.
+Authority phải lấy từ rulebook/README/calendar runtime, có hash.
+`planned` là đặc tả; runtime chưa hỗ trợ thì **abstain**, không tự kết luận unanswerable.
+Chỉ khi có bằng chứng dữ liệu gốc thiếu mới trả unanswerable.
+
+| ID / ưu tiên | Input shape và metric | Required facts/fields/rules/operators | Trạng thái / evidence | Acceptance / gate bật | Fallback và giới hạn |
+|---|---|---|---|---|---|
+| OUT / P0 | Typed answer mọi input shape | Existing output validator + exact JSON/Decimal serializer; evaluator riêng | supported ở output/evaluation; Phase 0 report và tests/test_contracts.py, test_evaluator.py | C28–C29; tests hiện có; không chứng minh metric | Dòng lỗi theo hợp đồng hiện có; chưa xác minh evaluator BTC tương đương hoàn toàn |
+| SAFE / P0 | Operator/schema chưa hỗ trợ | MockPlanner, per-question error boundary, không đọc nhãn/network | supported ở safe abstention; tests/test_split_runtime.py | C30; label isolation và failure continuation | abstain; hiện chưa có shape classifier hoặc planner thật |
+| S1-CSV-REV / P0 | CSV phẳng có order key, line amount/status/date, revenue | orders+sales; role gate; source-specific date/money/status; grouping; exact dedup; SUM Decimal; per-metric coverage | planned, runtime unsupported; nguồn dev khảo sát ở data-observations, chưa execution | C01–C06, C12, C16–C18, C30; P1-SUMMARY/P1-ERROR; đạt fixtures tương ứng + một câu qua LLM thật trước M1 | abstain; không biến raw min/max thành coverage; unknown/summary chưa phân loại chặn tổng |
+| S1-CSV-COUNT / P0 | Cùng shape, order_count | Order key/date/status có consistency; distinct/group restoration; không dùng source row count | planned, runtime unsupported | C03–C06, C12, C16–C18, C30; P1-SUMMARY | abstain; không mở count cho ledger không mã |
+| S1-HEADER / P0 mở rộng | Header-only revenue/count | Unique order ID; amount đúng nghĩa tiền hàng; loại source summary; SUM header một lần | planned, runtime unsupported | C03–C05, C17–C18, P1-SUMMARY; xác minh amount semantics | abstain khi unknown; nguồn thiếu item detail chỉ ảnh hưởng product metrics |
+| S1-RELATIONAL / P0 mở rộng | Header/detail CSV/XLSX/SQLite, revenue/count | Reader tương ứng; orders N:1 detail; keys/orphan/cardinality checks; preaggregation, no fan-out | planned, runtime unsupported; key mappings hiện là candidates ngoại trừ phạm vi EDA POS cũ | S1 cases + C09; multi-source reconciliation | abstain; đọc được bảng chưa đủ bật JOIN |
+| S1-EXCEL / P0 mở rộng | Nhiều sheet/tháng/phần, header nhiều dòng/kế thừa | Header/group/continuation recognition; all sheets; year hints; native cell types; summary/role gate | planned, runtime unsupported | C01–C06, C09 khi JOIN, C18, C27 khi cache; P1-SUMMARY/P1-ERROR | abstain nếu thiếu sheet/unknown boundary; không fill tiền/SL |
+| LEDGER / P1 | Sổ no-order, revenue/quantity | Ledger-record grain, giữ raw copies, bỏ summary; amount/date/status rõ; unit conversion cho quantity | planned, runtime unsupported | C02, C05, C13, C18, P1-SUMMARY | Revenue abstain tới khi kiểm chứng; count order/customer chỉ unanswerable sau xác nhận thiếu thông tin gốc |
+| TEMPORAL / P0 mở rộng | Nhiều kỳ, MTD, ratios, weekday/lunar | Per-window coverage, runtime calendar/as-of, independent scopes, DAG + denominator/undefined policy | planned, runtime unsupported | C17, C19–C20, C22, C26–C27 | abstain cho ambiguity/divide-by-zero chưa có rule; không missing→0 |
+| RANK / P1 | Product/customer/staff ranking/list | Identity resolution, metric-specific scope, base units, stable code tie-break, output ordering | planned, runtime unsupported | C13, C21–C22, C25, P1-IDENTITY | abstain khi aliases collision hoặc không đủ metric; không lấy mọi số trong tên làm attribute |
+| DEBT / P1 | Payment history, receivable/collection | Orders/payments separate; cutoff by payment date; COD/status policy riêng; per-order positive balance; earlier orders retained | planned, runtime unsupported | C09, C12, C15, C18, C26 | Source missing proof → unanswerable; engine/parser thiếu → abstain |
+| STOCK-COST / P1 | Stock event/snapshot, COGS/inventory value | Snapshot timestamp or ordered stock events; catalog vs line cost bases; unit conversions | planned, runtime unsupported | C10–C14, C17–C18, C27 | Không dùng snapshot khác mốc, không SUM balances, không FIFO tự suy |
+| LOTS / P1/P2 | Pharmacy lots/expiry | Lots/purchases/sale allocations/returns; lot price and base-unit quantity; no many-to-many fan-out | planned, runtime unsupported | C09, C12–C14, C26 | abstain nếu chưa tái lập history; snapshot không đủ lịch sử → unanswerable khi đã chứng minh |
+| MIXED-ROLES / P2 | Embedded topping, vouchers/points/ship/fees | Per-row subtype, source-specific split/allocation and reconciliation; metric-dependent role policy | planned, runtime unsupported | C07–C08, C18 | Giữ unknown và abstain metric phụ thuộc; không đưa mọi dòng vào parser sale_item |
+| DOMAIN / P2 | Repair, trade-in, installments, warranty, membership | Domain facts/keys/time axes and denominators theo runtime authority; task/visit/machine/contract tách grain | planned, runtime unsupported; không có khảo sát test mới | C23–C25 | abstain; các synthetic cases chỉ đặc tả nguy cơ đã có trong roadmap |
+
+Input shape chưa được nhận diện là unknown. Muốn mở capability phải lưu test/run evidence,
+required fields đủ, coverage/units/grain đúng, kết quả thực thi đạt và output hợp lệ.
+Một metric cấp shop có thể dùng header độc lập khi kiểm chứng đúng nghĩa, dù item parser chưa có;
+phải ghi chính xác giới hạn, không nâng cả ngành thành supported.

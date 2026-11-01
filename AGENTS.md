@@ -17,8 +17,8 @@ Use the isolated Python 3.11 `.venv`, managed through `pyproject.toml` and `uv.l
 
 ```bash
 uv sync --locked --python /usr/bin/python3.11
-uv run --no-sync python -m scripts.check_phase0 --scope cpu
-uv run --no-sync python -m scripts.check_phase0 --scope all
+uv run --no-sync python -m scripts.verify_runtime --scope cpu
+uv run --no-sync python -m scripts.verify_runtime --scope all
 ./predict.sh --data-dir dataset/train --output-dir .artifacts/my-run
 ```
 
