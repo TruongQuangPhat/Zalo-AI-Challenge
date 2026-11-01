@@ -3,10 +3,10 @@
 
 > **Dự án:** Zalo AI Challenge 2026 — *DataMate: Talking To Your Data Through Agentic AI*  
 > **Ngày lập:** 01/11/2026  
-> **Lần rà soát:** 01/11/2026 — bổ sung hợp đồng dữ liệu, query plan, acceptance cases và thứ tự triển khai trước Phase 0.  
+> **Lần rà soát:** 02/11/2026 — chốt Phase 1 sau rà soát code, tái lập audit/annotation và nghiệm thu lại quality/CPU smoke.\
 > **Mục tiêu:** Xây dựng **một baseline chạy được từ đầu đến cuối**, tự động trả lời câu hỏi tiếng Việt trên CSV/XLSX/SQLite, hoạt động hoàn toàn offline, có thể đánh giá bằng đáp án train và đóng gói Docker để nộp thi.  
 > **Phạm vi:** Tập trung vào một giải pháp **đúng quy định, tổng quát hóa được, có thể tái lập và đo lường được**. Các kỹ thuật tối ưu PA nâng cao, fine-tuning, ensemble hay multi-agent **để sau khi baseline hoàn chỉnh**.  
-> **Trạng thái:** `PHASE_0_COMPLETE` — bản dọn gọn đã được full reverify trên host ngày 01/11/2026 lúc 21:02 giờ Việt Nam: quality, CPU, Docker và GPU runtime đều passed; `phase0_complete=true`. Phase 0/M0 đã nghiệm thu theo report mới: [reports/phase0.json](reports/phase0.json). Các phase sau chưa bắt đầu.
+> **Trạng thái:** `PHASE_1_COMPLETE` — Phase 1 đã nghiệm thu đặc tả, fixtures và protocol đánh giá theo [reports/data_preparation.json](reports/data_preparation.json): lint/format, 84 tests, inventory/manifest/annotation checks đạt. Phase 0/M0 giữ bằng chứng full host reverify tại [reports/runtime_verification.json](reports/runtime_verification.json). Phase 2 trở đi và M1 chưa thực hiện; runtime vẫn mock abstain, chưa có metric execution hay LLM.
 > **Thiết lập hiện có (theo xác nhận của người thực hiện):** dự án đang có thư mục `dataset/` và đã đưa `dataset/` vào `.gitignore`; **không tạo lại bước gitignore dataset**. Mã nguồn dùng trực tiếp `src/`, **không có lớp thư mục `src/datamate/`**. Cần kiểm tra trạng thái Git thực tế trước khi kết luận dữ liệu chưa từng được track.
 
 **Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu lại sau cleanup; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
@@ -129,32 +129,79 @@ Preparation nạp quy ước nguồn và các luật ảnh hưởng phân loại
 - [x] `predict.sh` / `src/cli.py` stub đã chạy train 3.000 câu và public 1.000 câu, mỗi split hai lần; ID/output giống nhau, đủ log, 0 lỗi. Chỉ mock abstain, không có LLM hay execution nghiệp vụ.
 - [x] Evaluator nội bộ có fixtures cho mọi type/alias/list/table, +1/−1/0, số tiền lớn lệch 1 đồng, mẫu số đầy đủ và 90 đúng/10 sai/2.900 bỏ. Mock train được chấm 0 đúng/0 sai/3.000 abstain, PA=0, coverage=0, accuracy answered=null. **Tương đương evaluator BTC vẫn chưa xác minh** và đã ghi rõ trong report/docs.
 - [x] CLI inference/evaluation tách biệt, mock adapter ghi `is_mock=true`; test chặn mở labels và network trong inference, per-question failure tiếp tục batch, output ngoài input, 259 source files giữ nguyên hash trước/sau acceptance.
-- [x] Reverify Docker của bản dọn gọn đã đạt trên host ngày 01/11/2026: verifier Python build/run với network none, input/root read-only, output writable; đủ 3.000 predictions/logs, scoring all-abstain PA=0, coverage=0 và không missing/malformed. Verifier kiểm tra mount/root và thử ghi input bị từ chối; artifact tạm đã tự xóa. Đã đối chiếu hash Docker/source context hiện tại với report mới `reports/phase0.json`; không dùng kết quả trước cleanup để nghiệm thu.
+- [x] Reverify Docker của bản dọn gọn đã đạt trên host ngày 01/11/2026: verifier Python build/run với network none, input/root read-only, output writable; đủ 3.000 predictions/logs, scoring all-abstain PA=0, coverage=0 và không missing/malformed. Verifier kiểm tra mount/root và thử ghi input bị từ chối; artifact tạm đã tự xóa. Hash Docker/source context của bản đã nghiệm thu được lưu trong `reports/runtime_verification.json`; không dùng kết quả trước cleanup để nghiệm thu.
 - [x] Host đã xác nhận `.venv` Python 3.11.18, torch 2.6.0+cu124/CUDA 12.4 chạy tensor cuda:0, synchronize/readback thành công; GTX 1650 4.096 MiB, driver 555.97. Cleanup giữ nguyên môi trường này; full verifier kiểm tra lại GPU. Tương thích BTC/Blackwell vẫn thuộc gate image cuối.
 
-**Nghiệm thu sau cleanup:** người dùng chạy full verifier trên host ngày 01/11/2026 lúc 21:02 giờ Việt Nam; report mới ghi `phase0_complete=true`, mọi gate passed. Bản dọn gọn đạt lint/format, 58 test cốt lõi, train/public mỗi split hai lượt ổn định, 259 file nguồn giữ nguyên hash, Docker offline/mount/output/scoring và CUDA tensor trong `.venv` đạt; không còn artifact verify tạm. Đã đối chiếu Docker/source context hiện tại với hash trong report. Các lỗi socket/GPU từ phiên agent bị giới hạn không phải kết quả host và đã được thay thế bằng lượt nghiệm thu mới này. Phase 0/M0 hoàn thành cho bản sau cleanup; Phụ lục G–H vẫn là kế hoạch nghiên cứu, không phải kết quả thực nghiệm.
+**Nghiệm thu sau cleanup:** người dùng chạy full verifier trên host ngày 01/11/2026 lúc 21:02 giờ Việt Nam; report mới ghi `runtime_verified=true`, mọi gate passed. Bản dọn gọn đạt lint/format, 58 test cốt lõi, train/public mỗi split hai lượt ổn định, 259 file nguồn giữ nguyên hash, Docker offline/mount/output/scoring và CUDA tensor trong `.venv` đạt; không còn artifact verify tạm. Hash trong report thuộc lượt host nghiệm thu trước các thay đổi tên/hướng dẫn CLI. Các lỗi socket/GPU từ phiên agent bị giới hạn không phải kết quả host và đã được thay thế bằng lượt nghiệm thu mới này. Phase 0/M0 hoàn thành cho bản sau cleanup; Phụ lục G–H vẫn là kế hoạch nghiên cứu, không phải kết quả thực nghiệm.
 
 **Deliverables:** Repo hiện có được chuẩn hóa, Git/Docker ignore được xác minh, local checks, `src/cli.py`, `predict.sh`, Docker stub, evaluator tối thiểu đã kiểm chứng và trạng thái quy định cần xác minh trong roadmap.  
 **Exit criteria:** Chạy `predict.sh` offline trên sample split, tạo JSONL/logs đủ số câu; all-abstain được evaluator báo đúng `PA_full=0`, coverage bằng 0 và accuracy trên answered là N/A. Fixture có câu đúng/sai/bỏ kiểm tra đúng mẫu số và kiểu. Không ghi nhận các bước này đã hoàn tất trước khi chạy thực tế.
 
 ### Phase 1 — Hoàn thiện EDA có mục tiêu và tạo data contracts
 
-**Mục tiêu:** chuyển các phát hiện EDA sẵn có thành **spec có thể test**; không lặp lại toàn bộ profiling khi đã có bằng chứng.
+**Mục tiêu:** chuyển EDA sẵn có thành **đặc tả có thể kiểm tra**, tập đánh giá cố định và đầu vào cụ thể cho S1 (doanh thu/số đơn). Dùng inventory/profile cũ làm điểm xuất phát, xác minh những phần cần thiết bằng code và dữ liệu nguồn.
 
-**Công việc**
+**Ranh giới công việc:** Phase 1 chốt nghĩa dữ liệu, schema contract, fixture có expected values và cách đánh giá. Readers, chuẩn hóa và execution nghiệp vụ được triển khai theo lát cắt ở Phase 2–6. Chỉ code các kiểu dữ liệu/validator thực sự cần cho S1 hoặc để kiểm tra deliverables Phase 1; chưa tạo đủ class/module cho toàn bộ mô hình đích. Tái sử dụng `Question`/`Split` và output validator/evaluator hiện có. Việc tích hợp LLM để đạt M1 vẫn theo Phase 5; không chờ hoàn tất mọi cấu trúc/ngành mới bắt đầu S1.
 
-- [ ] Kiểm kê lại file/sheet/table trên **train** bằng script có thể chạy lại; đối chiếu với inventory đã có. Tài liệu cũ là điểm xuất phát, không thay thế kiểm tra code.
-- [ ] Chọn tập **representative train businesses** có cấu trúc khác nhau: CSV một bảng, Excel nhiều sheet/tháng, header/detail riêng, sổ không có mã đơn, POS SQLite, ngành nhà thuốc có lô/hạn dùng.
-- [ ] Phân loại bảng theo grain và **dòng trong bảng hỗn hợp** theo `row_role` (Phụ lục C): không giả định mọi dòng sau header là mặt hàng; phân biệt adjustment, service fee, trả hàng, thanh toán, snapshot và sự kiện.
-- [ ] Chuẩn hóa bộ từ vựng lỗi cần xử lý: ngày/tiền/đơn vị/kiểu cột; dòng kế thừa; trùng trong cùng đơn; ghi chú trạng thái; cột lỗi Excel; mã không nhất quán.
-- [ ] Phân loại **3.000 câu train** theo intent/metric/temporal complexity/data dependency/output type; đây là metadata phục vụ đánh giá, không phải lời giải theo từng câu.
-- [ ] Cụ thể hóa các hợp đồng Phụ lục C–F thành `SourceTable`, `SourceRow`, `ColumnProfile`, `EntityMapping`, `BusinessContext`, `Coverage`, `TransformationIssue`, `QueryPlan`, `Answer`, `MetricContract`, `Capability`. Chỉ triển khai các trường cần cho lát cắt đầu, nhưng không bỏ thông tin nguồn/đơn vị/thời gian.
-- [ ] Chốt capability matrix P0/P1/P2 và acceptance cases theo cấu trúc nguồn/metric, không theo ID; mỗi capability có required sources, operator, fixture và fallback. Cấu trúc ngành chưa hỗ trợ phải có đường nhận diện/fallback, không lặng lẽ đi qua parser bán hàng chung.
-- [ ] Thiết kế **business holdout validation**: giữ nguyên cả doanh nghiệp và nhóm cấu trúc ở validation; không chia ngẫu nhiên từng câu rồi cho cùng shop xuất hiện cả train và validation. Cố định split, seed và quy tắc chọn trước thí nghiệm.
-- [ ] Ghi nhận EDA trước đây đã xem dữ liệu cả hai split và một số nhãn train: các câu gold từng dùng là regression/dev evidence, không gọi chúng là đánh giá mù. Giữ một nhóm shop train để đánh giá cuối, không dùng lỗi trên nhóm đó để lặp sửa prompt liên tục rồi vẫn gọi là held-out.
+**Thứ tự thực hiện**
 
-**Deliverables:** `docs/data-contracts.md`, `docs/data-observations.md`, `config/validation_split.json`, fixtures và câu hỏi phân loại.  
-**Exit criteria:** Mỗi dạng dữ liệu mẫu có contract, grain và bộ test trường hợp khó; có protocol validation cố định.
+1. Đối chiếu inventory train ở mức cấu trúc, ghi mức độ tiếp xúc EDA và khóa protocol/split đánh giá trước khi xem thêm gold hoặc thử nghiệm.
+2. Chọn nguồn S1 và tập train đại diện trong phần dev; chốt grain, coverage, contracts và acceptance cases của S1 trước.
+3. Thử bộ nhãn câu hỏi trên một tập dev nhỏ, sửa định nghĩa rồi khóa phiên bản và phân loại toàn bộ 3.000 câu train.
+4. Hoàn thiện đặc tả các cấu trúc đại diện, capability matrix P0/P1/P2 và các kiểm tra deliverables. S1 có thể được triển khai song song sau bước 2; đánh giá trên tập nào phải ghi rõ tập đó và mẫu số.
+
+**Công việc và bằng chứng cần có**
+
+- [x] **Đối chiếu inventory trên train.** Dùng công cụ có thể chạy lại để so đường dẫn, kích thước/hash và danh sách file/sheet/table với `file_inventory.csv`/`table_inventory.csv` cũ; báo thiếu/thừa/thay đổi và xử lý hoặc ghi rõ lý do từng chênh lệch. Chỉ profile sâu lại nguồn thay đổi, có nghi vấn hoặc cần xác minh cho contract; không mặc định quét lại mọi dòng. Tách đường chạy train khỏi public và cấu hình output ngoài `dataset/`. Script EDA cũ cần được rà soát trước khi tái sử dụng: hiện có đường dẫn cố định, đọc cả hai split và ghi sản phẩm vào `dataset/explore/`.
+- [x] **Khóa protocol validation trước khi mở rộng xem nhãn.** `config/validation_split.json` ghi phiên bản, seed/quy tắc chọn, danh sách business và question IDs, nhóm cấu trúc cùng fingerprint nguồn. Có các phần dev, validation để chọn cấu hình và final-held-out để xác nhận bản đã chọn; mỗi phần không rỗng, không giao business, và mọi câu của một business thuộc cùng phần. Dev chứa các gold POS đã dùng trong EDA. Ghi rõ phần được phép dùng để fit/calibration nếu bổ sung các bước đó về sau; không lấy final-held-out cho các mục đích này.
+- [x] **Tách hai phép đánh giá tổng quát hóa.** Business holdout đo shop chưa dùng để phát triển nhưng có thể cùng cấu trúc; structure holdout giữ cả nhóm nguồn/template có quan hệ gần ra khỏi phần phát triển của phép đánh giá đó. Ghi cách nhóm và membership cho từng phép đánh giá; có thể dùng phân hoạch riêng nếu một split không đáp ứng được cả hai. Nếu không đủ nhóm độc lập, ghi cấu trúc nào chưa đo được; không coi đổi business ID là đã có unseen-schema. Không dùng public score hoặc public/private data để chọn split, prompt, model hay tham số.
+- [x] **Ghi mức độ tiếp xúc dữ liệu trước đây.** EDA đã khảo sát cả train/public, đọc phân bố nhãn train và kiểm chứng 9 câu POS; giữ các gold này làm regression/dev evidence. Phân biệt đã xem schema/dữ liệu, thống kê nhãn và giá trị đáp án cụ thể; phần chưa xác định ghi `unknown`. Final-held-out là phần không dùng thêm để tuning sau khi khóa protocol, không tuyên bố chưa từng được quan sát. Chỉ xem kết quả cuối sau khi chọn cấu hình; nếu dùng lỗi đó để sửa hệ thống, ghi phần đã trở thành dev và không tiếp tục báo là final độc lập.
+- [x] **Chọn nguồn S1 và tập train đại diện từ dev.** Ghi lý do chọn và bảng ánh xạ cấu trúc → nguồn → rủi ro → acceptance refs. Bao phủ CSV phẳng có mã đơn, Excel nhiều sheet/tháng hoặc nhiều phần, header/detail riêng, sổ không mã đơn, POS SQLite và nguồn nhà thuốc có lô/hạn dùng. Một business có thể bao phủ nhiều dạng; số lượng theo cấu trúc thực tế, không chọn chỉ theo ngành. Cấu trúc chỉ có ở holdout phải ghi là chưa khảo sát sâu cho phát triển, không kéo vào dev chỉ để đủ checklist. Quan sát public đã có chỉ ghi như giới hạn/rủi ro; không mở rộng khảo sát test để tạo fixture hoặc tối ưu parser.
+- [x] **Đặc tả grain, row roles và lỗi dữ liệu.** Với từng nguồn đại diện, ghi khóa/phạm vi khóa, quan hệ và nguy cơ fan-out, ranh giới nhóm/kế thừa, điều kiện dedup, date roles, đơn vị/nguồn giá và coverage basis, kèm source refs và phần chưa biết. Bảng hỗn hợp phân biệt `sale_item`, adjustment, service fee, trả hàng, thanh toán, snapshot/event và `unknown` theo Phụ lục C. Từ vựng lỗi thống nhất gồm ngày/tiền/đơn vị, kiểu cột, dòng kế thừa, trùng trong cùng đơn, ghi chú trạng thái, ô lỗi Excel và mã không nhất quán; mỗi loại có ví dụ synthetic, ảnh hưởng tới metric và cách xử lý hoặc fallback dự kiến. Không dùng profile ngày sơ bộ làm coverage chính thức.
+- [x] **Khóa bộ nhãn và phân loại 3.000 câu train.** Lưu annotation cục bộ ngoài `dataset/`, một record mỗi question ID, có schema/taxonomy version và nguồn gán nhãn. Thử trước trên khoảng 100 câu dev được chọn theo cấu trúc và dạng câu; rà thủ công để sửa định nghĩa, rồi khóa taxonomy trước khi gán toàn bộ. Regex chỉ tạo đề xuất; câu đa nghĩa ghi `unknown`/`ambiguous` và lý do, không ép nhãn để đủ thống kê. Bộ nhãn tối thiểu theo bảng dưới; validator kiểm tra đủ đúng 3.000 IDs, không trùng/thừa, enum/refs hợp lệ và thống kê số câu chưa phân giải theo từng chiều.
+- [x] **Chốt contracts tối thiểu theo Phụ lục C–F.** Mô tả mục đích, trường bắt buộc, kiểu/nullability, invariant và ví dụ cho `SourceTable`, `SourceRow`, `ColumnProfile`, `EntityMapping`, `BusinessContext`, `Coverage`, `TransformationIssue`, `QueryPlan`, `Answer`, `MetricContract`, `Capability`. Đánh dấu trường cần cho S1 và phần mở rộng hoãn; giữ provenance, grain, đơn vị, thời gian và uncertainty cho dữ liệu liên quan. `Answer` kế thừa hợp đồng hiện có. Chỉ thêm code khi có nơi sử dụng/kiểm tra cụ thể; không tạo class rỗng hay registry tổng quát chỉ để khớp danh sách.
+- [x] **Chốt capability matrix và acceptance cases.** Mỗi dòng theo cấu trúc nguồn/metric có required facts/fields/rules/operators, priority, status, acceptance refs, evidence và fallback theo F.1. S1 phải xác định rõ phần hỗ trợ dự kiến, điều kiện bật và các cấu trúc chưa hỗ trợ. Dùng fixture synthetic có input, expected output/intermediate values và căn cứ rule; không sao chép dữ liệu gốc vào Git. Case S1 tối thiểu bao gồm ngày/tiền, grouping/dedup theo grain, huỷ/trả cả đơn, count distinct, coverage, zero/parse failure và label isolation (các phần liên quan của C01–C06, C12, C16–C18, C30); thêm C09 khi nguồn có JOIN. Mọi dạng đại diện có acceptance cases được chỉ định hoặc fallback có lý do.
+
+**Bộ nhãn câu hỏi tối thiểu**
+
+| Chiều | Cách ghi và giới hạn |
+|---|---|
+| Intent | `intents[]` cho phép nhiều nhãn, như aggregate, ranking, comparison, lookup, listing; định nghĩa ranh giới và ví dụ trong taxonomy. |
+| Metric | `metrics[]` tham chiếu danh mục metric; một câu có thể hỏi nhiều chỉ tiêu. Không lưu SQL, plan giải sẵn hoặc đáp án trong annotation. |
+| Thời gian | Ghi `temporal_features[]`: ngày/kỳ tường minh, tương đối, nhiều kỳ, snapshot, lịch âm, cần lịch sử trước kỳ; không ép các đặc điểm đồng thời thành một nhãn duy nhất. |
+| Phụ thuộc dữ liệu | `required_facts[]` mô tả nhu cầu từ nghĩa câu; trạng thái đã xác minh nguồn thực sự đủ/thiếu giữ riêng, chỉ gán khi có source refs. Không biến phỏng đoán thành capability hoặc gold answerability. |
+| Output | `expected_output_type` suy từ câu có thể chưa rõ. `gold_output_type` chỉ được trích bởi luồng đánh giá từ labels, giữ riêng khỏi metadata dùng cho inference; không cần xem giá trị đáp án để phân loại. |
+| Chất lượng annotation | Ghi phương pháp gán, trạng thái proposed/reviewed/unknown/ambiguous và lý do khi cần. Công bố phần chưa rà thủ công; không gọi toàn bộ nhãn tự động là gold annotation. |
+
+Annotations, gold types và thống kê theo câu chỉ phục vụ phân tích/đánh giá. Inference không đọc chúng hoặc `train_qa_joined.jsonl`. Không mở gold final-held-out để giải bất đồng annotation; ghi unresolved. Rulebook/README/dữ liệu nguồn vẫn là input runtime hợp lệ theo F.3.
+
+**Deliverables**
+
+| Nơi lưu | Nội dung và ranh giới |
+|---|---|
+| `docs/data-contracts.md` | Contracts/taxonomy version, trường S1, invariants và tham chiếu C–F; đặc tả ổn định, không sao chép tiến độ từ roadmap. |
+| `docs/data-observations.md` | Bằng chứng đối chiếu inventory, nguồn đại diện, grain/keys/coverage, từ vựng lỗi và giới hạn EDA; tham chiếu artifact cục bộ, không nhúng raw data hoặc đáp án. |
+| `docs/capability-matrix.md`, `docs/acceptance-cases.md` | Phạm vi/case theo F, input/expected synthetic và trạng thái planned/implemented/passed riêng biệt. Chỉ ghi `supported` khi execution/fallback liên quan đã được kiểm tra thật. |
+| `config/validation_split.json` | Manifest có thể kiểm tra lại membership, seed/quy tắc nhóm, fingerprints và phạm vi dùng từng phần; không chứa câu trả lời. |
+| `scripts/`, `tests/` | Công cụ đối chiếu/validate tối thiểu và fixtures synthetic; dùng cấu trúc hiện có, không tạo framework hoặc cây thư mục chỉ để dự phòng. |
+| Output cục bộ trong `.artifacts/` | Inventory diff, annotation 3.000 câu và metadata đánh giá có nguồn/version; không commit dữ liệu/nhãn/generated runs, không ghi vào `dataset/`. |
+
+**Exit criteria — chỉ nghiệm thu Phase 1 khi có đủ bằng chứng:**
+
+1. Đối chiếu train inventory chạy lại được, không còn chênh lệch chưa giải thích; output và fingerprint nguồn truy ra được. Không cần full profiling khi không có lý do.
+2. Split manifest qua kiểm tra toàn bộ IDs/membership, không giao business và đầy đủ fingerprint; có protocol business/structure holdout và ghi nhận mức độ tiếp xúc EDA. Không đòi mọi nhóm cấu trúc đều chia được; giới hạn phải tường minh.
+3. Nguồn S1 đã chọn; mỗi cấu trúc đại diện có contract, grain, khóa hoặc bằng chứng không có khóa, coverage basis/unknown, acceptance refs và giới hạn. Cấu trúc không đủ bằng chứng được giữ unknown/unsupported.
+4. Annotation bao phủ đúng 3.000 câu với taxonomy cố định; validator và lượt rà tập dev thử nghiệm đạt, có thống kê phương pháp gán và unresolved theo từng chiều. Đủ record không đồng nghĩa đã xác minh đúng mọi nhãn.
+5. Contracts S1 và capability matrix có required sources/operators, expected values synthetic và fallback cụ thể. Kiểm tra schema/manifest và invariant đã triển khai phải chạy đạt; case nghiệp vụ chờ Phase 2–6 ghi `planned`, không lấy mock làm bằng chứng metric đúng. Chưa được bật revenue/count chỉ vì fixture đã được viết.
+6. Ghi trạng thái, kết quả kiểm tra, giới hạn và việc tiếp theo trong roadmap. Phase 1 hoàn thành nghĩa là đặc tả/fixtures/protocol sẵn sàng cho S1; M1 vẫn cần **LLM thật → plan → execution → output → evaluator**, và baseline vẫn cần các gate ở các phase sau.
+
+**Nghiệm thu Phase 1 — 01/11/2026:** [contracts](docs/data-contracts.md), [observations](docs/data-observations.md), [capability matrix](docs/capability-matrix.md), [acceptance cases](docs/acceptance-cases.md), [validation manifest](config/validation_split.json), hai công cụ offline và 33 fixture synthetic đã có. Lint/format và **84 tests** (58 cũ + 26 mới) đạt trong `.venv` Python 3.11. Inventory **162 file / 340 bảng train** khớp hash/kích thước/tên bảng với EDA cũ, input giữ nguyên. Manifest seed 20261101 có hai protocol: business dev/validation/final = **16/7/7 shop, 1.658/671/671 câu**; structure = **27/2/1 shop, 2.645/237/118 câu**, tách toàn họ handwritten/mixed. Pilot và khảo sát sâu mới chỉ dùng giao hai dev.
+
+**Annotation và bằng chứng:** taxonomy v1 bao phủ đúng **3.000 IDs**; **100 câu dev đã rà nghĩa câu**, **2.900 câu proposed**. Số unresolved theo chiều intent/metric/temporal/dependency/output lần lượt **43/212/48/212/2.331**; không coi proposal là gold annotation. Không trích gold types hoặc mở thêm giá trị đáp án; labels chỉ hash opaque bytes. Annotation chạy lại cho records giống từng byte; artifacts/reviews giữ cục bộ tại `.artifacts/data_preparation/`, không commit. Chi tiết hash/version và gates trong [reports/data_preparation.json](reports/data_preparation.json).
+
+**Chốt Phase 1 — 02/11/2026:** rà soát lại code và deliverables theo exit criteria, không còn lỗi chặn trong phạm vi audit/contracts/protocol. Verifier hiện tại đạt lint/format, **84 tests**, train/public mock mỗi split hai lượt ổn định và **259 file nguồn giữ nguyên hash**. Audit train và 3.000 annotation được tái tạo, records giống từng byte; kiểm tra local links và hash artifact đạt. Kết quả CPU mới được ghi trong `final_review` của report data preparation; `runtime_verified=false` ở lượt CPU do Docker/CUDA chưa chạy, không thay bằng chứng host đầy đủ trước đây. Phạm vi Phase 1 đã khóa; các annotation proposed/unresolved, coverage unknown và capability nghiệp vụ chưa triển khai tiếp tục là giới hạn tường minh khi bắt đầu S1.
+
+**Giới hạn và việc tiếp theo:** nguồn S1 là CSV order-line có mã đơn; kiểm tra targeted ghi 56.501 dòng / 22.428 order, 0 thiếu trường bắt buộc hoặc mâu thuẫn raw ngày/status trong order. Đây không phải output metric. Phát hiện dòng tổng ngày ở cả no-order ledger và header-only CSV đã được đặc tả thành `row_role=summary`, có fixture để tránh double-count. Available start của S1 còn unknown; quan hệ ở các nguồn khác vẫn có phần candidate. Các case nghiệp vụ là planned và capability revenue/count vẫn unsupported. Tập giữ lại không historically blind do EDA cũ; hai protocol chỉ hợp lệ khi không dùng feedback của holdout tương ứng. Bước tiếp theo là triển khai reader/normalization/coverage và execution S1 theo Phase 2–6, sau đó một câu qua LLM thật để đạt M1. Không chạy lại Docker/CUDA cho Phase 1; không dùng các gate này để tuyên bố baseline hoàn chỉnh.
 
 ### Phase 2 — Data ingestion và profiling tự động
 
@@ -409,11 +456,11 @@ Mỗi slice bắt buộc đi qua **ingest → normalize → semantics → plan �
 │   ├── regression/
 │   └── fixtures/                       # synthetic; dữ liệu train gốc ở dataset/ ignored
 ├── scripts/
-│   ├── check_phase0.py                 # verifier duy nhất, tự dọn artifact
+│   ├── verify_runtime.py                 # verifier duy nhất, tự dọn artifact
 │   ├── build_context.py
 │   └── probe_environment.py
 └── reports/
-    ├── phase0.json                     # report gần nhất, ghi đè mỗi lần verify
+    ├── runtime_verification.json                     # report gần nhất, ghi đè mỗi lần verify
     └── baseline_v1.md                  # tạo khi tới Phase 8
 ```
 
@@ -506,7 +553,7 @@ Các acceptance cases ở Phụ lục F là **yêu cầu test khi triển khai**
 
 | Milestone | Nội dung nghiệm thu | Trạng thái |
 |---|---|---|
-| M0 | Repo + Docker stub + output/logs hợp lệ + evaluator fixture có chấm thật | ✅ Hoàn thành sau cleanup: full host reverify 01/11/2026 đạt quality/CPU/Docker/GPU; xem reports/phase0.json |
+| M0 | Repo + Docker stub + output/logs hợp lệ + evaluator fixture có chấm thật | ✅ Hoàn thành sau cleanup: full host reverify 01/11/2026 đạt quality/CPU/Docker/GPU; xem reports/runtime_verification.json |
 | M1 | Một câu train đi qua LLM thật → execution → đáp án → evaluator | ⬜ Chưa thực hiện |
 | M2 | Mở rộng normalization/semantic metrics + `PA_full` trên train/validation | ⬜ Chưa thực hiện |
 | M3 | Cải thiện planner/ranking và coverage nhiều cấu trúc có kiểm chứng | ⬜ Chưa thực hiện |
@@ -599,7 +646,7 @@ Không forward-fill tiền không có nghĩa mọi ô tiền trống đều là 
 
 ### C.2. Vai trò dòng và trạng thái đơn
 
-`row_role` tối thiểu: `sale_item`, `service_fee`, `order_adjustment`, `return_item`, `payment`, `purchase_item`, `inventory_event`, `inventory_snapshot`, `repair_visit`, `warranty_visit`, `catalog`, `unknown`. Thêm trường mô tả subtype khi cần; không ép mỗi file chỉ có một role.
+`row_role` tối thiểu: `sale_item`, `service_fee`, `order_adjustment`, `return_item`, `payment`, `purchase_item`, `inventory_event`, `inventory_snapshot`, `repair_visit`, `warranty_visit`, `catalog`, `summary`, `unknown`. `summary` bổ sung từ khảo sát Phase 1 cho tổng cộng nguồn; giữ provenance, không tạo fact giao dịch và không kế thừa nhóm qua dòng này. Thêm trường mô tả subtype khi cần; không ép mỗi file chỉ có một role.
 
 Enum trạng thái nghiệp vụ thống nhất: `completed`, `cancelled`, `returned`, `shipping`; nhãn `in_delivery`/đang giao được ánh xạ về `shipping`. Không tạo trạng thái nghiệp vụ thứ năm để đoán đơn chưa phân giải: giữ status null cùng `mapping_status=ambiguous/unsupported` và chặn metric phụ thuộc.
 

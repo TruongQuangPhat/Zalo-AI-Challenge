@@ -1,4 +1,4 @@
-"""One Phase 0 verifier; temporary predictions/logs are removed after every run."""
+"""Offline runtime verifier; temporary predictions/logs are removed after every run."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def check_real_splits(data_dirs: list[Path], run_root: Path) -> dict:
             for record in records:
                 validate_answer(record)
                 if record["type"] != "abstain":
-                    raise ContractError("Phase 0 mock unexpectedly answered")
+                    raise ContractError("Mock runtime unexpectedly answered")
             logs = sorted((output / "logs").glob("*.json"))
             if len(logs) != len(records) or manifest["question_errors"] != 0:
                 raise ContractError("question logs/errors differ from clean-run contract")
@@ -178,7 +178,7 @@ def check_docker(work: Path) -> dict:
                 "--build-arg",
                 f"BASE_IMAGE={base}",
                 "-t",
-                "datamate-phase0:local",
+                "datamate-runtime-check:local",
                 "-",
             ],
             stdin=stream,
@@ -191,7 +191,7 @@ def check_docker(work: Path) -> dict:
         raise ContractError(f"Docker build failed: {build.stderr[-4000:]}")
     output = work / "docker-result"
     output.mkdir()
-    name = f"datamate-phase0-{uuid4().hex[:12]}"
+    name = f"datamate-runtime-check-{uuid4().hex[:12]}"
     mounts = [
         "--mount",
         f"type=bind,source={ROOT / 'dataset/train'},target=/data,readonly",
@@ -210,7 +210,7 @@ def check_docker(work: Path) -> dict:
                 "--tmpfs",
                 "/tmp:rw,nosuid,noexec,size=64m",
                 *mounts,
-                "datamate-phase0:local",
+                "datamate-runtime-check:local",
             ]
         )
         config = loads(checked(["docker", "inspect", "--format", "{{json .HostConfig}}", name]))
@@ -229,10 +229,10 @@ def check_docker(work: Path) -> dict:
                 *mounts,
                 "--entrypoint",
                 "python3",
-                "datamate-phase0:local",
+                "datamate-runtime-check:local",
                 "-c",
                 "import errno,pathlib,sys\n"
-                "try: pathlib.Path('/data/.phase0-readonly-probe').write_text('probe')\n"
+                "try: pathlib.Path('/data/.runtime-readonly-probe').write_text('probe')\n"
                 "except OSError as exc: sys.exit(0 if exc.errno == errno.EROFS else 1)\n"
                 "sys.exit(1)",
             ]
@@ -264,12 +264,12 @@ def check_docker(work: Path) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scope", choices=["cpu", "all"], default="all")
-    parser.add_argument("--report", type=Path, default=ROOT / "reports/phase0.json")
+    parser.add_argument("--report", type=Path, default=ROOT / "reports/runtime_verification.json")
     args = parser.parse_args()
     report = {
         "recorded_at": datetime.now(UTC).isoformat(),
         "scope": args.scope,
-        "phase0_complete": False,
+        "runtime_verified": False,
         "checks": {
             "quality": "not_run",
             "cpu": "not_run",
@@ -292,7 +292,7 @@ def main() -> int:
     )
     artifacts = ROOT / ".artifacts"
     artifacts.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="phase0-", dir=artifacts) as temporary:
+    with tempfile.TemporaryDirectory(prefix="runtime-verification-", dir=artifacts) as temporary:
         work = Path(temporary)
 
         def run_gate(name, operation):
@@ -331,10 +331,10 @@ def main() -> int:
                 }
 
             run_gate("gpu_runtime", gpu_check)
-    report["phase0_complete"] = all(state == "passed" for state in report["checks"].values())
+    report["runtime_verified"] = all(state == "passed" for state in report["checks"].values())
     args.report.parent.mkdir(parents=True, exist_ok=True)
     write_json(args.report, report)
-    print(dumps({key: report[key] for key in ["scope", "phase0_complete", "checks"]}))
+    print(dumps({key: report[key] for key in ["scope", "runtime_verified", "checks"]}))
     required = ["quality", "cpu"] if args.scope == "cpu" else list(report["checks"])
     return 0 if all(report["checks"][key] == "passed" for key in required) else 1
 

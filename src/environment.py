@@ -22,7 +22,7 @@ def require_project_environment() -> dict:
     expected = ROOT / ".venv"
     if Path(sys.prefix).resolve() != expected.resolve() or sys.prefix == sys.base_prefix:
         raise ContractError(
-            "Use the project's .venv: uv run --no-sync python -m scripts.check_phase0"
+            "Use the project's .venv: uv run --no-sync python -m scripts.verify_runtime"
         )
     if site.ENABLE_USER_SITE:
         raise ContractError("Project environment must not enable user site-packages")

@@ -1,0 +1,1187 @@
+{
+  "version": "data-acceptance-v1",
+  "cases": [
+    {
+      "case_id": "C01",
+      "title": "Source-specific money formats",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §9",
+        "C.4"
+      ],
+      "input": {
+        "amounts": [
+          "1.600đ",
+          "4,32tr",
+          "1tr340",
+          "10,000.0000"
+        ],
+        "conventions": [
+          "vi_grouping",
+          "vi_millions",
+          "vi_shorthand",
+          "comma_group_dot_decimal"
+        ],
+        "ambiguous": {
+          "raw": "1,234",
+          "convention": null
+        }
+      },
+      "expected": {
+        "vnd": [
+          1600,
+          4320000,
+          1340000,
+          10000
+        ],
+        "ambiguous": "abstain"
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C02",
+      "title": "Date role and year/epoch",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §8",
+        "C.1"
+      ],
+      "input": {
+        "values": [
+          {
+            "raw": "1 thg 1 2025",
+            "role": "ordered_at"
+          },
+          {
+            "raw": 45658,
+            "role": "ordered_at",
+            "epoch": "1899-12-30"
+          },
+          {
+            "raw": "01/01",
+            "role": "ordered_at",
+            "sheet_year": 2025
+          },
+          {
+            "raw": "2025-01-01 15:42:00",
+            "role": "ordered_at"
+          },
+          {
+            "raw": 45658,
+            "role": "product_id"
+          }
+        ]
+      },
+      "expected": {
+        "days": [
+          "2025-01-01",
+          "2025-01-01",
+          "2025-01-01",
+          "2025-01-01",
+          null
+        ],
+        "hour_preserved": 15,
+        "product_id": "45658"
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C03",
+      "title": "Bounded group inheritance",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §8",
+        "C.1"
+      ],
+      "input": {
+        "rows": [
+          {
+            "order": "A",
+            "customer": "Customer A",
+            "status": "shipping",
+            "quantity": 1,
+            "amount": 100
+          },
+          {
+            "order": null,
+            "customer": null,
+            "status": null,
+            "quantity": 2,
+            "amount": 200
+          },
+          {
+            "order": null,
+            "customer": null,
+            "status": null,
+            "quantity": null,
+            "amount": null
+          },
+          {
+            "order": "B",
+            "customer": "Customer B",
+            "status": "completed",
+            "quantity": 1,
+            "amount": 50
+          }
+        ],
+        "groups": [
+          [
+            0,
+            1,
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      "expected": {
+        "order_keys": [
+          "A",
+          "A",
+          "A",
+          "B"
+        ],
+        "customer_keys": [
+          "Customer A",
+          "Customer A",
+          "Customer A",
+          "Customer B"
+        ],
+        "null_quantity_rows": [
+          2
+        ],
+        "null_amount_rows": [
+          2
+        ],
+        "affected_metric": "abstain"
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C04",
+      "title": "Exact within-order copies preserve provenance",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §8",
+        "C.1"
+      ],
+      "input": {
+        "rows": [
+          {
+            "row": 1,
+            "order": "A",
+            "line": 1,
+            "product": "P",
+            "amount": 100
+          },
+          {
+            "row": 2,
+            "order": "A",
+            "line": 1,
+            "product": "P",
+            "amount": 100
+          },
+          {
+            "row": 3,
+            "order": "B",
+            "line": 1,
+            "product": "P",
+            "amount": 100
+          },
+          {
+            "row": 4,
+            "order": "A",
+            "line": 2,
+            "product": "P",
+            "amount": 100
+          }
+        ],
+        "ignore_for_equality": [
+          "row"
+        ]
+      },
+      "expected": {
+        "kept_rows": [
+          1,
+          3,
+          4
+        ],
+        "lineage": {
+          "1": [
+            1,
+            2
+          ],
+          "3": [
+            3
+          ],
+          "4": [
+            4
+          ]
+        },
+        "revenue": 300,
+        "order_count": 2
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C05",
+      "title": "No-order ledger keeps identical records",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §8",
+        "train §7"
+      ],
+      "input": {
+        "grain": "ledger_record",
+        "rows": [
+          {
+            "item": "P",
+            "amount": 100
+          },
+          {
+            "item": "P",
+            "amount": 100
+          }
+        ]
+      },
+      "expected": {
+        "records": 2,
+        "revenue": 200,
+        "order_count_decision": "unanswerable_when_source_absence_confirmed"
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C06",
+      "title": "Partial return excludes entire order",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §1",
+        "C.2"
+      ],
+      "input": {
+        "order": {
+          "id": "A",
+          "date": "2025-02-01"
+        },
+        "rows": [
+          {
+            "role": "sale_item",
+            "quantity": 1,
+            "amount": 100000
+          },
+          {
+            "role": "return_item",
+            "quantity": -1,
+            "amount": -20000
+          }
+        ],
+        "source_return_rule": "negative quantity is return linked to A"
+      },
+      "expected": {
+        "status": "returned",
+        "revenue": 0,
+        "order_count": 0,
+        "return_event_retained": true
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C07",
+      "title": "Negative order adjustments are not returns",
+      "priority": "P2",
+      "capability": "adjustments",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C07",
+        "C.2"
+      ],
+      "input": {
+        "rows": [
+          {
+            "role": "sale_item",
+            "amount": 100000
+          },
+          {
+            "role": "order_adjustment",
+            "kind": "voucher",
+            "amount": -10000
+          },
+          {
+            "role": "order_adjustment",
+            "kind": "points",
+            "amount": -5000
+          },
+          {
+            "role": "order_adjustment",
+            "kind": "ship",
+            "amount": 20000
+          }
+        ],
+        "rule": "synthetic explicit adjustment policy from C07"
+      },
+      "expected": {
+        "revenue": 100000,
+        "voucher": 10000,
+        "points": 5000,
+        "ship": 20000,
+        "status": "completed"
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C08",
+      "title": "Embedded topping and service fee preserve amount",
+      "priority": "P2",
+      "capability": "topping",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C08",
+        "C.2"
+      ],
+      "input": {
+        "source_item": {
+          "amount": 50000,
+          "quantity": 1,
+          "included_topping": {
+            "amount": 10000,
+            "quantity": 2
+          }
+        },
+        "fee": {
+          "role": "service_fee",
+          "amount": 5000
+        },
+        "explicit_rule": "topping included; fee counts in revenue, not product ranking"
+      },
+      "expected": {
+        "item_revenue": 40000,
+        "topping_revenue": 10000,
+        "topping_quantity": 2,
+        "revenue": 55000,
+        "ranking_products": 2
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C09",
+      "title": "Preaggregate independent one-to-many relations",
+      "priority": "P0",
+      "capability": "relational_sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §4",
+        "C.1"
+      ],
+      "input": {
+        "order": {
+          "id": "A",
+          "payable": 300000
+        },
+        "lines": [
+          {
+            "order": "A",
+            "line": 1,
+            "amount": 100000
+          },
+          {
+            "order": "A",
+            "line": 2,
+            "amount": 100000
+          },
+          {
+            "order": "A",
+            "line": 3,
+            "amount": 100000
+          }
+        ],
+        "payments": [
+          {
+            "order": "A",
+            "amount": 100000
+          },
+          {
+            "order": "A",
+            "amount": 50000
+          }
+        ]
+      },
+      "expected": {
+        "payable": 300000,
+        "paid": 150000,
+        "balance": 150000,
+        "order_count": 1
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C10",
+      "title": "Snapshot cannot answer historical date",
+      "priority": "P1",
+      "capability": "inventory",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §7",
+        "C.5"
+      ],
+      "input": {
+        "snapshot": {
+          "date": "2025-02-08",
+          "quantity": 10
+        },
+        "asked_at": "2025-02-01",
+        "source_history_available": false
+      },
+      "expected": {
+        "decision": "unanswerable",
+        "if_history_exists_but_reader_unsupported": "abstain"
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C11",
+      "title": "Last stock balance, not sum",
+      "priority": "P1",
+      "capability": "inventory",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C.5",
+        "C11"
+      ],
+      "input": {
+        "events": [
+          {
+            "time": "2025-02-01 08:00:00",
+            "id": "E1",
+            "balance": 10
+          },
+          {
+            "time": "2025-02-01 09:00:00",
+            "id": "E2",
+            "balance": 7
+          }
+        ],
+        "asked_at": "2025-02-01 23:59:59"
+      },
+      "expected": {
+        "quantity": 7,
+        "unresolved_ordering_policy": "abstain"
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C12",
+      "title": "Revenue status and stock event use different cutoffs",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train introduction",
+        "train §1",
+        "C.5"
+      ],
+      "input": {
+        "order_date": "2025-01-01",
+        "sale_amount": 100000,
+        "status": "returned",
+        "return_date": "2025-02-01",
+        "asked_at": "2025-01-15"
+      },
+      "expected": {
+        "revenue": 0,
+        "order_count": 0,
+        "return_stock_effect_at_asked_at": 0
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C13",
+      "title": "Cost per sale unit",
+      "priority": "P1",
+      "capability": "costs",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §5",
+        "C.4"
+      ],
+      "input": {
+        "quantity_sale": 2,
+        "sale_unit": "box",
+        "base_unit": "can",
+        "factor": 24,
+        "cost_per_sale_unit": 180000
+      },
+      "expected": {
+        "quantity_base": 48,
+        "cost_of_goods": 360000
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C14",
+      "title": "Inventory catalog cost differs from lot purchase cost",
+      "priority": "P1",
+      "capability": "lots",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §5",
+        "train §6 pharmacy",
+        "C.4"
+      ],
+      "input": {
+        "stock_base": 10,
+        "catalog_cost_base": 8000,
+        "expiring_lot_remaining_base": 4,
+        "lot_purchase_cost_base": 7000
+      },
+      "expected": {
+        "inventory_value": 80000,
+        "expiring_lot_cost": 28000
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C15",
+      "title": "Debt collection includes earlier orders and excludes COD",
+      "priority": "P1",
+      "capability": "debt",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §4",
+        "C.5"
+      ],
+      "input": {
+        "period": [
+          "2025-02-01",
+          "2025-02-28"
+        ],
+        "orders": [
+          {
+            "id": "A",
+            "date": "2025-01-01",
+            "method": "debt",
+            "status": "returned",
+            "payable": 100000
+          },
+          {
+            "id": "B",
+            "date": "2025-01-01",
+            "method": "cod",
+            "status": "completed",
+            "payable": 50000
+          }
+        ],
+        "payments": [
+          {
+            "order": "A",
+            "date": "2025-02-05",
+            "amount": 20000
+          }
+        ]
+      },
+      "expected": {
+        "debt_collection": 20000,
+        "receivable_at_end": 80000
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C16",
+      "title": "Cancellation denominator is every order",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §1"
+      ],
+      "input": {
+        "status_counts": {
+          "cancelled": 2,
+          "returned": 1,
+          "shipping": 1,
+          "completed": 6
+        }
+      },
+      "expected": {
+        "cancellation_percent": 20,
+        "revenue_order_count": 7,
+        "all_order_count": 10
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C17",
+      "title": "Available coverage independent of calendar",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §7",
+        "C.5"
+      ],
+      "input": {
+        "available_span": [
+          "2025-04-01",
+          "2025-04-30"
+        ],
+        "calendar_span": [
+          "2024-01-01",
+          "2027-12-31"
+        ],
+        "requested_periods": [
+          [
+            "2025-02-01",
+            "2025-02-28"
+          ],
+          [
+            "2025-03-20",
+            "2025-04-10"
+          ]
+        ]
+      },
+      "expected": {
+        "decisions": [
+          "unanswerable",
+          "compute_partial"
+        ],
+        "effective_periods": [
+          null,
+          [
+            "2025-04-01",
+            "2025-04-10"
+          ]
+        ]
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C18",
+      "title": "Complete empty filter differs from parse failure",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §7",
+        "C.5"
+      ],
+      "input": {
+        "scenarios": [
+          {
+            "coverage": "complete",
+            "selected_rows": []
+          },
+          {
+            "coverage": "complete",
+            "selected_rows": [
+              {
+                "raw_amount": "bad",
+                "parse_status": "failed"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "decisions": [
+          {
+            "type": "number",
+            "answer": 0
+          },
+          {
+            "type": "abstain"
+          }
+        ]
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C19",
+      "title": "Previous MTD clamps month end and lunar uses calendar",
+      "priority": "P0",
+      "capability": "temporal",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §2"
+      ],
+      "input": {
+        "as_of_date": "2025-03-31",
+        "previous_mtd": true,
+        "synthetic_lunar_window": {
+          "lunar_start": "12-23",
+          "lunar_end": "01-10",
+          "calendar_lookup": [
+            "2025-01-22",
+            "2025-02-07"
+          ]
+        }
+      },
+      "expected": {
+        "previous_mtd": [
+          "2025-02-01",
+          "2025-02-28"
+        ],
+        "lunar_window_days": 17
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C20",
+      "title": "Weekday mean includes zero-transaction dates",
+      "priority": "P0",
+      "capability": "temporal",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C20"
+      ],
+      "input": {
+        "weekday_dates": [
+          "2025-02-03",
+          "2025-02-10",
+          "2025-02-17",
+          "2025-02-24"
+        ],
+        "amounts_by_date": {
+          "2025-02-03": 100,
+          "2025-02-10": 200,
+          "2025-02-17": 100
+        }
+      },
+      "expected": {
+        "denominator": 4,
+        "mean_vnd": 100
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C21",
+      "title": "Ordering depends on requested result",
+      "priority": "P1",
+      "capability": "ranking",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §9"
+      ],
+      "input": {
+        "ranking": [
+          {
+            "id": "B",
+            "value": 10
+          },
+          {
+            "id": "A",
+            "value": 10
+          }
+        ],
+        "asked_series": [
+          "March",
+          "January",
+          "February"
+        ],
+        "series_values": [
+          3,
+          1,
+          2
+        ]
+      },
+      "expected": {
+        "ranked_ids": [
+          "A",
+          "B"
+        ],
+        "series": [
+          3,
+          1,
+          2
+        ]
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C22",
+      "title": "Group share denominator includes walk-ins",
+      "priority": "P0",
+      "capability": "ratios",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §1"
+      ],
+      "input": {
+        "group_revenue": 20,
+        "shop_revenue_including_walkins": 100
+      },
+      "expected": {
+        "percent": 20
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C23",
+      "title": "Multi-task repair visit and warranty denominators",
+      "priority": "P2",
+      "capability": "repair",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C23"
+      ],
+      "input": {
+        "visits": [
+          {
+            "id": "V1",
+            "tasks": [
+              "T1",
+              "T2",
+              "T3"
+            ],
+            "amount": 300000,
+            "warranty": false
+          },
+          {
+            "id": "V2",
+            "tasks": [
+              "T1"
+            ],
+            "amount": 0,
+            "warranty": true
+          }
+        ]
+      },
+      "expected": {
+        "visit_count": 2,
+        "paid_visit_count": 1,
+        "revenue": 300000,
+        "average_paid_visit": 300000,
+        "paid_task_T1_visits": 1
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C24",
+      "title": "Trade-in and installments do not create new revenue",
+      "priority": "P2",
+      "capability": "installments",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C24"
+      ],
+      "input": {
+        "sold_date": "2025-01-01",
+        "machine_amount": 10000000,
+        "trade_in": 1000000,
+        "down_payment": 3000000,
+        "installment_paid": 500000,
+        "due_date": "2025-02-01",
+        "asked_at": "2025-02-01"
+      },
+      "expected": {
+        "sale_revenue": 10000000,
+        "installment_debt_collection": 500000,
+        "due_is_overdue": false
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C25",
+      "title": "Explicit attributes and registration",
+      "priority": "P2",
+      "capability": "membership",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C25"
+      ],
+      "input": {
+        "product": {
+          "name": "Milk 2",
+          "size": null
+        },
+        "member": {
+          "registered": "2025-02-02",
+          "orders": 0
+        },
+        "period": [
+          "2025-02-01",
+          "2025-02-28"
+        ]
+      },
+      "expected": {
+        "size_group": null,
+        "new_members": 1
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C26",
+      "title": "Independent comparison coverage and zero baseline",
+      "priority": "P0",
+      "capability": "comparisons",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C.5",
+        "E.1"
+      ],
+      "input": {
+        "current": {
+          "coverage": "complete",
+          "value": 10
+        },
+        "baselines": [
+          {
+            "coverage": "missing",
+            "value": null
+          },
+          {
+            "coverage": "complete",
+            "value": 0
+          }
+        ]
+      },
+      "expected": {
+        "decisions": [
+          "unanswerable",
+          "abstain_unless_rule_defined"
+        ]
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C27",
+      "title": "Cache boundaries and invalidation",
+      "priority": "P0",
+      "capability": "cache",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "Phase 2",
+        "C27"
+      ],
+      "input": {
+        "queries": [
+          {
+            "as_of": "2025-01-01",
+            "rule_hash": "r1"
+          },
+          {
+            "as_of": "2025-02-01",
+            "rule_hash": "r1"
+          },
+          {
+            "as_of": "2025-01-01",
+            "rule_hash": "r2"
+          }
+        ]
+      },
+      "expected": {
+        "prepared_facts_cut_to_question_date": false,
+        "query_key_contains_as_of_and_rules": true,
+        "source_change_invalidates": true,
+        "question_order_independent": true
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C28",
+      "title": "Output comparator types and ordering",
+      "priority": "P0",
+      "capability": "output",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §9"
+      ],
+      "input": {
+        "table_rows": [
+          [
+            "A",
+            1
+          ],
+          [
+            "B",
+            2
+          ]
+        ],
+        "table_permuted": [
+          [
+            "B",
+            2
+          ],
+          [
+            "A",
+            1
+          ]
+        ],
+        "list": [
+          1,
+          2
+        ],
+        "list_permuted": [
+          2,
+          1
+        ],
+        "boolean": true,
+        "number": 1
+      },
+      "expected": {
+        "table_equal": true,
+        "list_equal": false,
+        "bool_number_equal": false
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C29",
+      "title": "Full denominator scoring",
+      "priority": "P0",
+      "capability": "evaluation",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §9"
+      ],
+      "input": {
+        "correct": 90,
+        "wrong": 10,
+        "abstain": 2900
+      },
+      "expected": {
+        "pa_fraction": [
+          80,
+          3000
+        ],
+        "coverage_fraction": [
+          100,
+          3000
+        ],
+        "accuracy_percent": 90,
+        "all_abstain_accuracy": null
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "C30",
+      "title": "Labels and unsupported operator isolation",
+      "priority": "P0",
+      "capability": "fallback",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C30"
+      ],
+      "input": {
+        "adjacent_forbidden_files": [
+          "answers.jsonl",
+          "train_qa_joined.jsonl",
+          "annotations.jsonl"
+        ],
+        "unsupported_operator": "unimplemented_metric"
+      },
+      "expected": {
+        "decision": "abstain",
+        "forbidden_files_opened": []
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "P1-SUMMARY",
+      "title": "Summary must not become inherited transaction",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C.1",
+        "C.2",
+        "Phase 1 source observations"
+      ],
+      "input": {
+        "rows": [
+          {
+            "order": "A",
+            "amount": 100,
+            "role": "sale_item"
+          },
+          {
+            "order": null,
+            "amount": 100,
+            "label": "Tổng ngày",
+            "role": "summary"
+          },
+          {
+            "order": "B",
+            "amount": 50,
+            "role": "sale_item"
+          }
+        ]
+      },
+      "expected": {
+        "revenue": 150,
+        "order_count": 2,
+        "summary_rows_retained_in_provenance": [
+          1
+        ]
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "P1-ERROR",
+      "title": "Auxiliary Excel errors vs dependent field errors",
+      "priority": "P0",
+      "capability": "sales",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "C.1",
+        "C.5"
+      ],
+      "input": {
+        "rows": [
+          {
+            "amount": 100,
+            "aux_error": "#N/A"
+          },
+          {
+            "amount_error": "#VALUE!"
+          }
+        ]
+      },
+      "expected": {
+        "first_row_kept": true,
+        "total_decision": "abstain"
+      },
+      "implementation_status": "planned"
+    },
+    {
+      "case_id": "P1-IDENTITY",
+      "title": "Same name does not merge source IDs",
+      "priority": "P1",
+      "capability": "entities",
+      "source": "synthetic; no dataset values copied",
+      "rule_refs": [
+        "train §3",
+        "C.1"
+      ],
+      "input": {
+        "customers": [
+          {
+            "id": "C1",
+            "name": "Customer X"
+          },
+          {
+            "id": "C2",
+            "name": "Customer X"
+          }
+        ]
+      },
+      "expected": {
+        "customers": 2,
+        "name_only_resolution": "ambiguous"
+      },
+      "implementation_status": "planned"
+    }
+  ]
+}
