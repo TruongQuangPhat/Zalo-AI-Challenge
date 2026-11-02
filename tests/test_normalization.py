@@ -296,7 +296,7 @@ def test_prepared_cache_detects_damage_and_all_dependencies(
     elif change == "incomplete":
         (entry / "manifest.json").unlink()
     elif change == "software":
-        monkeypatch.setattr("src.data.normalization.VERSION", "changed")
+        monkeypatch.setattr("src.data.normalization.store.VERSION", "changed")
     else:
         path = {
             "readme": synthetic_split / "data/shop_a/README.md",
@@ -469,7 +469,7 @@ def test_failed_build_never_publishes_complete_facts(synthetic_split, tmp_path, 
     def failed(*args):
         raise RuntimeError("interrupted normalization")
 
-    monkeypatch.setattr("src.data.normalization.build_sales", failed)
+    monkeypatch.setattr("src.data.normalization.store.build_sales", failed)
     with pytest.raises(RuntimeError, match="interrupted"):
         prepare_facts(context, tmp_path / "facts", cache_dir=tmp_path / "cache")
     assert list((tmp_path / "facts").iterdir()) == []
