@@ -54,3 +54,10 @@ Phase 1 tests tập trung validator manifest/annotation, inventory, provenance v
 chặn business/structure leakage, thay fingerprints, duplicate/missing IDs, metadata có answer,
 review giả, source verification không bằng chứng, output trong dataset và source symlink.
 Script `audit_dataset` kiểm tra fixture schema/case refs; không thực thi expected metrics.
+
+Normalization S1 có behavioral tests riêng tại `tests/test_normalization.py` cho parse ngày/tiền,
+header inheritance, exact dedup và lineage, summary/error, whole-order return với event tương lai,
+coverage evidence, cache invalidation/round-trip và label isolation. Đây là bằng chứng của phần
+preparation liên quan C01–C06/C12/C17–C18/C27/C30, chưa là toàn bộ acceptance metrics; chưa có
+cancellation/temporal/stock executor hoặc câu qua LLM. Fixture `implementation_status=planned`
+vẫn đúng cho nghiệm thu toàn capability; validator spec không được đổi thành chứng nhận engine.

@@ -3,10 +3,10 @@
 
 > **Dự án:** Zalo AI Challenge 2026 — *DataMate: Talking To Your Data Through Agentic AI*  
 > **Ngày lập:** 01/11/2026  
-> **Lần rà soát:** 02/11/2026 — nghiệm thu Phase 2: 116 tests, frozen train ingestion, CPU smoke, Docker offline và CUDA tensor đạt.\
+> **Lần rà soát:** 02/11/2026 — triển khai preparation S1: 157 tests; đối chiếu raw dev và cold/warm cache. Bằng chứng full runtime/Docker/CUDA Phase 2 giữ phạm vi lịch sử.\
 > **Mục tiêu:** Xây dựng **một baseline chạy được từ đầu đến cuối**, tự động trả lời câu hỏi tiếng Việt trên CSV/XLSX/SQLite, hoạt động hoàn toàn offline, có thể đánh giá bằng đáp án train và đóng gói Docker để nộp thi.  
 > **Phạm vi:** Tập trung vào một giải pháp **đúng quy định, tổng quát hóa được, có thể tái lập và đo lường được**. Các kỹ thuật tối ưu PA nâng cao, fine-tuning, ensemble hay multi-agent **để sau khi baseline hoàn chỉnh**.  
-> **Trạng thái:** `PHASE_2_COMPLETE` — readers CSV/XLSX/SQLite, bounded profiles, provenance, catalog/cache và runtime context đã nghiệm thu theo [reports/ingestion_verification.json](reports/ingestion_verification.json) và [reports/runtime_verification.json](reports/runtime_verification.json). Mọi runtime gate đạt; planner vẫn mock abstain, M1/normalization/metric execution/LLM chưa thực hiện.
+> **Trạng thái:** `PHASE_3_S1_READY` — CSV order-line có README/rulebook rõ đã có normalization, facts SQLite exact Decimal, lineage/quality/cache và tích hợp runtime. Xem [normalization report](reports/normalization_verification.json). Phase 2 đã nghiệm thu trước đó; normalization Excel/SQLite/JOIN/unit/domain, metric execution, LLM và M1 chưa thực hiện. Full train/public runtime và CUDA chưa được nghiệm thu lại cho bản này.
 > **Thiết lập hiện có (theo xác nhận của người thực hiện):** dự án đang có thư mục `dataset/` và đã đưa `dataset/` vào `.gitignore`; **không tạo lại bước gitignore dataset**. Mã nguồn dùng trực tiếp `src/`, **không có lớp thư mục `src/datamate/`**. Cần kiểm tra trạng thái Git thực tế trước khi kết luận dữ liệu chưa từng được track.
 
 **Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu lại sau cleanup; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
@@ -289,36 +289,89 @@ Bằng chứng chi tiết nằm trong [ingestion report](reports/ingestion_verif
 
 ### Phase 3 — Data cleaning, normalization và quality gates
 
-**Mục tiêu:** cung cấp dữ liệu có kiểu chuẩn để SQL/Python tính đúng, **không phá hủy ngữ nghĩa**.
+**Mục tiêu:** chuyển raw rows đã đọc ở Phase 2 thành **bảng nghiệp vụ có kiểu chuẩn, có thể truy vấn và truy ngược nguồn**. Canonical nghĩa là thống nhất tên trường, kiểu và ý nghĩa; grain nghĩa là một bản ghi đại diện cho đơn, dòng hàng, lần thu hay sự kiện nào. Phase này chuẩn bị dữ liệu cho SQL/Python và metadata cho ngữ cảnh LLM; **không huấn luyện model**.
 
-**Công việc bắt buộc**
+**Trạng thái:** đã có preparation S1 cho một CSV order-line resolved với mapping README và rulebook operator được nhận diện, trong `src/data/normalization/`; catalog/cache raw Phase 2 giữ riêng. Các định dạng/shape và nghiệp vụ mở rộng bên dưới vẫn là planned/unsupported. Checklist đánh dấu chỉ trong phạm vi S1 được nêu, không chứng nhận toàn bộ Phase 3 hoặc metric execution.
 
-- [ ] `parse_date` / `parse_datetime`: `dd/mm/yyyy`, ISO, `1 thg 1 2025`, serial Excel (lưu ý date system), ngày thiếu năm lấy từ metadata của sheet khi có căn cứ; giữ giờ tạo đơn/giờ thu/giờ sự kiện để tính ca và giờ cao điểm. Không thay `as_of_date` bằng giờ hệ thống hoặc cắt mọi timestamp thành ngày.
-- [ ] `parse_money` và `parse_number`: `1.600đ`, `4,32tr`, `1tr340`, `10,000.0000`, dấu phân cách nghìn/thập phân theo nguồn; tiền ưu tiên số nguyên VND/`Decimal`; không ép kiểu mù.
-- [ ] `parse_quantity_unit`: tách số lượng và đơn vị; ánh xạ sang đơn vị cơ bản theo **hệ số thực tế của từng sản phẩm/shop**. Giữ `quantity_sale`, `sale_unit`, `quantity_base`, `base_unit`, `conversion_factor`; giữ riêng đơn vị của giá bán/giá vốn/giá nhập. Không nhân lượng cơ bản với giá vốn theo đơn vị bán.
-- [ ] `normalize_status`: ánh xạ `shipping` và các nhãn tương đương về trạng thái canonical đã chốt; đọc ghi chú khi nguồn không có cột trạng thái. Nhận diện trả hàng từ số lượng âm **khi quy ước nguồn định nghĩa như vậy**, liên kết về đơn gốc và suy ra trạng thái cả đơn; giữ riêng ngày sự kiện và căn cứ trạng thái. Không coi tiền âm voucher/điểm là trả hàng; nếu bằng chứng trạng thái mâu thuẫn thì đánh dấu ambiguity.
-- [ ] Forward-fill **có điều kiện** các cột header đơn trên những dòng chi tiết thuộc cùng nhóm; tuyệt đối không forward-fill toàn bộ cột hoặc âm thầm tạo đơn mới.
-- [ ] Deduplicate **sau khi hiểu grain và group ID**: phục hồi header nhóm trước; chỉ loại dòng cùng đơn giống ở mọi trường nghiệp vụ nguồn, không đưa tọa độ provenance vào phép so nhưng giữ lineage của tất cả bản sao. Không dedup chỉ bằng mã hàng/lượng/tiền hoặc giá trị đã làm tròn. Nối các phần file/sheet theo bằng chứng nguồn; khác đơn giữ nguyên; sổ không ghi theo đơn giữ cả dòng giống nhau.
-- [ ] Preserve IDs as strings: SKU, mã đơn, mã khách, barcode, SĐT, IMEI; khóa thuộc phạm vi `business_id`.
-- [ ] Xử lý giá trị `#VALUE!`, `#N/A`, null: đánh dấu invalid/unknown; không tự điền dữ liệu nghiệp vụ chưa có.
-- [ ] Xây bảng chuẩn theo grain và khả năng thực tế của nguồn theo Phụ lục C: tách order header/detail/adjustment, purchase header/detail, snapshot/event, unit conversion và giá theo thời điểm. Giữ nguồn thiếu mã đơn dưới dạng sổ ghi nhận; không tạo đơn giả chỉ để phù hợp schema.
-- [ ] Thực hiện parser cấu trúc đã bật capability: topping chung ô; voucher/điểm/ship; phí phục vụ; alias/ghi tắt; phiếu nhiều công việc; sổ nợ/góp/bảo hành. Parser chưa triển khai hoặc không phân giải chắc chắn phải giữ `unknown` và chặn metric bị ảnh hưởng.
-- [ ] Mỗi transformation ghi `method`, `status`, `confidence`/ambiguity, source refs và warnings. Mapping không chắc chắn phải được chuyển sang quality report, không đoán.
+**P3-01 — Đầu vào và ranh giới**
 
-**Quality gates**
+- [x] Dùng `BusinessContext.iter_rows(source_id)`, catalog/provenance Phase 2, README của business, rulebook và calendar đúng split. Mapping dựa trên cấu trúc, dữ liệu và authority có source/hash refs; không routing bằng business/question ID hoặc dùng nhãn để chọn mapping.
+- [x] Chuẩn bị một lần mỗi business và phiên bản nguồn/normalizer, giữ **toàn bộ timeline**. Không nhận cutoff của câu đầu để cắt prepared facts; `as_of_date`, cửa sổ, bộ lọc và công thức metric được áp ở query-time theo Phase 4/6/7. Giữ các trạng thái đơn, kể cả cancelled/returned, cho metric có policy khác nhau.
+- [x] Không sửa file gốc, ghi vào `dataset/` hoặc đọc answers/QA/annotations/EDA answer reports trong preparation. Nhãn train chỉ evaluator đọc riêng khi kiểm chứng kết quả.
 
-- [ ] Row-count reconciliation và source-to-canonical lineage: mỗi dòng được giữ, tách/gộp, loại trùng hoặc quarantine đều có lý do. Không yêu cầu số dòng canonical luôn bằng raw khi topping/sổ nhóm được tách; kiểm tra bảo toàn tiền/lượng theo đúng grain và đơn vị.
-- [ ] Không có key collision xuyên doanh nghiệp; các JOIN đã kiểm soát fan-out.
-- [ ] Tổng dòng/tổng đơn/tổng thu khớp nguồn kiểm chứng **khi metric tương ứng có định nghĩa rõ**.
-- [ ] Ngày sau `as_of_date` không bị xóa khỏi prepared data; bộ lọc theo ngày được áp ở query-time, có ngoại lệ status như rulebook.
-- [ ] Không gộp các khái niệm `revenue`, `order_payable`, `payment_received`, `outstanding_debt`.
-- [ ] Kiểm tra tổng cấp đơn/phiếu chỉ tính một lần, giá vốn đúng đơn vị và số dư snapshot không bị cộng như luồng phát sinh. Quality gate fail chỉ chặn capability phụ thuộc phần dữ liệu lỗi, không âm thầm bỏ dòng để vẫn trả tổng thiếu.
-- [ ] Unit/regression tests cho case tiền TEXT, serial Excel, kế thừa nhóm, dedup có mã đơn/không mã đơn và đơn trả hàng.
+| Nguồn | Cách đi vào bảng chuẩn | Thông tin phải giữ |
+|---|---|---|
+| CSV | Map cột/role, parse text; nguồn order-line có thể tách thành `orders` và `order_lines`. Nhiều CSV liên quan chỉ nối sau khi xác minh khóa/cardinality. | Raw text, header, record/physical lines, hash và mapping refs. |
+| XLSX | Xử lý từng sheet/region, header nhiều dòng và nhóm kế thừa; hợp nhất sheet tháng/phần file khi đã chứng minh cùng nghĩa và grain. | Workbook/sheet/cell, raw numeric token, native type, formula/cache, date system/year hints và ranh giới nhóm. |
+| SQLite | Đọc read-only qua reader hiện có, map bảng/cột và parse cả trường TEXT; schema SQL sẵn có không tự chứng minh đúng kiểu/nghĩa/quan hệ. | Declared/storage types, bảng, locator, hash; raw locator order không phải thứ tự event nghiệp vụ. Views chưa đọc giữ giới hạn. |
 
-**Deliverables:** `src/data/normalization/`, canonical tables trong DuckDB/Parquet hoặc SQLite/cache cục bộ, quality report, transformations audit log.  
-**Exit criteria:** Một số doanh nghiệp train đại diện có bảng chuẩn hóa và các phép tổng hợp đã được kiểm chứng bằng test độc lập/nhãn train; phần chưa hỗ trợ có trạng thái minh bạch.
+Đuôi file quyết định reader, **không quyết định schema chuẩn hoặc kho lưu riêng**. Các nguồn khác định dạng có thể vào cùng nhóm facts nếu ý nghĩa/khóa/grain đã được xác minh; nguồn chưa phân giải giữ unknown và có fallback.
 
-> **Không yêu cầu hoàn thiện canonical hóa 100% doanh nghiệp trước khi tiếp tục.** Bắt đầu bằng vertical slice chạy được; mở rộng dựa trên lỗi thực tế. Data preparation chạy **một lần mỗi business**, còn rule/metric theo câu hỏi tính ở inference.
+**P3-02 — Thứ tự chuẩn hóa và parser dùng chung**
+
+Chuỗi logic theo C.1: **raw/provenance → header/ranh giới → row roles và liên kết nhóm → parse kiểu/đơn vị → danh tính/dedup → facts/relations → quality gates**. Có thể lặp để phân giải nhưng không xóa thông tin trước khi hiểu role; nhận diện summary trước forward-fill.
+
+- [x] Parse ngày/giờ theo nguồn: `dd/mm/yyyy`, ISO, `1 thg 1 2025`, serial Excel theo date system; thiếu năm chỉ bổ sung khi sheet/metadata có căn cứ. Giữ giờ và quy ước timezone; không dùng ngày máy thay `as_of_date` hoặc đổi numeric ID thành ngày.
+- [x] Parse tiền/số theo convention có căn cứ: `1.600đ`, `4,32tr`, `1tr340`, `10,000.0000`. Dùng `Decimal` hoặc integer có scale; giữ precision nguồn và chỉ rounding ở bước metric yêu cầu. Không parse qua float hoặc xóa mọi dấu chấm/phẩy; ambiguity/overflow/scale không đủ phải báo lỗi, không round ngầm.
+- [x] Giữ IDs là chuỗi và khóa theo split/business/entity kind; không mất số 0 đầu. Tách `source_missing`, `inherited`, `parse_failed`, `ambiguous`, `not_applicable`; không đổi `#VALUE!`, `#N/A`, formula thiếu cache hoặc tiền chưa parse thành 0. Lỗi cột phụ không loại cả hàng.
+- [ ] Phân loại row roles theo C.2; summary chỉ dùng truy vết/đối chiếu, không tạo giao dịch. Chỉ kế thừa header đơn trong nhóm có căn cứ, không lan qua summary/header lặp/đơn khác và không fill tiền/lượng/giá vốn. Default 0 chỉ khi quy ước nguồn xác nhận.
+- [ ] Chuẩn hóa status về `completed/cancelled/returned/shipping`; chưa rõ giữ null cùng mapping status/lý do. Dùng ghi chú hoặc SL âm để nhận diện return chỉ khi nguồn định nghĩa; giữ liên kết đơn gốc, ngày event và căn cứ. Voucher/điểm âm không tự là return; conflict phải chặn metric phụ thuộc.
+- [ ] Dedup sau phục hồi nhóm và hiểu grain: chỉ bỏ bản sao cùng đơn giống ở mọi trường nghiệp vụ nguồn; không dùng tọa độ provenance làm tiêu chí bằng nhau, giữ lineage mọi bản sao. Không gộp khác STT/đơn, không so theo giá trị đã làm tròn/fuzzy; sổ không mã đơn giữ dòng giống nhau. Nối/trùng xuyên file/sheet cần cùng mức bằng chứng.
+- [ ] Khi mở quantity/cost capability: giữ `quantity_sale`, `sale_unit`, `quantity_base`, `base_unit`, `conversion_factor` và unit của từng loại giá. Hệ số theo sản phẩm/shop, giữ lượng thập phân; COGS không lấy lượng base nhân giá vốn theo đơn vị bán. Profiler dùng chung parser đã kiểm chứng khi cần thống kê parsed values.
+- [ ] Khi mở cấu trúc/nghiệp vụ mở rộng: thêm parser topping, voucher/điểm/ship, phí phục vụ, alias, phiếu nhiều việc, góp/bảo hành theo C–D. Chưa có parser chắc chắn giữ unknown và chặn metric liên quan; không yêu cầu cài toàn bộ trước S1.
+
+**P3-03 — Bảng chuẩn và metadata đầu ra**
+
+Chỉ tạo facts khi nguồn và capability cần dùng; bảng thiếu khác bảng có 0 bản ghi. Trường chưa biết phải có trạng thái/lý do, không tạo đơn giả để ép nguồn vào schema. Đây là hợp đồng logic; schema lưu vật lý phải có version và kiểu/khóa/nullability tường minh khi triển khai.
+
+| Đầu ra | Phạm vi tối thiểu và invariant |
+|---|---|
+| `orders` cho S1 order-line | Một bản ghi/đơn có khóa canonical theo split/business, raw order ID dạng chuỗi, ngày/giờ đặt, status, mapping status/issues và lineage. Xác minh ngày/status nhất quán giữa các dòng cùng đơn. |
+| `order_lines` cho S1 order-line | Một bản ghi/dòng sau dedup, line key riêng, order key đã xác minh, row role, line net amount chính xác và lineage. Không dùng order+product làm khóa dòng mặc định; chỉ yêu cầu quantity/unit/product fields khi metric cần. |
+| Extensions | Header-only có thể hỗ trợ metric cấp đơn bằng trường tiền đúng nghĩa; ledger giữ grain bản ghi. Payments/returns/adjustments, purchases, stock snapshots/events, lots, entities/units/prices tách theo C.3; không lặp tổng đơn/phiếu trên từng detail. |
+| Catalog/coverage/capabilities | Schema và nghĩa cột, grain, keys/relations đã xác minh, coverage theo fact/time axis, required fields/operators và issues. Phân biệt observed span với available span có căn cứ; start S1 hiện chưa được chứng minh. Rule/hash refs phải còn truy ra được. |
+| Lineage/audit/quality | Map raw rows tới facts hoặc lý do không tạo fact, kể cả summary, bản trùng, tách/gộp và quarantine. Mỗi transformation có method, status/ambiguity, source/rule refs và warnings; confidence nếu có không thay bằng chứng. Issues ghi affected fields/metrics và warning/blocking. |
+
+**P3-04 — Lưu trữ và cache prepared facts**
+
+**Backend S1 đã chọn: SQLite trong standard library**, chưa thêm DuckDB/Parquet dependency. Một `facts.sqlite` chứa orders/order_lines/lineage/issues và metadata (dependencies, mapping, coverage, quality summary); không tạo thêm audit/quality file theo từng dòng. `prepare` ghi `<output>/<business>/facts.sqlite` và `<output>/<business>.json`; `predict` ghi facts dưới `<output>/prepared/<business>/` và summary trong catalog. Cache tùy chọn tại `<cache-dir>/prepared/<fingerprint>/` gồm database + manifest checksum. Cả output/cache đều ngoài input; Docker dùng vùng writable ngoài `/data`. DuckDB vẫn là ứng viên nếu workload JOIN/throughput sau này chứng minh nhu cầu; không giữ nhiều bản facts cùng lúc.
+
+- [x] S1 giữ tiền dưới dạng TEXT Decimal, không ép scale hoặc round trung gian; API đọc trả Decimal và diagnostic aggregates dùng phép cộng Decimal với precision theo toán hạng. Round-trip giữ `99999999999999.00000001` và phần lẻ 1e-8 trong tests. Không dùng SQLite SUM/AVG/CAST REAL cho tiền; quantity/unit/cost còn planned.
+- [x] Manifest/cache key gồm split/business, tập paths+content hashes, README/rulebook/calendar, reader/parser/normalizer/mapping/schema/config versions. Tách cache facts khỏi catalog cache Phase 2; thêm/xóa/sửa nguồn hoặc đổi luật/mapping phải invalidate. Không chứa nhãn, câu trả lời hoặc cutoff theo câu.
+- [x] Ghi tạm, kiểm checksum/quality rồi mới công bố revision hoàn tất; cache dở/hỏng không được reuse. Reload cùng revision phải giữ facts/lineage và kết quả kiểm tra tương đương; không cần query-result cache ở bước này.
+
+**P3-05 — Quality gates và bằng chứng nghiệm thu**
+
+- [x] Mọi raw row được accounting có lý do và truy tới facts/lineage hoặc exclusion/quarantine; số facts không bắt buộc bằng raw rows khi tách/gộp. Kiểm tra bảo toàn tiền/lượng theo role và unit, không ép revenue bằng tổng raw có summary/adjustments.
+- [ ] Không collision xuyên namespace; order fields nhất quán, quan hệ đủ khóa, orphan và JOIN fan-out được kiểm soát. Tổng cấp đơn/phiếu/thu chỉ tính một lần; không SUM số dư snapshot hoặc dùng một filter trạng thái chung cho mọi metric.
+- [ ] Đối chiếu số đơn/tổng dòng/tổng thu theo đúng metric với reference độc lập khi có định nghĩa rõ; không dùng chính output normalizer làm oracle. Giữ riêng `revenue`, `order_payable`, `payment_received`, `outstanding_debt`.
+- [ ] Gate fail chặn đúng capability/phạm vi phụ thuộc; không bỏ dòng lỗi để xuất tổng thiếu. Chưa rõ coverage/mapping/parser → abstain metric liên quan; chỉ unanswerable khi có bằng chứng nguồn gốc không đủ theo C.5.
+- [ ] Fixtures chạy qua code thật: C01–C06, C12, C16–C18, C30 và P1-SUMMARY/P1-ERROR cho slice liên quan; thêm C09 trước JOIN, C27 trước reuse prepared cache, C13–C14 khi bật quantity/cost. Case chưa triển khai giữ planned, không gọi spec validation là metric passed.
+- [x] Hash input trước/sau không đổi; round-trip/cache không đổi giá trị; đổi thứ tự câu/as-of không đổi prepared facts; đổi nguồn/authority/mapping làm invalidation đúng. Không đọc labels/QA hoặc kết nối mạng trong inference.
+
+**P3-06 — Thứ tự triển khai và điều kiện chuyển tiếp**
+
+1. **S1 trước:** CSV order-line thuộc dev đã chọn ở Phase 1; triển khai ngày/tiền, row roles/status, group/dedup, orders/lines, lineage và coverage/quality tối thiểu. Chọn theo shape, không hard-code shop. Fields/metric ngoài phạm vi có fallback.
+2. Nối dữ liệu S1 với semantic/temporal, context builder/LLM planner, executor và verifier theo Phase 4–7 để đạt M1. Phase 3 cung cấp facts và metadata; context builder chọn phần liên quan theo câu, LLM sinh QueryPlan, SQL/Python tính trên facts đầy đủ. Không đưa mọi raw row vào prompt hoặc dùng context tốt để bỏ qua quality/validator.
+3. Mở rộng header-only, nhiều sheet/phần, relational JOIN rồi quantity/payment/stock/domain khi capability có fixtures. Không đợi canonical hóa 100% doanh nghiệp mới thử câu qua LLM thật.
+
+**Deliverables:** parser/fact builder thực sự được dùng trong `src/data/normalization/`; prepared facts có schema version và backend đã kiểm chứng cho slice; catalog/coverage, lineage/transformation audit, quality report và manifest ngoài input. Không tạo class/module/bảng chưa có nơi dùng.
+
+**Exit criteria cho từng capability:** facts/metadata của nguồn dev đại diện đúng contract; fixtures liên quan và reference aggregates độc lập đạt; storage/cache và input/label isolation đạt; giới hạn/fallback được ghi trong capability matrix. Đối chiếu nhãn chỉ qua evaluator riêng theo protocol train. Ghi rõ capability/shape được nghiệm thu; đạt S1 không đồng nghĩa mọi parser/ngành của Phase 3 đã hoàn tất. **M1 nghiệm thu riêng** bằng câu tự đi qua LLM thật → plan → execution → output → evaluator, không sửa plan/SQL bằng tay.
+
+**Nghiệm thu preparation S1 — 02/11/2026**
+
+- `values.py` giữ parser ngày/giờ/serial và tiền chính xác; `sales.py` nhận diện mapping từ README, locale có evidence, grouping có điều kiện, raw-field dedup và summary/unknown gates. Status giữ đủ bốn loại; negative quantity chỉ suy return khi cả README và rulebook có operator tương ứng. Return role/event date được giữ, chưa có engine dựng lịch sử kho.
+- `PreparedBusiness` mở facts read-only/query-only, `BusinessContext.prepared` được tạo một lần/business trong runtime. Catalog raw không bị sửa thành facts. Lệnh `src.cli prepare` reuse CLI hiện có; không thêm wrapper/config hoặc dependency. Blocked fields có issues/affected metrics, shape/authority chưa hiểu trả unsupported và không tạo facts rỗng.
+- Lint/format và **157 tests** đạt; gồm 41 test cases mới về parser precision, grouping/dedup/lineage, summary/aux error/amount error, order conflict, partial return sau ngày hỏi, coverage contradiction, namespace/cache corruption/invalidation, interruption, output guards và label isolation. Đây là nghiệm thu preparation liên quan acceptance cases, chưa nâng toàn bộ C01–C30 thành passed.
+- Nguồn dev S1: **22.428 orders, 56.501 order_lines, 56.502 lineage records, 0 issues**; raw CSV reference độc lập đối chiếu số đơn/dòng và tổng theo từng status. Hai cold runs và warm cache cùng content hash; 5 nguồn/authority/questions giữ nguyên hash. Không mở labels, QA/annotations hoặc public/private để phát triển/đối chiếu.
+- Local: cold **21,507 / 18,892 giây**, warm **1,926 giây**, facts **77,549,568 bytes**, process peak RSS **107.66 MiB** (gồm raw reference và kiểm tra trong cùng process). Đây là số đo S1 trên máy local, không phải benchmark toàn solution/hardware BTC. Output/cache kiểm chứng đặt trong temporary directory và tự dọn; chỉ giữ [report ngắn](reports/normalization_verification.json).
+- Docker offline với source context hash của bản cuối đã đạt trên input synthetic hỗ trợ: 2 câu, 2 orders/2 lines, duplicate và summary có accounting; host/container predictions khớp, input/root read-only, output writable, network none. Image và working outputs kiểm chứng tự dọn. Đây không phải frozen all-train/public Docker hoặc CUDA acceptance.
+- Available start/completeness của S1 vẫn **unknown**, không suy từ observed min/max/calendar. Metric execution và LLM chưa có nên mọi câu runtime vẫn abstain; M1 chưa đạt. Full train/public/Docker/CUDA report Phase 2 là bằng chứng lịch sử, không chứng nhận bản chuẩn hóa mới.
+
+**Refactor module — 02/11/2026:** chuyển implementation profiling sang `src/data/profiling/profiler.py` và prepared store/cache sang `src/data/normalization/store.py`; hai `__init__.py` chỉ export API public. Các import package hiện có giữ nguyên; hai monkeypatch tests trỏ tới module sở hữu implementation. Lint/format, fresh-process imports và 157 tests đạt; AST implementation không đổi ngoài docstrings/exports. Đối chiếu cold/warm S1 với baseline được lưu riêng ở `refactor_validation` trong report normalization; hash mã nguồn/cache thay đổi có chủ đích sau di chuyển module. Bằng chứng Docker/CUDA trước refactor giữ phạm vi lịch sử, không coi build-context check là chạy container mới.
+
+**Bước tiếp theo:** semantic/temporal và context builder/LLM + executor/verifier hẹp cho S1 theo Phase 4–7; kiểm tra coverage từng câu trước trả lời. Mở rộng normalization theo shape có fixtures, không theo business ID. Quantity/cost, nhiều sheet/phần, relational JOIN và domain parsers vẫn planned; đạt preparation S1 không đồng nghĩa hoàn tất chúng.
 
 ### Phase 4 — Business semantic layer và temporal reasoning
 
@@ -587,7 +640,7 @@ Các acceptance cases ở Phụ lục F là **yêu cầu test khi triển khai**
 
 | Quyết định | Chỉ nên chốt khi có bằng chứng |
 |---|---|
-| `DuckDB` vs SQLite/Parquet cache | Kiểm tra ingestion, JOIN, kiểu dữ liệu và memory thực trên tập train. Có thể kết hợp DuckDB với SQLite read-only input. |
+| Backend facts | S1 chọn SQLite stdlib với tiền TEXT Decimal và Python exact arithmetic; round-trip/dev cold-warm đã kiểm chứng. Chỉ cân nhắc DuckDB/Parquet khi JOIN/throughput/lưu trữ mới có nhu cầu và benchmark. |
 | Canonical schema rộng hay lean | Xác định grain/schema phổ biến và các metric P0; bảng ngành được thêm qua extension. |
 | Rulebook parsing | Chốt thứ tự ưu tiên luật và schema rule references từ đầu; lựa chọn parser/LLM có thể thử nghiệm. Luật không ánh xạ được vào operator đã kiểm chứng phải fallback, không cho LLM tự tạo ý nghĩa rồi xem là đúng. |
 | Local model & quantization | So sánh accuracy của planner, VRAM, cold start, throughput, ngày weights/license và tổng tham số. |
@@ -621,7 +674,7 @@ Các acceptance cases ở Phụ lục F là **yêu cầu test khi triển khai**
 
 | Milestone | Nội dung nghiệm thu | Trạng thái |
 |---|---|---|
-| M0 | Repo + Docker stub + output/logs hợp lệ + evaluator fixture có chấm thật | ✅ Hoàn thành; reverify 02/11/2026 đạt quality/CPU/Docker/GPU trên bản ingestion hiện tại; xem reports/runtime_verification.json |
+| M0 | Repo + Docker stub + output/logs hợp lệ + evaluator fixture có chấm thật | ✅ Mốc đã đạt trên bản Phase 2 ngày 02/11/2026; reports/runtime_verification.json giữ phạm vi đó, bản normalization có report riêng |
 | M1 | Một câu train đi qua LLM thật → execution → đáp án → evaluator | ⬜ Chưa thực hiện |
 | M2 | Mở rộng normalization/semantic metrics + `PA_full` trên train/validation | ⬜ Chưa thực hiện |
 | M3 | Cải thiện planner/ranking và coverage nhiều cấu trúc có kiểm chứng | ⬜ Chưa thực hiện |

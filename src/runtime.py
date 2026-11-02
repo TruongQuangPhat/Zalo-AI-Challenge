@@ -14,6 +14,7 @@ from src import __version__
 from src.agent.mock import MockPlanner
 from src.contracts import validate_answer
 from src.data.catalog import prepare_business, require_output
+from src.data.normalization import prepare_facts
 from src.data.split import load_split
 from src.jsonio import ContractError, dumps, write_json
 
@@ -27,7 +28,7 @@ def run_inference(
     if cache_dir is not None:
         require_output(cache_dir, split.root)
     output.mkdir(parents=True, exist_ok=True)
-    for name in ["submission.jsonl", "run_manifest.json", "logs", "catalogs"]:
+    for name in ["submission.jsonl", "run_manifest.json", "logs", "catalogs", "prepared"]:
         if (output / name).exists() or (output / name).is_symlink():
             raise ContractError(f"output already exists: {name}; use a fresh output directory")
     logs = output / "logs"
@@ -59,12 +60,22 @@ def run_inference(
             if question.business_id not in contexts:
                 try:
                     context = prepare_business(split, question.business_id, cache_dir=cache_dir)
+                    facts = prepare_facts(
+                        context, output / "prepared" / question.business_id, cache_dir=cache_dir
+                    )
                     contexts[question.business_id] = context
-                    write_json(catalogs / f"{question.business_id}.json", context.catalog)
+                    write_json(
+                        catalogs / f"{question.business_id}.json",
+                        {**context.catalog, "prepared": facts.summary},
+                    )
                     manifest["preparation"][question.business_id] = {
                         "read_complete": context.catalog["read_complete"],
                         "cache_hit": context.cache_hit,
                         "elapsed_seconds": context.elapsed_seconds,
+                        "normalization": facts.summary,
+                        "facts": str(facts.path.relative_to(output)) if facts.path else None,
+                        "facts_cache_hit": facts.cache_hit,
+                        "normalization_seconds": facts.elapsed_seconds,
                     }
                 except Exception as exc:
                     contexts[question.business_id] = None
