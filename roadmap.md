@@ -3,10 +3,10 @@
 
 > **Dự án:** Zalo AI Challenge 2026 — *DataMate: Talking To Your Data Through Agentic AI*  
 > **Ngày lập:** 01/11/2026  
-> **Lần rà soát:** 02/11/2026 — triển khai preparation S1: 157 tests; đối chiếu raw dev và cold/warm cache. Bằng chứng full runtime/Docker/CUDA Phase 2 giữ phạm vi lịch sử.\
+> **Lần rà soát:** 02/11/2026 — semantic/temporal/preflight S1: 204 tests; đối chiếu nguồn dev và cold/warm cache. Bằng chứng full runtime/CUDA Phase 2 giữ phạm vi lịch sử.\
 > **Mục tiêu:** Xây dựng **một baseline chạy được từ đầu đến cuối**, tự động trả lời câu hỏi tiếng Việt trên CSV/XLSX/SQLite, hoạt động hoàn toàn offline, có thể đánh giá bằng đáp án train và đóng gói Docker để nộp thi.  
 > **Phạm vi:** Tập trung vào một giải pháp **đúng quy định, tổng quát hóa được, có thể tái lập và đo lường được**. Các kỹ thuật tối ưu PA nâng cao, fine-tuning, ensemble hay multi-agent **để sau khi baseline hoàn chỉnh**.  
-> **Trạng thái:** `PHASE_3_S1_READY` — CSV order-line có README/rulebook rõ đã có normalization, facts SQLite exact Decimal, lineage/quality/cache và tích hợp runtime. Xem [normalization report](reports/normalization_verification.json). Phase 2 đã nghiệm thu trước đó; normalization Excel/SQLite/JOIN/unit/domain, metric execution, LLM và M1 chưa thực hiện. Full train/public runtime và CUDA chưa được nghiệm thu lại cho bản này.
+> **Trạng thái:** `PHASE_4_S1_SEMANTICS_READY` — preparation CSV order-line và API luật runtime, contracts revenue/count, temporal resolver, coverage/preflight đã có; metadata tích hợp vào context/catalog hiện có. Xem [semantic report](reports/semantics_verification.json) và [normalization report](reports/normalization_verification.json). Available start/completeness dev S1 vẫn unknown; numeric execution, LLM/M1, normalization nhiều nguồn/định dạng và nghiệp vụ mở rộng chưa thực hiện. Full train/public runtime và CUDA chưa được nghiệm thu lại cho bản này.
 > **Thiết lập hiện có (theo xác nhận của người thực hiện):** dự án đang có thư mục `dataset/` và đã đưa `dataset/` vào `.gitignore`; **không tạo lại bước gitignore dataset**. Mã nguồn dùng trực tiếp `src/`, **không có lớp thư mục `src/datamate/`**. Cần kiểm tra trạng thái Git thực tế trước khi kết luận dữ liệu chưa từng được track.
 
 **Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu lại sau cleanup; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
@@ -375,21 +375,114 @@ Chỉ tạo facts khi nguồn và capability cần dùng; bảng thiếu khác b
 
 ### Phase 4 — Business semantic layer và temporal reasoning
 
-**Mục tiêu:** biến dữ liệu đã chuẩn hóa thành các thực thể/metric có ý nghĩa đúng theo rulebook tại runtime.
+**Mục tiêu:** cung cấp luật nghiệp vụ, metric contracts, cửa sổ thời gian và bằng chứng đủ/thiếu dữ liệu để planner/executor tính đúng trên prepared facts. Định nghĩa metric tách khỏi ETL; phép tính số và quyết định output cuối thuộc Phase 6–7.
 
-**Công việc**
+**Trạng thái:** đã triển khai API semantic/temporal/preflight trong phạm vi S1, tích hợp `predict`/`prepare` và metadata catalog. Runtime vẫn mock abstain; chưa có numeric execution, QueryPlan hoặc LLM. Ngày bắt đầu và tính đầy đủ của nguồn dev S1 vẫn unknown; preflight không cấp quyền trả tổng khi thiếu căn cứ. Checkbox chỉ nghiệm thu phần semantic S1 được nêu, không nâng metric hoặc toàn bộ Phase 4 thành supported.
 
-- [ ] Đọc `rulebook.md` **của split đang xử lý**, `README.md` của business và `calendar.csv`; tạo representation cho các luật rõ ràng (metric definitions, filters, roundings, time rules, ranking order).
-- [ ] Xây thư viện thời gian kiểm thử được: ngày/tuần Thứ Hai–Chủ nhật, tháng này đến `as_of_date`, so với tháng trước theo cùng số ngày, N ngày gần nhất, quý/năm, Tết theo lịch âm, khoảng `[start, end]` bao gồm hai đầu, điều kiện tương lai. Phân biệt tháng M/Y tường minh (cả tháng) với tháng này (MTD); tháng/quý không năm theo quy tắc trước/sau ngày hỏi. Không cắt mọi cửa sổ về hôm nay một cách toàn cục.
-- [ ] Xây metric definitions **tách rời khỏi ETL**: doanh thu, số đơn, số lượng theo đơn vị cơ bản, đơn huỷ, tỉ trọng/tăng trưởng, giá trị trung bình, ranking/top-k; bổ sung nợ, kho, giá vốn, thuốc/hạn dùng khi dữ liệu và lịch cho phép.
-- [ ] Tạo policy/bộ lọc riêng cho từng metric: doanh thu bỏ huỷ và trả cả đơn; công nợ có logic riêng, đơn COD không tính nợ; giá bán tại ngày có thể dùng dòng của đơn huỷ/trả; tránh một `valid_orders` dùng cho mọi câu.
-- [ ] Xây entity resolver theo mã/tên/alias trong dữ liệu, phân biệt khách lẻ, tên khác cách viết, SKU/IMEI/SĐT và phạm vi business.
-- [ ] Tạo `answerability metadata` theo Phụ lục C: coverage theo nguồn/sự kiện/trục thời gian/metric, snapshot tại ngày nào, lịch sử có đủ không, trường thật sự thiếu hay parser thất bại. Kỳ nằm hoàn toàn ngoài dữ liệu là `unanswerable`; giao một phần xử lý theo rulebook; tập lọc rỗng trong kỳ có căn cứ có thể bằng 0.
-- [ ] Chốt `MetricContract` theo Phụ lục D trước khi bật metric: grain, lượng/đơn vị, bộ lọc trạng thái, trục thời gian, lịch sử cần đọc, tử/mẫu số, cách lấy giá và rounding/output. Tách trạng thái cuối đã ghi của đơn khỏi phát sinh kho/thu tiền đúng thời điểm.
-- [ ] Khi luật mới chỉ có trong rulebook của split khác, engine cần đọc và diễn giải tại runtime; các luật có thể encode sẵn như operator tổng quát, **không sao chép mặc định train sang mọi split**.
+**P4-01 — Phạm vi và ranh giới triển khai**
 
-**Deliverables:** `src/semantics/`, `src/temporal/`, metric registry và `business_context.json` runtime.  
-**Exit criteria:** Các câu nghiệp vụ đại diện chạy đúng trên một số shop train; thay rulebook dẫn tới thay cách diễn giải mà không cần hard-code ID doanh nghiệp.
+- [x] **P4-S1 trước:** semantics cho `revenue` và `order_count` toàn business trên shape preparation S1, thời gian cơ bản và answerability preflight. Không yêu cầu entity filters, JOIN, quantity/cost hoặc nghiệp vụ ngành trước khi nối M1.
+- [x] Dùng `BusinessContext.prepared`, catalog/coverage/issues và raw refs hiện có; không tạo schema facts hoặc contract `QueryPlan` cạnh tranh. Phase 5 chuyển câu tiếng Việt thành intent/entities/biểu thức thời gian có cấu trúc; Phase 4 resolve và kiểm tra ngữ nghĩa; Phase 6 validate plan/thực thi; Phase 7 kiểm chứng kết quả và chọn output.
+- [x] Chỉ mở metric/shape khi fields, grain, units và operators phụ thuộc đã được kiểm chứng. `ready` của preparation hoặc có `MetricContract` chưa đủ để ghi capability `supported`.
+
+**P4-02 — Runtime authority và luật có cấu trúc**
+
+- [x] Nạp `rulebook.md`/`calendar.csv` đúng split và README đúng business; tái sử dụng phần chung theo split, phần riêng theo business. Rule profile có operator/tham số, phạm vi áp dụng, source path/hash/section hoặc đoạn nguồn và trạng thái `resolved/unsupported/ambiguous`. Hash xác định revision, không tự chứng minh đã hiểu luật.
+- [ ] Thể hiện thứ tự ưu tiên: điều kiện tường minh trong câu hỏi ưu tiên mặc định; luật ngành ưu tiên luật chung. README xác định grain, nghĩa cột và cách mã hóa nguồn; mâu thuẫn chưa giải quyết giữ ambiguity, chặn metric phụ thuộc. Không mặc định luật train cho split khác. Hiện có explicit time/cutoff trong DSL và industry override theo khai báo README; entity/status overrides ngoài DSL vẫn abstain, chờ planner/contract mở rộng.
+- [x] Bắt đầu bằng tập operator nhỏ cho revenue/count, time rules và rounding; nhận diện dựa trên nội dung có căn cứ, không theo business/question ID. Luật đổi trong tập đã hỗ trợ phải đổi representation/hành vi tương ứng; clause đã nhận diện nhưng chưa ánh xạ chắc vào operator dẫn tới `abstain`. Chưa có kiểm tra đầy đủ ngoại lệ ngoài cấu trúc được nhận diện; xem giới hạn parser được tạm chấp nhận bên dưới.
+- [x] Dùng chung kết quả diễn giải với preparation khi luật ảnh hưởng grouping/dedup/return classification; tránh hai bộ policy độc lập. Thay luật làm đổi facts phải invalidate/rebuild theo dependency hoặc báo unsupported; chỉ đổi filter query-time không khôi phục được thông tin đã biến đổi. Luật chỉ ảnh hưởng metric được áp ở query-time, giữ facts đủ timeline.
+
+**P4-03 — MetricContract và policy riêng theo metric**
+
+- [x] Registry nhỏ có nơi sử dụng thực, bắt đầu với `revenue`/`order_count`. Mỗi contract theo Phụ lục D ghi required facts/fields, grain/count unit, status/row-role policy, time axis/history, công thức, unit/price basis, scope tử/mẫu số, empty/undefined policy, rounding/output/order và acceptance refs; trường không áp dụng có lý do.
+- [x] Policy lấy từ runtime authority đã phân giải; không dùng một `valid_orders` cho mọi câu. Lỗi ảnh hưởng field/metric nào chặn đúng dependency đó: amount parse fail không tự chặn order count khi key/date/status/role và coverage cho count vẫn đủ. Chưa chứng minh thu hẹp được phạm vi issue thì giữ gate bảo thủ, không bỏ dòng lỗi để tính tổng thiếu.
+
+| Metric / giai đoạn | Contract cần giữ trước khi bật |
+|---|---|
+| `revenue` — P4-S1 | Ngày đặt; theo luật train hiện tại, giữ completed/shipping, loại cancelled/returned cả đơn kể cả return sau ngày hỏi. Tổng line net amount sau giảm dòng; không cộng summary, không trừ giảm cấp đơn, không cộng VAT/ship. Service fee chỉ tính khi role/parser đã hỗ trợ và luật yêu cầu. Decimal chính xác, rounding ở bước output theo luật. |
+| `order_count` — P4-S1 | Cùng policy revenue khi runtime rulebook quy định; count distinct canonical order key, không dùng line count. Required fields riêng, không bắt buộc amount hợp lệ nếu không ảnh hưởng danh tính/role/trạng thái đơn. |
+| AOV, difference/growth, tỷ lệ huỷ, tỉ trọng — S2 | AOV từ revenue/count cùng scope; growth/difference có hai kỳ độc lập; tỷ lệ huỷ theo luật train dùng cancelled / mọi đơn đặt trong kỳ. Tử/mẫu số không vô tình dùng chung filter; tỉ trọng nhóm cần facts/entity fields tương ứng. Baseline 0 khác thiếu dữ liệu; undefined chưa có luật thì abstain. |
+| Quantity, ranking/entities — S3 | Cần canonical product/customer keys, aliases và quantity/base-unit evidence bổ sung từ Phase 3. Top-k/tie-break/list/table order theo Phụ lục E; service fee không thành sản phẩm. |
+| Nợ/kho/giá vốn/lô/hạn dùng/ngành — S4 | Cần facts/history/units/price basis tương ứng. Nợ có status/COD policy riêng; giá bán ngày có thể dùng cancelled/returned. Snapshot và event cutoff khác trạng thái cuối đơn; không mở metric chỉ vì reader đã thấy cột. |
+
+**P4-04 — Temporal resolver xác định**
+
+- [x] API nhận biểu thức có cấu trúc, `as_of_date`, rules và calendar; không dùng ngày máy, không tự giải toàn bộ ngôn ngữ câu hỏi. Giữ biểu thức gốc và requested window; preflight bổ sung effective window, cutoff cùng căn cứ coverage. Mỗi window có ID/time axis, hai đầu inclusive; nhiều kỳ được kiểm tra riêng theo QueryPlan Phụ lục E.
+- [x] P4-S1 hỗ trợ ngày tường minh/hôm nay/hôm qua, khoảng ngày, tuần này/tuần trước, tháng M/Y, tháng này, tháng trước, cùng kỳ tháng trước và N ngày gần nhất. Theo luật train: tuần Thứ Hai–Chủ nhật, tuần này tới as-of; tháng M/Y là cả tháng, tháng này là MTD; so MTD lấy cùng số ngày tháng trước và chặn cuối tháng; N ngày tính cả hôm nay. Tháng trước độc lập không tự thành cùng kỳ MTD nếu câu/luật không yêu cầu.
+- [x] Cutoff theo nghĩa câu/metric/rule, không cắt mọi kỳ tường minh về hôm nay. Theo luật train, tháng/quý không năm chọn năm nay nếu kỳ không sau ngày hỏi, nếu sau thì năm trước; giữ ambiguity nếu authority chưa phân giải được. Ngày/giờ dùng quy ước timezone nguồn; day window trên timestamp phải bao trọn ngày cuối, không mất phần giây lẻ. Nguồn chỉ có ngày không đủ cho metric theo ca.
+- [ ] Mở S2 với quý/năm/YTD, tháng/quý không năm, lọc thứ/ngày và Tết; thêm ca khi facts giữ giờ. **Đã có API resolve** quý/năm/YTD, tháng/quý không năm, Tết và trước Tết; chưa có lọc thứ, ca, average hoặc future operator D…D+N. Tết theo calendar runtime: 23 Chạp năm âm Y−1 đến hết 10 Giêng năm âm Y; trước Tết là cùng số ngày ngay trước đó, không chỉ lọc holiday. Calendar thiếu/mâu thuẫn có diagnostic/fallback, không suy lịch âm ngoài nguồn.
+- [x] Cung cấp tuple `CalendarDay` cho resolver theo split thay vì chỉ giữ `calendar_days`; contexts dùng chung, không đọc lại mỗi câu. Calendar xác định ngày/lịch, không chứng minh coverage giao dịch.
+- [ ] Khi bật average theo thứ, số ngày làm mẫu số phải gồm ngày không có giao dịch trong effective window đã đủ coverage; chưa có numeric average executor.
+
+**P4-05 — Coverage và answerability preflight**
+
+**Blocker hiện có:** README dev S1 xác nhận ngày cuối nhưng chưa chứng minh available start/completeness. Không tự nâng observed min/max hoặc calendar thành available span, không sửa README/input để mở metric. Trước nghiệm thu trả số trên nguồn thật, phải ghi được căn cứ runtime hợp lệ cho phạm vi cần tính; nếu chưa có thì tiếp tục abstain và ghi rõ giới hạn. Synthetic coverage đầy đủ chỉ chứng minh engine xử lý đúng fixture.
+
+- [x] Đánh giá theo required source/fact/time axis/metric/window; giữ observed span, available bounds/span và availability basis, snapshot_at/history, parse/mapping status, issue refs và uncertainties theo C.5. Unknown một thuộc tính không tự chặn câu đã có bằng chứng độc lập đủ, cũng không cho phép suy đầy đủ phần còn lại. Ví dụ kỳ sau ngày kết thúc đã xác nhận có thể chứng minh ngoài dữ liệu dù ngày bắt đầu chưa biết; end hint chưa được kiểm chứng không tự cấp quyền này.
+- [x] Preflight chỉ xác nhận **đủ điều kiện thực thi**, hoặc đưa bằng chứng `unanswerable`/lý do `abstain`; chưa gọi kết quả answerable cuối cùng trước executor/verifier. Phân biệt bảng/cột thật sự không phát hành với parser/operator chưa hỗ trợ, đọc thất bại hoặc chưa xác minh.
+
+| Bằng chứng theo metric/window | Hành vi yêu cầu |
+|---|---|
+| Nguồn/thông tin cần thiết thực sự thiếu, hoặc kỳ hoàn toàn ngoài phạm vi đã xác nhận | `unanswerable` theo runtime rulebook, kèm refs chứng minh. |
+| Giao một phần phạm vi đầy đủ đã xác nhận | Theo luật train tính trên phần giao; giữ requested/effective windows và kiểm tra riêng từng kỳ so sánh. |
+| Coverage/dependencies đầy đủ, filter không có phát sinh | Áp empty policy của contract; SUM/count có thể bằng 0, không tự dùng cho average/top-1. |
+| Coverage unknown, parse/mapping/row-role lỗi liên quan, luật/operator chưa hỗ trợ | `abstain`, không biến thành 0 hoặc bằng chứng nguồn gốc không trả lời được. |
+| Snapshot khác mốc, không có lịch sử cần thiết | `unanswerable` nếu chứng minh nguồn gốc không đủ; chỉ engine chưa xử lý history hiện có thì `abstain`. |
+| Mẫu số thực sự 0 hoặc phép tính bất định | Theo undefined policy đã xác minh; chưa có luật thì abstain, không trả NaN/Infinity/0 tùy ý. |
+
+**P4-06 — Entity resolution và phần mở rộng có điều kiện**
+
+- [x] P4-S1 giữ namespace order keys hiện có và nhận diện filter/entity ngoài capability để abstain; không âm thầm bỏ điều kiện thực thể rồi trả tổng shop. Chưa tạo resolver rộng hoặc module rỗng trước khi có canonical fields cần dùng.
+- [ ] Khi mở S3, bổ sung facts/keys ở Phase 3 rồi resolve mã trước, tên/alias theo dữ liệu và luật sau; giữ tên gốc, scope split/business, candidates/ambiguity và refs. Hai mã khác nhau không gộp vì trùng tên; bỏ dấu/fuzzy chỉ tìm ứng viên, không tự chứng minh cùng danh tính. Phân biệt khách lẻ, cách viết tên, SKU/IMEI/SĐT theo C.1; mã điện thoại/thiết bị không tự thành mã khách. Chỉ bật quantity/ranking khi units và output ordering đã có fixtures.
+
+**P4-07 — Tích hợp, deliverables và thứ tự thực hiện**
+
+1. Chốt rule profile/contracts revenue-count và chính sách coverage trên nguồn dev S1; giữ unknown/blocker khi thiếu bằng chứng. Viết behavioral tests synthetic cho luật đổi, temporal boundaries và answerability decisions.
+2. Triển khai `src/semantics/rulebook.py`, `metric_registry.py`, `answerability.py` và `src/temporal/resolver.py` khi có consumer; reuse parsers, `Question`/`Split`/`BusinessContext`, serializer và error boundary. Registry là tập contract/operator hẹp, chưa cần compiler hoặc dependency mới. SQLite read-only + Python Decimal tiếp tục là backend S1.
+3. Gắn metadata semantic vào context và JSON catalog mỗi business hiện có, giữ rõ raw catalog/prepared summary/semantics. Không bắt buộc thêm `business_context.json` trùng nội dung; chỉ tách khi consumer cần. Ghi authority/preparation revision và semantic/metric/temporal versions để tránh reuse sai; nếu thêm cache semantic phải kiểm đủ dependencies/checksum, không chứa cutoff của câu đầu hoặc nhãn.
+4. Nối sớm executor/verifier hẹp Phase 6–7, rồi local LLM/context builder Phase 5 để đạt M1; không đợi S2–S4 hoặc canonical hóa mọi shop. Query-time windows/preflight nằm theo câu, prepared facts giữ đủ timeline. Mở rộng metric/shape theo bằng chứng lỗi và fixtures, không theo business ID.
+
+**Deliverables:** implementation semantic/temporal có nơi dùng; contracts revenue/count và rule refs runtime; metadata coverage/capability/issues trong context/catalog; diagnostics theo câu khi tích hợp; behavioral tests và bằng chứng ngắn ghi trong roadmap/report phù hợp. Quantity/entities/nợ/kho/domain vẫn planned tới khi đủ dependencies; không sinh thêm config/wrapper/log trùng lặp.
+
+**Gate nghiệm thu và điều kiện chuyển tiếp**
+
+| Gate | Bằng chứng bắt buộc |
+|---|---|
+| A — Runtime rules | Đổi một luật/tham số đã hỗ trợ làm đổi profile/policy và hành vi tương ứng; thay ID không đổi logic. Clause thiếu/mâu thuẫn/chưa hỗ trợ trong cấu trúc đã nhận diện có fallback; chưa chứng minh phát hiện mọi ngoại lệ trong tài liệu. Thay luật ảnh hưởng facts không reuse prepared revision sai. |
+| B — Temporal | Expected độc lập cho hai đầu inclusive, tuần giao năm, cuối tháng/năm nhuận, tháng tường minh khác MTD, previous MTD và N ngày; không global cutoff. C19 và phần temporal C27 liên quan qua API thật; lunar/quý/ca chỉ nghiệm thu khi được bật. |
+| C — Contracts/answerability | C12, C16–C18, C26–C27, C30 và summary/error cases theo phạm vi bật: status cuối khác event cutoff; mẫu số huỷ đúng; partial/unknown/outside/empty/parse failure/zero baseline phân biệt đúng. Gate semantic kiểm tra policy/decisions; expected số phải chạy executor Phase 6, không chỉ assert fixture specification. C20/C22 thêm khi mở average/share. |
+| D — Runtime/isolation | Context dùng đúng business/split, metadata/rule refs ổn định qua cold/warm khi có cache; đảo thứ tự câu/as-of không đổi facts hoặc lẫn query state. Không đọc labels/QA/annotations/EDA answer reports, không network/ghi input; fallback giữ output/logs hợp lệ và batch tiếp tục. |
+| E — Nguồn dev và giới hạn | Đối chiếu contracts/rule refs/coverage với nguồn dev S1 và reference độc lập khi đủ căn cứ tính; không dùng nhãn để hợp thức hóa coverage. Nếu nguồn thật còn unknown, ghi phần semantic đã kiểm chứng cùng blocker, không tuyên bố revenue/count supported hoặc toàn Phase 4 hoàn tất. Mở thêm shape phải có preparation/fixtures tương ứng. |
+
+**Exit criteria:** P4-S1 sẵn sàng tích hợp khi các gate semantic/temporal/isolation liên quan đạt và giới hạn coverage được biểu diễn đúng; có thể chuyển tiếp Phase 5–7 trong khi blocker nguồn thật còn mở, nhưng chưa nghiệm thu metric trả số trên nguồn đó. Capability chỉ bật sau execution/verifier và acceptance tương ứng đạt, có bằng chứng trên nguồn dev đủ điều kiện. **M1 nghiệm thu riêng** bằng câu train qua LLM thật → plan → resolve/preflight → execution → verification → typed output → evaluator; không chỉnh plan/SQL/output bằng tay. Hoàn thành P4-S1 không đồng nghĩa toàn bộ Phase 4 hoặc S2–S4 hoàn tất.
+
+**Nghiệm thu semantic S1 — 02/11/2026**
+
+- Bốn module implementation trong `src/semantics/` và `src/temporal/`; dùng lại loader/context/CLI, parser/serializer, SQLite read-only và error boundary. Không thêm dependency, wrapper hoặc script thực thi. Rule profile giữ source hash/line/section/scope/quote; normalization dùng chung dedup/inheritance/return policy. Registry/preflight có required fields và issues riêng theo metric; raw catalog/facts không bị đổi thành câu trả lời.
+- Lint/format và **204 tests** đạt, gồm **47 cases mới** về rule evidence/đổi luật/scope, unsupported clauses, calendar boundaries/lunar, coverage/quality/schema, cache/reordering và isolation. Fixtures C01–C30 vẫn planned ở mức toàn capability; resolved contract hoặc eligible preflight chưa chứng nhận expected numeric. Rounding tie chưa có quy định rõ được ghi abstain, không tự chọn cách làm tròn.
+- Nguồn dev S1 đối chiếu độc lập với raw: **22.428 orders / 56.501 lines**, status counts và observed dates khớp. Hai cold runs và warm cache có semantic revision giống nhau; 5 file input/authority/questions giữ nguyên hash. Raw reference được tạo không dùng labels; validation cuối reuse reference sau kiểm hash nguồn. Thời gian/RSS và revision nằm trong [report](reports/semantics_verification.json), chỉ là số đo local có tải đồng thời, không là benchmark phần cứng BTC.
+- Coverage dev S1 vẫn `available_span=null`; ngày cuối README được kiểm chứng riêng là **24/08/2026**. Probe trong observed span trả `abstain/coverage_unknown`; probe sau confirmed end trả `unanswerable` nội bộ preflight theo rulebook. Đây không phải prediction của planner; runtime vẫn xuất mock abstain cho mọi câu. Không suy available start từ observed min/calendar.
+- Docker smoke synthetic kiểm tra host/container có predictions và semantic metadata khớp, input/root read-only, output writable, network none; duplicate/summary có accounting. Image/output tạm tự dọn; không chạy mới all-train/public inference hoặc CUDA. Bằng chứng đúng source context ghi trong report; các report Phase 2/3 giữ phạm vi lịch sử.
+
+**Giới hạn rule parser được tạm chấp nhận — 02/11/2026**
+
+Theo quyết định của người thực hiện, giữ implementation hiện tại cho Phase 4–S1 và ghi nhận các giới hạn sau; đây không phải nghiệm thu khả năng hiểu rulebook mới tổng quát.
+
+- `src/semantics/rulebook.py` dùng labels/regex viết thủ công dựa trên wording của rulebook train; các biến thể shipping/week được thêm bằng synthetic tests. Parser không được học hoặc kiểm chứng trên một corpus rulebook độc lập, đa dạng. Đổi nhãn, cách diễn đạt, xuống dòng hoặc bố cục có thể làm một luật cùng nghĩa trở thành unsupported.
+- `fullmatch()` chỉ kiểm tra clause được nhận diện. Ngoại lệ/phủ định ở paragraph hoặc section khác có thể bị bỏ qua; một rule vẫn resolved dù toàn tài liệu có mâu thuẫn. Source hash/line/quote hỗ trợ truy vết, không chứng minh tài liệu đã được diễn giải đầy đủ hoặc policy đúng về ngữ nghĩa. Phát biểu guard trong docstring chỉ có bằng chứng trong phạm vi clause/scope đã được parser nhận diện.
+- Đối chiếu synthetic trong RAM, không sửa raw inputs hoặc mở thêm public/private/labels, cho các kết quả thực sau:
+
+| Biến thể từ rulebook train | Kết quả parser hiện tại | Giới hạn được ghi nhận |
+|---|---|---|
+| Giữ câu “Đơn đang giao vẫn tính” | revenue_status resolved, gồm completed/shipping | Mẫu wording đã hỗ trợ. |
+| Đổi thành “Đơn đang giao được tính vào doanh thu” | revenue_status unsupported | Cùng nghĩa nhưng không nhận diện được paraphrase. |
+| Giữ câu gốc, thêm section mới có “Đơn đang giao không được tính vào doanh thu.” | revenue_status vẫn resolved, gồm shipping | Bỏ sót câu mâu thuẫn ngoài cấu trúc nhận diện; chưa tự chặn được policy này. |
+
+- **204 tests đạt** là bằng chứng của toàn bộ project trên các cases đã kiểm tra. Fixtures semantic bám sát wording dùng để viết parser; tests và đối chiếu dev S1 chưa chứng minh generalization hoặc phát hiện mọi luật mới/mâu thuẫn. Không suy từ passing tests, đọc file rulebook runtime hoặc hash mới sang khả năng tự thích nghi ngữ nghĩa.
+- Phạm vi được tạm chấp nhận là API semantic/temporal/preflight S1 với các clause đã kiểm chứng; runtime vẫn mock abstain, chưa có numeric execution hoặc metric accuracy acceptance. Điểm yếu này có thể ảnh hưởng policy khi nối executor; việc chấp nhận hiện tại không tự cho phép bật metric trên rulebook chưa kiểm chứng.
+- [ ] Trước khi tuyên bố hỗ trợ rulebook mới, tách parsing cấu trúc tài liệu khỏi mapping ngữ nghĩa; giữ các đoạn/ngoại lệ chưa diễn giải và kiểm tra tác động tới metric/scope. Bổ sung tests độc lập cho paraphrase/đổi nhãn/đổi bố cục, phủ định và ngoại lệ ngoài bảng. Gate cần chứng minh biến thể cùng nghĩa giữ cùng policy, còn conflict/ngoại lệ liên quan chưa phân giải dẫn tới ambiguity/abstain. Phương án local LLM đề xuất typed rule specification thuộc bước đánh giá sau; vẫn cần validator/operator và evidence checks, chưa chốt là giải pháp đã bảo đảm đúng.
+
+**Việc tiếp theo:** nối QueryPlan/context builder/local LLM và numeric executor/verifier theo Phase 5–7 để đạt M1, đồng thời xử lý giới hạn parser trước khi mở rulebook mới hoặc bật policy chưa kiểm chứng. Giữ blocker coverage nguồn thật khi chưa có căn cứ; entity/status overrides ngoài DSL, quantity/ranking, derived metrics, nợ/kho và normalization mở rộng vẫn planned. Không coi semantic readiness là nghiệm thu metric accuracy.
 
 ### Phase 5 — Local LLM baseline và question planning
 

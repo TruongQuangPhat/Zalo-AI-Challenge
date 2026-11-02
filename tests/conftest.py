@@ -39,3 +39,104 @@ def synthetic_split(tmp_path: Path) -> Path:
     # Intentionally invalid: reading this for inference is a defect.
     (root / "answers.jsonl").write_text("LABEL_READ_IS_FORBIDDEN_NOT_JSON\n")
     return root
+
+
+@pytest.fixture
+def rulebook_text() -> str:
+    # Synthetic rules; no dataset values or question/answer records.
+    return (
+        "Hôm nay của mỗi câu là trường `as_of_date` trong `questions.jsonl`. Mọi cách nói"
+        " tương đối tính theo ngày này. Riêng trạng thái huỷ, trả hàng của đơn lấy theo "
+        "trạng thái ghi trên đơn, kể cả khi phiếu trả ghi ngày sau hôm nay.\n"
+        "## 1. Bán hàng\n"
+        "| Luật | Mặc định |\n"
+        "|---|---|\n"
+        "| Đơn tính vào doanh thu | đơn không huỷ và không trả hàng. Đơn có trả hàng, kể "
+        "cả chỉ trả một phần, là đơn trả hàng: bỏ cả đơn. Đơn đang giao vẫn tính |\n"
+        "| Số đơn | chỉ tính đơn không huỷ, không trả; cả khi đếm số đơn có một mặt hàng,"
+        " số đơn của một khách. Khách đã mua trong kỳ là khách có ít nhất một đơn như vậy"
+        " trong kỳ |\n"
+        "| Đơn thuộc kỳ nào | theo ngày đặt, không theo ngày giao hay ngày thu tiền |\n"
+        "| Doanh thu một đơn | tổng thành tiền các dòng hàng (đã trừ giảm giá trên từng "
+        "dòng). Không trừ giảm giá trên cả đơn (khuyến mãi theo tổng tiền đơn, voucher "
+        "shop), không cộng thuế VAT, không gồm phí giao hàng. Tiền hàng, tiền bán của đơn"
+        " bán cùng nghĩa với doanh thu |\n"
+        "## 2. Thời gian\n"
+        "| Từ X đến Y, nhóm X–Y | gồm cả X và Y |\n"
+        "| N ngày gần nhất | N ngày liền nhau kể cả hôm nay, ngày cuối là hôm nay |\n"
+        "| Tuần | bắt đầu thứ Hai. Tuần này: từ thứ Hai của tuần chứa hôm nay đến hết hôm"
+        " nay. Tuần trước, tuần rồi: cả tuần liền trước, thứ Hai đến Chủ nhật |\n"
+        "| Tháng M/Y | cả tháng, từ ngày 1 đến hết ngày cuối tháng |\n"
+        "| Tháng này | từ ngày 1 đến hết hôm nay. So với tháng trước thì lấy cùng số ngày"
+        " của tháng trước: từ ngày 1 đến hết ngày trùng số với hôm nay; tháng trước không"
+        " có ngày đó thì đến hết tháng trước |\n"
+        "| Từ đầu năm, từ đầu năm tới nay | từ 01/01 của năm nay đến hết hôm nay |\n"
+        "| Tháng M, quý Q không ghi năm | của năm nay nếu không sau hôm nay; sau hôm nay "
+        "thì của năm trước. Quý theo dương lịch, mỗi quý 3 tháng tính từ tháng 1 |\n"
+        "| Tết năm Y, dịp Tết, mùa Tết | từ ngày dương của 23 tháng Chạp (năm âm Y − 1) "
+        "đến hết ngày dương của mùng 10 tháng Giêng (năm âm Y). So với trước Tết = cùng "
+        "số ngày ngay trước 23 tháng Chạp. Tra lịch âm trong `calendar.csv` cùng thư mục."
+        " |\n"
+        "## 7. Không trả lời được\n"
+        "- Không có dữ liệu khác với bằng 0: kỳ nằm hoàn toàn ngoài khoảng ngày có dữ "
+        "liệu của shop, hoặc shop không ghi loại thông tin câu hỏi cần, thì không trả lời"
+        " được, không phải 0.\n"
+        "- Kỳ chỉ có một phần nằm trong khoảng ngày có dữ liệu thì tính trên phần có dữ "
+        "liệu.\n"
+        "## 8. Cách ghi\n"
+        "| Hai dòng của cùng một đơn giống nhau ở mọi ô | lỗi xuất file, tính một lần. "
+        "Hai dòng giống nhau của hai đơn khác nhau là hai lần bán, tính cả hai |\n"
+        "| Ô để trống ở các dòng sau của cùng một nhóm dòng | giống ô đó ở dòng đầu nhóm:"
+        " khách, ghi chú, trạng thái của đơn áp cho mọi dòng của đơn. Không phải thiếu dữ"
+        " liệu, không có nghĩa là khách lẻ hay đơn hoàn thành |\n"
+        "## 9. Output\n"
+        "- Làm tròn: tiền ra số lẻ làm tròn về đồng; trung bình của một khoản tiền cũng "
+        "là tiền, làm tròn về đồng. Phần trăm và số trung bình khác làm tròn 2 chữ số "
+        "thập phân, trừ khi một luật khác trong rulebook ghi khác.\n"
+    )
+
+
+@pytest.fixture
+def semantic_source(synthetic_split, tmp_path, rulebook_text):
+    from src.data.catalog import prepare_business
+    from src.data.normalization import prepare_facts
+    from src.data.split import load_split
+    from src.semantics.answerability import prepare_semantics
+
+    revision = 0
+
+    def prepare(*, rows=None, complete=True, rules=None, readme_extra="", cache_dir=None):
+        nonlocal revision
+        revision += 1
+        business = synthetic_split / "data/shop_a"
+        readme = """One order line per row.
+- **order_id**: order id
+- **date**: order date
+- **status**: order status
+- **amount**: line net amount
+- **item**: product name
+Tiền dùng dấu chấm thập phân, không nhóm nghìn.
+Dữ liệu có đến hết 03/01/2026.
+"""
+        if complete:
+            readme += "Dữ liệu đầy đủ từ 01/01/2026 đến hết 03/01/2026.\n"
+        (business / "README.md").write_text(readme + readme_extra)
+        (synthetic_split / "rulebook.md").write_text(rulebook_text if rules is None else rules)
+        with (business / "sales.csv").open("w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["order_id", "date", "status", "amount", "item"])
+            writer.writerows(
+                rows
+                if rows is not None
+                else [
+                    ["001", "01/01/2026", "Xong", "100.25", "Item A"],
+                    ["002", "03/01/2026", "Đang giao", "50.25", "Item B"],
+                    ["003", "03/01/2026", "Đổi trả", "30", "Item C"],
+                ]
+            )
+        context = prepare_business(load_split(synthetic_split), "shop_a", cache_dir=cache_dir)
+        prepare_facts(context, tmp_path / f"semantic-prepared-{revision}", cache_dir=cache_dir)
+        prepare_semantics(context)
+        return context
+
+    return prepare

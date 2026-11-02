@@ -49,8 +49,7 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
     text = normalized(readme)
     if not re.search(r"(?:mot dong hang|moi dong mot san pham|one order line per row)", text):
         raise ContractError("README does not establish order-line grain")
-    rules = normalized((context.root / "rulebook.md").read_text(encoding="utf-8-sig"))
-    if not re.search(r"hai dong cua \*\*cung mot don\*\* giong nhau o moi o.*tinh mot lan", rules):
+    if context.rules is None or context.rules.require("dedup").operator != "exact_within_order":
         raise ContractError("runtime rulebook does not establish exact within-order deduplication")
     meanings = {
         "order_id": {"ma don", "ma hoa don", "order id"},
@@ -92,10 +91,12 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
     if len(declared) > 1:
         raise ContractError("conflicting numeric conventions in README")
     inheritance = "thong tin don chi ghi o dong dau nhom" in text
+    if inheritance:
+        context.rules.require("header_inheritance")
     negative_returns = "so luong am la tra hang" in text
     if negative_returns and "quantity" not in fields:
         raise ContractError("negative-return convention has no verified quantity field")
-    if negative_returns and "bo **ca don**" not in rules:
+    if negative_returns and context.rules.require("return_policy").operator != "whole_order_return":
         raise ContractError("runtime return policy is not supported")
     return SalesMapping(
         table["source_id"], fields, inheritance, next(iter(declared), None), negative_returns

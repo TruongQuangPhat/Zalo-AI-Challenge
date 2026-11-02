@@ -13,6 +13,7 @@ from src.data.profiling import ProfileOptions
 from src.data.split import load_split
 from src.jsonio import ContractError, dumps, write_json
 from src.runtime import run_inference
+from src.semantics.answerability import prepare_semantics
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -79,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
                         context, args.output_dir / business, cache_dir=args.cache_dir
                     )
                     payload["prepared"] = facts.summary
+                    payload["semantics"] = prepare_semantics(context)
                 write_json(args.output_dir / f"{business}.json", payload)
                 results[business] = {
                     "read_complete": context.catalog["read_complete"],

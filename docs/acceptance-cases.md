@@ -61,3 +61,12 @@ coverage evidence, cache invalidation/round-trip và label isolation. Đây là 
 preparation liên quan C01–C06/C12/C17–C18/C27/C30, chưa là toàn bộ acceptance metrics; chưa có
 cancellation/temporal/stock executor hoặc câu qua LLM. Fixture `implementation_status=planned`
 vẫn đúng cho nghiệm thu toàn capability; validator spec không được đổi thành chứng nhận engine.
+
+Semantic/preflight tests tại `tests/test_semantics.py` và temporal tests tại
+`tests/test_temporal.py` chạy API thật cho phần liên quan C17–C19/C26–C27/C30:
+requested/effective windows, unknown/outside/partial, issue theo metric, đổi rule/scope,
+cache/reordering và label/network/input isolation. C12 được giữ trong recorded-status
+contract và regression preparation hiện có; chưa nghiệm thu stock/event execution.
+Eligibility trong kỳ rỗng chưa là output 0, contract count chưa là kết quả COUNT; C16,
+C20/C22 và expected numeric khác vẫn cần executor. Các fixture toàn capability tiếp tục
+planned; bằng chứng API/dev nằm trong report semantic và roadmap.

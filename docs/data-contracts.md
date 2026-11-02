@@ -5,7 +5,9 @@ Contract version: `data-contracts-v1`. Taxonomy: `question-taxonomy-v1`.
 [roadmap](../roadmap.md), không suy ra từ việc có tài liệu hoặc fixture.
 Các hợp đồng C–F trong roadmap và rulebook/README/calendar đúng split là nguồn đối chiếu.
 Readers, profile và business catalog đã có implementation theo Phase 2;
-Prepared facts S1 cho một CSV order-line đã có trong `src/data/normalization/`; entity mapping rộng, QueryPlan và metric execution vẫn là contract Phase 4–7.
+Prepared facts S1 cho một CSV order-line đã có trong `src/data/normalization/`;
+rule profile, contracts revenue/count, temporal resolver và preflight đã có API.
+Entity mapping rộng, QueryPlan và metric execution vẫn chờ các slice/phase tương ứng.
 
 ## Kiểu chung và phạm vi S1
 
@@ -164,6 +166,38 @@ operator rulebook đã nhận diện. Mapping/locale/coverage có căn cứ và 
 hoặc shape khác trả unsupported. Day/timestamp giữ precision thời gian nguồn, không cắt theo as-of.
 Full available_span cần phát biểu coverage đầy đủ trong README và không mâu thuẫn nguồn;
 observed min/max và README end hint riêng không chứng minh availability.
+
+## Semantic metadata S1 — implementation boundary
+
+`Split.rules` giữ rule profile, `Split.calendar` là tuple `CalendarDay` đã được loader
+kiểm tra; contexts cùng split chia sẻ chúng. Industry override chỉ chọn từ khai báo
+`Ngành: ...` trong README; scope chưa xác định khi có override liên quan giữ ambiguous.
+Rule parser là tập clause/operator hữu hạn, không phải bộ hiểu rulebook tự nhiên tổng quát.
+Dedup/header inheritance/whole-order return ở preparation dùng cùng profile này.
+
+`prepare_semantics(context)` tạo `.semantics`, lưu cùng payload catalog hiện có, ngoài
+raw catalog cache và facts metadata. Có rules/source refs, contracts, schema facts,
+coverage, versions và revision; không mang cutoff câu đầu hay labels. Capability metric
+vẫn unsupported khi chưa có executor/verifier, dù contract đã resolved.
+
+`MetricContract` là dataclass tại `src/semantics/metric_registry.py`; `.summary()` trả JSON.
+`revenue` và `order_count` có required fields/status policy riêng. Contract tiền ghi rõ
+nearest đồng với tie chưa có luật thì abstain; không tự dùng ROUND_HALF_EVEN/HALF_UP
+cho mọi khoản tiền. Các phép tính và serializer cuối còn thuộc Phase 6–7.
+
+`TimeWindow` giữ requested bounds inclusive, as-of/cutoff và rule refs; `contains()` xét
+ngày local của timestamp nguồn, giữ offset và bao trọn phần giây lẻ ngày cuối. Không
+chuyển timezone theo máy hoặc hỗ trợ ca khi chỉ có date. Tết và trước Tết kiểm tra calendar
+liên tục cho cả kỳ gốc và kỳ so, không suy từ cột holiday hoặc nguồn bên ngoài.
+
+`preflight` chỉ nhận aggregate revenue/count toàn business và biểu thức temporal có
+cấu trúc. Nonempty filters/metric/operator chưa hỗ trợ dẫn tới abstain. Kết quả gồm:
+`decision`, `reason`, `contract`, `window`, `effective_window`, `evidence_refs`, `issue_refs`.
+`eligible_to_execute` không có answer value và chưa chứng nhận answerability cuối.
+Schema thiếu field canonical là engine chưa hỗ trợ, không là proof dữ liệu gốc thiếu.
+Available span cần completeness có căn cứ; confirmed end riêng chỉ chứng minh kỳ sau
+ngày kết thúc, không cấp quyền trả tổng trong kỳ. Source end mâu thuẫn hoặc parse ngày
+chưa đủ giữ unknown/conflict; issue chỉ chặn đúng metric phụ thuộc.
 
 Tests và bằng chứng nằm tại `tests/test_normalization.py` và roadmap; C01–C30 trong fixture
 vẫn là specifications toàn capability, không đổi thành passed chỉ từ một phần preparation.
