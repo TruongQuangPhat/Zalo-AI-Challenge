@@ -1,4 +1,4 @@
-# CPU-only Phase 0 stub; not a Blackwell/model-serving submission image.
+# CPU source ingestion and mock abstention; no model-serving runtime yet.
 # Resolve BASE_IMAGE to an approved digest before accepting a final build.
 ARG BASE_IMAGE=python:3.11-slim-bookworm
 FROM ${BASE_IMAGE}

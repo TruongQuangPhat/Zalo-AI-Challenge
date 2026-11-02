@@ -105,7 +105,7 @@ def test_output_cannot_write_inside_input_or_replace_existing_run(synthetic_spli
 
 def test_failed_question_abstains_and_next_question_still_runs(synthetic_split, tmp_path):
     class FailingOnce(MockPlanner):
-        def decide(self, question):
+        def decide(self, question, *, context=None):
             if question.id == "q_one":
                 raise RuntimeError("synthetic executor failure")
             return super().decide(question)
@@ -154,3 +154,22 @@ def test_cli_from_different_directory_and_separate_evaluation(synthetic_split, t
 def test_inference_module_does_not_import_evaluator_in_fresh_process():
     code = "import sys,src.runtime; assert 'src.evaluation.scorer' not in sys.modules"
     subprocess.run([sys.executable, "-c", code], cwd=ROOT, check=True)
+
+
+@pytest.mark.parametrize("tensor_status", ["passed", "unavailable"])
+def test_cuda_gate_uses_tensor_evidence_independently_of_docker_info(monkeypatch, tensor_status):
+    from scripts.verify_runtime import check_gpu
+
+    monkeypatch.setattr(
+        "scripts.verify_runtime.probe",
+        lambda: {
+            "docker": {"status": "unavailable", "reason": "timeout"},
+            "gpu": {"status": "passed", "stdout": "Synthetic GPU"},
+            "torch_cuda": {"status": tensor_status, "stdout": '{"tensor_device":"cuda:0"}'},
+        },
+    )
+    if tensor_status == "passed":
+        assert check_gpu()["torch_cuda"]["tensor_device"] == "cuda:0"
+    else:
+        with pytest.raises(ContractError, match="unavailable"):
+            check_gpu()

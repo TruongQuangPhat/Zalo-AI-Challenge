@@ -6,6 +6,9 @@ import argparse
 import sys
 from pathlib import Path
 
+from src.data.catalog import prepare_business, require_output
+from src.data.ingestion import ReaderOptions
+from src.data.profiling import ProfileOptions
 from src.data.split import load_split
 from src.jsonio import ContractError, dumps, write_json
 from src.runtime import run_inference
@@ -20,6 +23,16 @@ def main(argv: list[str] | None = None) -> int:
     predict = commands.add_parser("predict", help="label-free mock abstention; no LLM")
     predict.add_argument("--data-dir", type=Path, required=True)
     predict.add_argument("--output-dir", type=Path, required=True)
+    predict.add_argument("--cache-dir", type=Path)
+    catalog = commands.add_parser("catalog", help="inspect source tables without labels or metrics")
+    catalog.add_argument("--data-dir", type=Path, required=True)
+    catalog.add_argument("--output-dir", type=Path, required=True)
+    catalog.add_argument("--business", action="append", help="repeat to select businesses")
+    catalog.add_argument("--cache-dir", type=Path)
+    catalog.add_argument("--encoding", default="utf-8-sig")
+    catalog.add_argument("--delimiter", choices=[",", ";", "\t", "|"])
+    catalog.add_argument("--max-distinct", type=int, default=100000)
+    catalog.add_argument("--counter-memory-mib", type=int, default=32)
     validate = commands.add_parser("validate", help="validate split structure without labels")
     validate.add_argument("--data-dir", type=Path, required=True)
     score = commands.add_parser("evaluate", help="explicit, separate ground-truth evaluation")
@@ -29,7 +42,43 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(args_list)
     try:
         if args.command == "predict":
-            report = run_inference(args.data_dir, args.output_dir)
+            report = run_inference(args.data_dir, args.output_dir, cache_dir=args.cache_dir)
+        elif args.command == "catalog":
+            split = load_split(args.data_dir)
+            require_output(args.output_dir, split.root)
+            if args.cache_dir is not None:
+                require_output(args.cache_dir, split.root)
+            businesses = args.business or split.businesses
+            if len(set(businesses)) != len(businesses) or not set(businesses) <= set(
+                split.businesses
+            ):
+                raise ContractError("duplicate or unknown catalog businesses")
+            args.output_dir.mkdir(parents=True, exist_ok=False)
+            reader = ReaderOptions(encoding=args.encoding, delimiter=args.delimiter)
+            profile = ProfileOptions(
+                max_distinct=args.max_distinct,
+                max_counter_bytes=args.counter_memory_mib * 1024 * 1024,
+            )
+            results = {}
+            for business in businesses:
+                context = prepare_business(
+                    split,
+                    business,
+                    cache_dir=args.cache_dir,
+                    reader_options=reader,
+                    profile_options=profile,
+                )
+                write_json(args.output_dir / f"{business}.json", context.catalog)
+                results[business] = {
+                    "read_complete": context.catalog["read_complete"],
+                    "tables": len(context.catalog["tables"]),
+                    "cache_hit": context.cache_hit,
+                    "elapsed_seconds": context.elapsed_seconds,
+                }
+            report = {
+                "businesses": results,
+                "read_complete": all(r["read_complete"] for r in results.values()),
+            }
         elif args.command == "validate":
             report = load_split(args.data_dir).summary()
         else:
@@ -44,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.report.parent.mkdir(parents=True, exist_ok=True)
                 write_json(args.report, report)
         print(dumps(report))
-        return int(report.get("question_errors", 0) > 0)
+        return int(report.get("question_errors", 0) > 0 or report.get("read_complete") is False)
     except (ContractError, OSError, UnicodeError) as exc:
         print(dumps({"error": type(exc).__name__, "message": str(exc)}), file=sys.stderr)
         return 2
