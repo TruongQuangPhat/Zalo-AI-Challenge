@@ -1,6 +1,6 @@
 # Zalo AI Challenge — DataMate
 
-Runtime đọc CSV/XLSX/SQLite, tạo catalog/profile theo business, rồi chạy **mock abstain** và ghi JSONL/log theo câu. Có provenance, bounded profiles và normalization S1 cho CSV order-line có mapping README rõ ràng; facts lưu SQLite với tiền Decimal chính xác. Planner vẫn mock, chưa có metric execution hoặc LLM. Tiến độ và bằng chứng nằm trong [roadmap.md](roadmap.md).
+Runtime đọc CSV/XLSX/SQLite, tạo catalog/profile theo business, rồi chạy **mock abstain** và ghi JSONL/log theo câu. Có provenance, bounded profiles, normalization S1 với SQLite/Decimal và semantic metadata cho revenue/count. Temporal resolver và answerability preflight đã có API kiểm thử; planner vẫn mock, chưa có metric execution hoặc LLM. Tiến độ và bằng chứng nằm trong [roadmap.md](roadmap.md).
 
 ## Môi trường riêng
 
@@ -107,7 +107,7 @@ uv run --no-sync python -m src.cli prepare \
   --output-dir .artifacts/prepared-inspection
 ```
 
-Lệnh ghi `<business>.json` gồm catalog và summary chuẩn hóa. Nguồn phù hợp có thêm
+Lệnh ghi `<business>.json` gồm catalog, summary chuẩn hóa và metadata `semantics`. Nguồn phù hợp có thêm
 `<business>/facts.sqlite`: `orders`, `order_lines`, `lineage`, `issues`, `metadata`.
 Mapping dựa vào mô tả cột/grain trong README và rulebook runtime, không dựa business ID.
 Hiện hỗ trợ một CSV order-line có cấu trúc rõ; các shape khác ghi `unsupported`, không tạo facts rỗng.
@@ -132,11 +132,33 @@ Bằng chứng đối chiếu raw độc lập, hai cold runs và warm cache tr�
 [reports/normalization_verification.json](reports/normalization_verification.json).
 Runtime vẫn xuất mock abstain cho mọi câu; preparation không tự bật revenue/count.
 
+## Ngữ nghĩa và thời gian
+
+`BusinessContext.rules` và `.calendar` dùng authority đúng split; `.semantics` được tạo
+sau preparation trong `predict`/`prepare`, ghi cùng catalog hiện có. Không có script,
+entrypoint hoặc file context bổ sung. Rule profile giữ hash/line/section/đoạn nguồn;
+luật thiếu, mâu thuẫn hoặc chưa nhận diện không dùng ngầm mặc định train.
+
+API `metric_contract(rules, metric_id)` cung cấp contract revenue/count.
+`resolve_window(expression, as_of_date, rules, calendar)` nhận biểu thức có cấu trúc,
+không tự hiểu câu tiếng Việt. Hỗ trợ day/range, today/yesterday, current/previous week,
+month/current_month/previous_month/previous_mtd, last_n_days, quarter/year/year_to_date
+và tet/before_tet theo calendar. Kỳ tường minh giữ nguyên; chỉ cắt theo as-of khi biểu thức yêu cầu.
+
+`preflight(context, metric_id, expression, as_of_date=...)` trả `eligible_to_execute`,
+`unanswerable` hoặc `abstain`, cùng contract, requested/effective windows và evidence.
+Eligibility chưa phải đáp án. Entity filters, numeric/derived execution và LLM chưa hỗ trợ.
+Nguồn dev S1 vẫn unknown available start/completeness; ngày cuối có thể được xác nhận riêng
+để chứng minh kỳ nằm sau dữ liệu. Không dùng observed min/max/calendar để mở coverage.
+
+Kiểm tra bằng `uv run --no-sync python -m pytest tests/test_semantics.py tests/test_temporal.py`.
+Bằng chứng dev/cold/warm nằm trong [reports/semantics_verification.json](reports/semantics_verification.json).
+
 ## Cấu trúc tối thiểu
 
-- `src/`: contracts, split, readers/profile/catalog/cache, normalization S1, mock runtime và evaluator.
+- `src/`: contracts, split, readers/profile/catalog/cache, normalization/semantics S1, temporal resolver, mock runtime và evaluator.
 - `scripts/verify_runtime.py`: kiểm tra runtime/Docker/GPU; `verify_ingestion.py` kiểm tra nguồn train với output tạm. `build_context.py`, `probe_environment.py` hỗ trợ Docker/phần cứng.
-- `tests/`: output/scorer/runtime, data tools, readers, catalog/cache và normalization; dùng dữ liệu synthetic.
+- `tests/`: output/scorer/runtime, data tools, readers, catalog/cache, normalization, semantic/preflight và temporal; dùng dữ liệu synthetic.
 - `scripts/audit_dataset.py`, `scripts/annotate_questions.py`: đối chiếu/validate train và annotation offline; runtime không import hai script này.
 - `docs/`: data contracts, observations, capability matrix và acceptance cases; `config/validation_split.json` giữ protocol đánh giá.
 - `README.md`, `roadmap.md`: hướng dẫn và kế hoạch; không duy trì ADR/nhật ký/config mô tả trùng lặp.

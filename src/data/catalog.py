@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, Any
 from src.data.cache import fingerprint, load_catalog, save_catalog
 from src.data.ingestion import READERS, ReaderOptions, SourceTable
 from src.data.profiling import ProfileOptions, candidate_relations, profile_table
-from src.data.split import Split
+from src.data.split import CalendarDay, Split, load_split
 from src.jsonio import ContractError
+from src.semantics.rulebook import RuleProfile, parse_rulebook
 
 if TYPE_CHECKING:
     from src.data.normalization import PreparedBusiness
@@ -106,6 +107,9 @@ class BusinessContext:
     elapsed_seconds: float = 0
     metrics: dict[str, Any] = field(default_factory=dict)
     prepared: PreparedBusiness | None = None
+    rules: RuleProfile | None = None
+    calendar: tuple[CalendarDay, ...] = ()
+    semantics: dict[str, Any] = field(default_factory=dict)
 
     def source_table(self, source_id: str) -> SourceTable:
         """Reopen a revision-checked source; its rows remain raw and unfiltered."""
@@ -145,12 +149,27 @@ def prepare_business(
         require_output(cache_dir, split.root)
     sources, excluded = discover(split, business)
     authority = {name: digest(split.root / name) for name in ["rulebook.md", "calendar.csv"]}
+    if any(authority[name] != split.source_hashes.get(name) for name in authority):
+        split = load_split(split.root)
+    readme = (split.root / "data" / business / "README.md").read_text(encoding="utf-8-sig")
+    industries = re.findall(r"^\s*(?:-\s*)?(?:\*\*)?Ngành(?:\*\*)?\s*:\s*(.+)$", readme, re.M)
+    if len(industries) > 1:
+        raise ContractError("conflicting industry declarations in README")
+    rules = split.rules
+    if industries:
+        rules = parse_rulebook(
+            split.rulebook_text,
+            split.root.name,
+            industry=industries[0],
+            source_sha256=authority["rulebook.md"],
+        )
     dependencies = {
         "version": VERSION,
         "split": split.root.name,
         "business_id": business,
         "sources": sources,
         "authority": authority,
+        "rule_parser_sha256": rules.parser_sha256 if rules else None,
         "excluded": excluded,
         "reader_options": asdict(reader_options),
         "profile_options": asdict(profile_options),
@@ -160,9 +179,14 @@ def prepare_business(
         cached = load_catalog(cache_dir, dependencies)
         if cached is not None:
             return BusinessContext(
-                split.root, cached, reader_options, True, time.perf_counter() - started
+                split.root,
+                cached,
+                reader_options,
+                True,
+                time.perf_counter() - started,
+                rules=rules,
+                calendar=split.calendar,
             )
-    readme = (split.root / "data" / business / "README.md").read_text(encoding="utf-8-sig")
     declared_files = sorted(
         set(re.findall(r"`([^`\n]+\.(?:csv|xlsx|sqlite))`", readme, flags=re.I))
     )
@@ -314,4 +338,6 @@ def prepare_business(
         False,
         time.perf_counter() - started,
         {"retained_key_bytes_accounted": retained_bytes},
+        rules=rules,
+        calendar=split.calendar,
     )

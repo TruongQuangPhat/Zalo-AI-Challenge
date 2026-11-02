@@ -17,6 +17,7 @@ from src.data.catalog import prepare_business, require_output
 from src.data.normalization import prepare_facts
 from src.data.split import load_split
 from src.jsonio import ContractError, dumps, write_json
+from src.semantics.answerability import prepare_semantics
 
 
 def run_inference(
@@ -63,10 +64,11 @@ def run_inference(
                     facts = prepare_facts(
                         context, output / "prepared" / question.business_id, cache_dir=cache_dir
                     )
+                    semantics = prepare_semantics(context)
                     contexts[question.business_id] = context
                     write_json(
                         catalogs / f"{question.business_id}.json",
-                        {**context.catalog, "prepared": facts.summary},
+                        {**context.catalog, "prepared": facts.summary, "semantics": semantics},
                     )
                     manifest["preparation"][question.business_id] = {
                         "read_complete": context.catalog["read_complete"],

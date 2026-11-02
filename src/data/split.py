@@ -12,6 +12,7 @@ from typing import Any
 
 from src.contracts import require_id
 from src.jsonio import ContractError, read_jsonl
+from src.semantics.rulebook import RuleProfile, parse_rulebook
 
 
 @dataclass(frozen=True)
@@ -23,12 +24,26 @@ class Question:
 
 
 @dataclass(frozen=True)
+class CalendarDay:
+    day: date
+    weekday: int
+    lunar_day: int
+    lunar_month: int
+    lunar_year: int
+    lunar_leap: bool
+    holiday: str
+
+
+@dataclass(frozen=True)
 class Split:
     root: Path
     questions: tuple[Question, ...]
     businesses: tuple[str, ...]
     source_hashes: dict[str, str]
     calendar_days: int
+    calendar: tuple[CalendarDay, ...] = ()
+    rules: RuleProfile | None = None
+    rulebook_text: str = ""
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -79,6 +94,7 @@ def load_split(data_dir: Path) -> Split:
     calendar_path = checked("calendar.csv")
     previous: date | None = None
     calendar_dates: set[str] = set()
+    calendar: list[CalendarDay] = []
     required = {
         "date",
         "weekday",
@@ -108,6 +124,17 @@ def load_split(data_dir: Path) -> Split:
             except (ValueError, TypeError) as exc:
                 raise ContractError(f"calendar.csv:{line}: {exc}") from exc
             calendar_dates.add(row["date"])
+            calendar.append(
+                CalendarDay(
+                    current,
+                    current.isoweekday(),
+                    int(row["lunar_day"]),
+                    int(row["lunar_month"]),
+                    int(row["lunar_year"]),
+                    row["lunar_leap"] == "true",
+                    row["holiday"],
+                )
+            )
             previous = current
     if not calendar_dates:
         raise ContractError("calendar.csv has no dates")
@@ -151,7 +178,17 @@ def load_split(data_dir: Path) -> Split:
             raise ContractError(f"questions.jsonl:{line}: {exc}") from exc
     if not questions:
         raise ContractError("questions.jsonl has no questions")
-    return Split(root, tuple(questions), tuple(sorted(businesses)), sources, len(calendar_dates))
+    rules = parse_rulebook(rulebook, root.name, source_sha256=sources["rulebook.md"])
+    return Split(
+        root,
+        tuple(questions),
+        tuple(sorted(businesses)),
+        sources,
+        len(calendar_dates),
+        tuple(calendar),
+        rules,
+        rulebook,
+    )
 
 
 def question_dict(question: Question) -> dict[str, Any]:
