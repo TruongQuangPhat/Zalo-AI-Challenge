@@ -1,1 +1,1 @@
-"""Input structure checks; business-table ETL is outside Phase 0."""
+"""Split validation, raw readers, bounded profiles and business catalogs."""

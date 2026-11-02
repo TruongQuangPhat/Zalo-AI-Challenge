@@ -4,8 +4,8 @@ Contract version: `data-contracts-v1`. Taxonomy: `question-taxonomy-v1`.
 Đây là đặc tả đầu vào cho S1; trạng thái triển khai nằm trong
 [roadmap](../roadmap.md), không suy ra từ việc có tài liệu hoặc fixture.
 Các hợp đồng C–F trong roadmap và rulebook/README/calendar đúng split là nguồn đối chiếu.
-Làm rõ provenance/raw representation ngày 02/11/2026 theo yêu cầu Phase 2;
-các trường bổ sung dưới đây là đặc tả reader, chưa có implementation.
+Readers, profile và business catalog đã có implementation theo Phase 2;
+facts, entity mapping và QueryPlan nghiệp vụ bên dưới vẫn là contract cho S1 ở Phase 3–7.
 
 ## Kiểu chung và phạm vi S1
 
@@ -69,6 +69,18 @@ Phase 2 bổ sung metadata có nơi sử dụng cho các contract trên:
 - `BusinessContext`: references tới source manifest, reader/profile/schema/config versions,
   raw handles/cache và trạng thái completeness/issues; không cần nhét mọi raw row vào JSON.
   Cache raw/profile khác cache facts chuẩn hóa, không mang theo cutoff của câu hỏi đầu tiên.
+
+API raw hiện tại: `SourceTable.iter_rows()` hoặc `BusinessContext.iter_rows(source_id)`
+trả `SourceRow(ordinal, row, cells, locator, line_end)`. `cells` dùng vị trí cột 1-based,
+mỗi `Cell` có `raw_value`, `native_type`, `metadata`; `row.reference(table, column)` và
+`row.identity(table)` tạo provenance/ID theo revision. Đây là phần decoded raw của contract
+S1; các trường entity/group/row-role nghiệp vụ do normalization bổ sung khi có căn cứ.
+Profile chỉ đề xuất structural roles và giữ accounting; không tạo order/fact từ locator.
+
+`read_status=not_read` chỉ dùng cho SQLite system tables/views được kiểm kê nhưng loại khỏi
+đường đọc bảng nghiệp vụ với `exclusion_reason`; trạng thái này không chứng minh nguồn đầy đủ
+cho metric phụ thuộc view. Distinct/key/relationship checks có giới hạn bộ nhớ; khi vượt giới hạn
+phải giữ partial/not_checked. Runtime không coi `read_complete=true` là metric capability.
 
 `row_role`: `sale_item`, `service_fee`, `order_adjustment`, `return_item`, `payment`,
 `purchase_item`, `inventory_event`, `inventory_snapshot`, `repair_visit`, `warranty_visit`,

@@ -211,7 +211,8 @@ def check_docker(work: Path) -> dict:
                 "/tmp:rw,nosuid,noexec,size=64m",
                 *mounts,
                 "datamate-runtime-check:local",
-            ]
+            ],
+            timeout=1800,
         )
         config = loads(checked(["docker", "inspect", "--format", "{{json .HostConfig}}", name]))
         bindings = loads(checked(["docker", "inspect", "--format", "{{json .Mounts}}", name]))
@@ -259,6 +260,18 @@ def check_docker(work: Path) -> dict:
         }
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=15, check=False)
+
+
+def check_gpu() -> dict:
+    result = probe()
+    # Docker has its own gate; a daemon-info timeout does not invalidate a CUDA tensor.
+    required = ["gpu", "torch_cuda"]
+    if any(result[key]["status"] != "passed" for key in required):
+        raise ContractError(dumps({key: result[key] for key in required}))
+    return {
+        "device": result["gpu"]["stdout"],
+        "torch_cuda": loads(result["torch_cuda"]["stdout"]),
+    }
 
 
 def main() -> int:
@@ -317,20 +330,7 @@ def main() -> int:
         if args.scope == "all":
             run_gate("docker", lambda: check_docker(work))
 
-            def gpu_check():
-                result = probe()
-                if any(
-                    result[key]["status"] != "passed" for key in ["docker", "gpu", "torch_cuda"]
-                ):
-                    raise ContractError(
-                        dumps({key: result[key] for key in ["docker", "gpu", "torch_cuda"]})
-                    )
-                return {
-                    "device": result["gpu"]["stdout"],
-                    "torch_cuda": loads(result["torch_cuda"]["stdout"]),
-                }
-
-            run_gate("gpu_runtime", gpu_check)
+            run_gate("gpu_runtime", check_gpu)
     report["runtime_verified"] = all(state == "passed" for state in report["checks"].values())
     args.report.parent.mkdir(parents=True, exist_ok=True)
     write_json(args.report, report)

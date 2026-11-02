@@ -44,7 +44,10 @@ def inside(path: Path, root: Path) -> bool:
 
 
 def _source(root: Path, relative: str) -> Path:
-    path = (root / relative).resolve()
+    candidate = root / relative
+    if any(p.is_symlink() for p in [candidate, *candidate.parents] if p.is_relative_to(root)):
+        raise ContractError(f"source symlink is forbidden: {relative}")
+    path = candidate.resolve()
     if not inside(path, root) or not path.is_file():
         raise ContractError(f"missing/escaping input: {relative}")
     return path
