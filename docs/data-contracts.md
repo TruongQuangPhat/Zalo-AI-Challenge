@@ -4,6 +4,8 @@ Contract version: `data-contracts-v1`. Taxonomy: `question-taxonomy-v1`.
 Đây là đặc tả đầu vào cho S1; trạng thái triển khai nằm trong
 [roadmap](../roadmap.md), không suy ra từ việc có tài liệu hoặc fixture.
 Các hợp đồng C–F trong roadmap và rulebook/README/calendar đúng split là nguồn đối chiếu.
+Làm rõ provenance/raw representation ngày 02/11/2026 theo yêu cầu Phase 2;
+các trường bổ sung dưới đây là đặc tả reader, chưa có implementation.
 
 ## Kiểu chung và phạm vi S1
 
@@ -13,8 +15,25 @@ Các hợp đồng C–F trong roadmap và rulebook/README/calendar đúng split
   Raw text không được mất. Không parse tiền qua float; không lấy tolerance làm rounding policy.
 - `Span`: `{start: Day, end: Day}`, gồm hai đầu, start ≤ end.
 - `SourceRef`: `{split, business_id, file, sha256, table, row, column}`.
-  File tương đối với split, không thoát root; row là tọa độ vật lý 1-based, không phải order ID.
-  `row`/`column` có thể null với tham chiếu cả bảng/file; SHA-256 là 64 hex.
+  File tương đối với split, không thoát root; SHA-256 là 64 hex của phiên bản file.
+  CSV: `row` là physical line bắt đầu record, bổ sung `line_end` khi record nhiều dòng;
+  `record_ordinal` 1-based tính cả header/blank records của parser, khác số physical lines.
+  XLSX: `row` là số dòng worksheet 1-based, giữ cell address khi tham chiếu ô.
+  SQLite: `row` là null, bổ sung `locator={kind, columns, values}`; kind là
+  `primary_key` đã kiểm tra hoặc `rowid` khả dụng. Locator gồm source hash nên chỉ
+  có hiệu lực cho đúng phiên bản file. Với bảng không có hai loại locator đó,
+  cần chiến lược duyệt ổn định được kiểm chứng trước khi báo đã đọc thành công;
+  không dùng thứ tự SELECT không ORDER BY làm định danh ổn định hoặc thứ tự event.
+  `column` là identity theo vị trí 1-based trong bảng nguồn, tên hiển thị giữ riêng;
+  `row`/`column` có thể null với tham chiếu cả bảng/file. Không dùng locator để đếm đơn.
+- Phase 2 giữ raw value trước diễn giải: CSV là text; XLSX giữ raw numeric token,
+  native type, style/date-system và formula/cached value riêng; SQLite giữ declared type
+  cùng storage class thực. Số lưu REAL đã có giới hạn nguồn, không khẳng định khôi phục
+  được precision trước khi lưu. BLOB nếu có dùng base64 + encoding/native-type tag,
+  không decode tùy ý thành text. Không coi formula cache thiếu là blank hợp lệ hoặc 0.
+- `source_id` định danh split/business/path/sheet-or-table/region; content hash là revision
+  riêng. `source_row_id` gắn source revision và locator. Mỗi cột có `column_id` theo vị trí,
+  tên nội bộ duy nhất và raw header refs; header rỗng/trùng không được ghi đè hoặc mất cột.
 - Nullable chỉ dùng khi trường chưa biết/không áp dụng và có trạng thái/lý do đi kèm.
   Phân biệt `source_missing`, `inherited`, `parse_failed`, `ambiguous`, `not_applicable`.
   Không biến missing/error thành 0 hoặc bỏ dòng để xuất tổng thiếu.
@@ -32,6 +51,24 @@ Các hợp đồng C–F trong roadmap và rulebook/README/calendar đúng split
 | `BusinessContext` **S1** | `split: ID`, `business_id: ID`, `rulebook_hash: sha256`, `readme_hash: sha256`, `calendar_hash: sha256`, `tables: SourceTable[]`, `coverage: Coverage[]`, `capabilities: Capability[]`, `issues: TransformationIssue[]` | Chỉ chứa nguồn của business hiện tại và authority đúng split. Không chứa answers/QA/annotations. Extension: source/parser/schema/config versions trong cache key. |
 | `Coverage` **S1** | `source_refs: SourceRef[]`, `fact_type: string`, `time_axis: string`, `observed_span: Span/null`, `available_span: Span/null`, `availability_basis: string[]`, `snapshot_at: Timestamp/Day/null`, `history_available: true/false/null`, `parse_status: enum`, `uncertainties: string[]` | Unknown không trở thành full coverage. Available span cần căn cứ; quan sát một dòng đầu/cuối không chứng minh không thiếu giai đoạn. Snapshot chỉ áp dụng tại mốc được xác nhận. Extension: coverage từng partition/file và lịch sử tái lập. |
 | `TransformationIssue` **S1** | `issue_id: ID`, `code: string`, `source_refs: SourceRef[]`, `raw_value: scalar/null`, `affected_fields: string[]`, `affected_metrics: string[]`, `severity: warning/blocking`, `resolution: string/null` | Lỗi cột phụ không loại cả hàng; lỗi ảnh hưởng tổng phải chặn metric. Không chỉ ghi warning rồi tính phần còn đọc được như tổng đầy đủ. |
+
+Phase 2 bổ sung metadata có nơi sử dụng cho các contract trên:
+
+- `SourceTable`: `read_status=read/empty/failed`, `structure_status=resolved/ambiguous/unsupported`,
+  header/boundary candidates và evidence. File chỉ `read` khi mọi sheet/table trong phạm vi
+  đã được duyệt; metadata nguồn rỗng vẫn có trong catalog. Grain/roles chưa phân giải giữ unknown.
+- `SourceRow`: `structure_role` cho title/header/repeated-header/blank/summary-candidate/
+  data-candidate/unknown và source accounting. Đây không phải `row_role` nghiệp vụ;
+  Phase 2 chưa xác lập thì `row_role=unknown`, group key null có lý do, không forward-fill/dedup.
+- `ColumnProfile`: scope/counts và rows scanned; mỗi statistic ghi exact/estimated/not_checked.
+  `non_null_count` đếm raw value không null, gồm cả chuỗi rỗng và native error;
+  blank-string/error counts là các thống kê riêng, có thể thuộc non-null, không cộng mù
+  thành row count. Ô XLSX không có cell và cell blank giữ distinction trong raw metadata.
+  `parse_status=not_checked` trước khi gọi parser chung; mẫu không chứng minh toàn bảng.
+  Tối đa 5 sample values khác nhau/cột, chọn theo thứ tự nguồn ổn định.
+- `BusinessContext`: references tới source manifest, reader/profile/schema/config versions,
+  raw handles/cache và trạng thái completeness/issues; không cần nhét mọi raw row vào JSON.
+  Cache raw/profile khác cache facts chuẩn hóa, không mang theo cutoff của câu hỏi đầu tiên.
 
 `row_role`: `sale_item`, `service_fee`, `order_adjustment`, `return_item`, `payment`,
 `purchase_item`, `inventory_event`, `inventory_snapshot`, `repair_visit`, `warranty_visit`,
