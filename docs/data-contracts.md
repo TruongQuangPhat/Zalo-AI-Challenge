@@ -5,7 +5,7 @@ Contract version: `data-contracts-v1`. Taxonomy: `question-taxonomy-v1`.
 [roadmap](../roadmap.md), không suy ra từ việc có tài liệu hoặc fixture.
 Các hợp đồng C–F trong roadmap và rulebook/README/calendar đúng split là nguồn đối chiếu.
 Readers, profile và business catalog đã có implementation theo Phase 2;
-facts, entity mapping và QueryPlan nghiệp vụ bên dưới vẫn là contract cho S1 ở Phase 3–7.
+Prepared facts S1 cho một CSV order-line đã có trong `src/data/normalization/`; entity mapping rộng, QueryPlan và metric execution vẫn là contract Phase 4–7.
 
 ## Kiểu chung và phạm vi S1
 
@@ -140,3 +140,30 @@ Pilot lấy 100 câu ở giao phần dev của cả hai protocol: round-robin bu
 hash seed+ID để chọn trong bucket, không dùng gold. Rà nghĩa câu, sửa taxonomy chung rồi
 khóa v1. Các đề xuất còn lại không được gọi gold annotation. Review cục bộ được giữ để
 tái tạo output bằng `--reviews`; metadata này không thuộc runtime inference/Docker context.
+
+## Prepared facts S1 — implementation boundary
+
+`BusinessContext.prepared` trỏ tới `PreparedBusiness(path, summary, cache_hit, elapsed_seconds)`.
+`path=null` cùng `status=unsupported` khi shape/authority chưa hỗ trợ; không có bảng rỗng giả.
+`ready/blocked` là trạng thái preparation, độc lập available coverage và metric execution.
+`connect()` mở database read-only/query-only; `iter_records()` chỉ đọc bảng facts/audit đã cho phép.
+
+SQLite STRICT dùng một file `facts.sqlite`, không thêm dependency. Schema version là
+`prepared-sales-v1`; dependencies/quality summary nằm trong bảng `metadata`. Money là TEXT
+Decimal chính xác, qua API trả Decimal; không dùng SUM/AVG/CAST REAL cho tiền trong SQL.
+`orders` giữ raw ID/namespace key, ordered_at, canonical status, mapping_status.
+`order_lines` giữ key riêng, order FK, net_amount nullable khi lỗi có issue, row_role,
+source_values trước parse (sau phục hồi header), event_at cho return đã có nguồn ngày.
+Return item nằm riêng role với sale item; event_at chưa biết giữ null, chưa chứng nhận stock history.
+`lineage` map mỗi raw row tới line key hoặc disposition header/title/blank/summary/quarantined;
+bản trùng trỏ về line giữ lại. `issues.detail` có code, raw value, source ref, affected metrics và severity.
+
+Mapping chỉ mở trên một CSV resolved khi README xác nhận order-line grain và nghĩa các cột.
+Header inheritance/negative-return conventions cần README; dedup/whole-order return cần
+operator rulebook đã nhận diện. Mapping/locale/coverage có căn cứ và hashes; luật chưa hiểu
+hoặc shape khác trả unsupported. Day/timestamp giữ precision thời gian nguồn, không cắt theo as-of.
+Full available_span cần phát biểu coverage đầy đủ trong README và không mâu thuẫn nguồn;
+observed min/max và README end hint riêng không chứng minh availability.
+
+Tests và bằng chứng nằm tại `tests/test_normalization.py` và roadmap; C01–C30 trong fixture
+vẫn là specifications toàn capability, không đổi thành passed chỉ từ một phần preparation.

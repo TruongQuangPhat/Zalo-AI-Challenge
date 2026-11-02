@@ -1,6 +1,6 @@
 # Zalo AI Challenge — DataMate
 
-Runtime đọc CSV/XLSX/SQLite, tạo catalog/profile theo business, rồi chạy **mock abstain** và ghi JSONL/log theo câu. Có provenance, thống kê có giới hạn bộ nhớ và cache catalog tùy chọn; chưa có normalization nghiệp vụ, metric execution hoặc LLM. Tiến độ và bằng chứng nằm trong [roadmap.md](roadmap.md).
+Runtime đọc CSV/XLSX/SQLite, tạo catalog/profile theo business, rồi chạy **mock abstain** và ghi JSONL/log theo câu. Có provenance, bounded profiles và normalization S1 cho CSV order-line có mapping README rõ ràng; facts lưu SQLite với tiền Decimal chính xác. Planner vẫn mock, chưa có metric execution hoặc LLM. Tiến độ và bằng chứng nằm trong [roadmap.md](roadmap.md).
 
 ## Môi trường riêng
 
@@ -38,7 +38,7 @@ uv run --no-sync python -m src.cli evaluate \
   --predictions .artifacts/my-run/submission.jsonl
 ```
 
-Output của lần chạy chủ động gồm `submission.jsonl`, `logs/`, một catalog mỗi business trong `catalogs/` và `run_manifest.json`. Context được chuẩn bị một lần/business và không cắt theo ngày của câu hỏi. Các file này được giữ để người dùng xem; chỉ output do verifier tạo mới tự xóa. Thêm `--cache-dir .artifacts/source-cache` khi muốn tái sử dụng catalog giữa các lượt; mặc định không sinh cache đĩa.
+Output của lần chạy chủ động gồm `submission.jsonl`, `logs/`, một catalog mỗi business trong `catalogs/`, `run_manifest.json` và `prepared/<business>/facts.sqlite` cho nguồn được hỗ trợ. Context được chuẩn bị một lần/business và không cắt theo ngày của câu hỏi. Các file này được giữ để người dùng xem; chỉ output do verifier tạo mới tự xóa. Thêm `--cache-dir .artifacts/source-cache` để reuse catalog và prepared facts giữa các lượt; mặc định không sinh cache đĩa. Catalog nguồn giữ riêng metadata `prepared`; `BusinessContext.prepared` cho planner truy cập facts read-only.
 
 ## Kiểm tra deliverables Phase 1
 
@@ -97,11 +97,46 @@ uv run --no-sync python -m scripts.verify_ingestion --scope all-train
 tune rồi tiếp tục gọi kết quả là final độc lập. Fixtures nghiệp vụ C01–C30 vẫn giữ trạng thái
 planned cho tới khi normalization/execution tương ứng được triển khai.
 
+## Chuẩn hóa dữ liệu
+
+Dùng entrypoint hiện có với output mới, không mở labels hoặc chạy LLM:
+
+```bash
+uv run --no-sync python -m src.cli prepare \
+  --data-dir dataset/train --business biz_101 \
+  --output-dir .artifacts/prepared-inspection
+```
+
+Lệnh ghi `<business>.json` gồm catalog và summary chuẩn hóa. Nguồn phù hợp có thêm
+`<business>/facts.sqlite`: `orders`, `order_lines`, `lineage`, `issues`, `metadata`.
+Mapping dựa vào mô tả cột/grain trong README và rulebook runtime, không dựa business ID.
+Hiện hỗ trợ một CSV order-line có cấu trúc rõ; các shape khác ghi `unsupported`, không tạo facts rỗng.
+Summary `ready` chỉ xác nhận preparation không bị blocking issue; không chứng minh đủ coverage
+hoặc metric đã có executor. `blocked` giữ lỗi/facts để kiểm tra và chặn metric phụ thuộc;
+CLI `prepare` trả exit 1 khi có blocking issues.
+
+Tiền lưu TEXT Decimal, giữ phần lẻ nguồn; đọc qua `PreparedBusiness.iter_records()` trả Decimal.
+Không dùng SQLite `SUM/AVG/CAST REAL` trực tiếp cho tiền; phép tính chính xác dùng Python Decimal.
+Ngày chỉ có ngày giữ ISO date, timestamp giữ giờ/offset. Giữ mọi status và ngày sau câu hỏi;
+chỉ query-time mới áp policy metric. Summary/tổng nguồn không tạo giao dịch; exact dedup trong
+cùng đơn giữ lineage; trả theo SL âm chỉ xử lý khi README và rulebook xác nhận.
+
+Cache facts nằm trong `<cache-dir>/prepared/<fingerprint>/`, gồm database và manifest checksum.
+Metadata trong database chứa schema/software/source/authority versions, mapping, coverage và
+quality summary; không tạo thêm file audit/quality theo từng dòng. Start/completeness chưa đủ
+căn cứ giữ unknown. Lịch sử return cho kho, JOIN nhiều nguồn, Excel/SQLite normalization,
+quantity/unit/cost và nghiệp vụ ngành chưa được bật.
+
+Kiểm tra bằng `uv run --no-sync python -m pytest tests/test_normalization.py`.
+Bằng chứng đối chiếu raw độc lập, hai cold runs và warm cache trên nguồn dev S1 nằm tại
+[reports/normalization_verification.json](reports/normalization_verification.json).
+Runtime vẫn xuất mock abstain cho mọi câu; preparation không tự bật revenue/count.
+
 ## Cấu trúc tối thiểu
 
-- `src/`: contracts, split, source readers/profile/catalog/cache, mock runtime và evaluator.
+- `src/`: contracts, split, readers/profile/catalog/cache, normalization S1, mock runtime và evaluator.
 - `scripts/verify_runtime.py`: kiểm tra runtime/Docker/GPU; `verify_ingestion.py` kiểm tra nguồn train với output tạm. `build_context.py`, `probe_environment.py` hỗ trợ Docker/phần cứng.
-- `tests/`: output/scorer/runtime, data tools, readers và catalog/cache; dùng dữ liệu synthetic.
+- `tests/`: output/scorer/runtime, data tools, readers, catalog/cache và normalization; dùng dữ liệu synthetic.
 - `scripts/audit_dataset.py`, `scripts/annotate_questions.py`: đối chiếu/validate train và annotation offline; runtime không import hai script này.
 - `docs/`: data contracts, observations, capability matrix và acceptance cases; `config/validation_split.json` giữ protocol đánh giá.
 - `README.md`, `roadmap.md`: hướng dẫn và kế hoạch; không duy trì ADR/nhật ký/config mô tả trùng lặp.

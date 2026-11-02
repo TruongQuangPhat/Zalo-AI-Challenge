@@ -7,13 +7,16 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.data.cache import fingerprint, load_catalog, save_catalog
-from src.data.ingestion import READERS, ReaderOptions
+from src.data.ingestion import READERS, ReaderOptions, SourceTable
 from src.data.profiling import ProfileOptions, candidate_relations, profile_table
 from src.data.split import Split
 from src.jsonio import ContractError
+
+if TYPE_CHECKING:
+    from src.data.normalization import PreparedBusiness
 
 VERSION = "source-catalog-v1"
 OFFLINE_NAMES = {
@@ -58,16 +61,21 @@ def _software_hash() -> str:
 def discover(split: Split, business: str) -> tuple[dict, list[dict]]:
     if business not in split.businesses:
         raise ContractError("unknown business in this split")
-    directory = split.root / "data" / business
+    return discover_sources(split.root, business)
+
+
+def discover_sources(root: Path, business: str) -> tuple[dict, list[dict]]:
+    """Hash permitted business sources without opening adjacent evaluation metadata."""
+    directory = root / "data" / business
     if any(
-        p.is_symlink() for p in [directory, *directory.parents] if p.is_relative_to(split.root)
-    ) or not directory.resolve().is_relative_to(split.root):
+        p.is_symlink() for p in [directory, *directory.parents] if p.is_relative_to(root)
+    ) or not directory.resolve().is_relative_to(root):
         raise ContractError("business source directory must not be a symlink or escape split")
     sources, excluded = {}, []
 
     def visit(folder: Path):
         for path in sorted(folder.iterdir()):
-            relative = path.relative_to(split.root).as_posix()
+            relative = path.relative_to(root).as_posix()
             if path.stem.casefold() in OFFLINE_NAMES or path.name.casefold() in OFFLINE_DIRECTORIES:
                 excluded.append({"file": relative, "reason": "offline_metadata"})
                 continue
@@ -97,11 +105,12 @@ class BusinessContext:
     cache_hit: bool = False
     elapsed_seconds: float = 0
     metrics: dict[str, Any] = field(default_factory=dict)
+    prepared: PreparedBusiness | None = None
 
-    def iter_rows(self, source_id: str):
-        """Reopen the immutable raw source, preserving duplicate records and native metadata."""
+    def source_table(self, source_id: str) -> SourceTable:
+        """Reopen a revision-checked source; its rows remain raw and unfiltered."""
         profile = next((t for t in self.catalog["tables"] if t["source_id"] == source_id), None)
-        if profile is None or profile["read_status"] == "failed":
+        if profile is None or profile["read_status"] not in {"read", "empty"}:
             raise ContractError("unknown or failed raw table")
         ref = profile["source_ref"]
         path = self.root / ref["file"]
@@ -114,8 +123,11 @@ class BusinessContext:
         tables = READERS[path.suffix.casefold()](
             self.root, path, ref["business_id"], ref["sha256"], self.reader_options
         )
-        table = next(t for t in tables if t.source_id == source_id)
-        yield from table.iter_rows()
+        return next(t for t in tables if t.source_id == source_id)
+
+    def iter_rows(self, source_id: str):
+        """Stream all source rows, including headers, blanks and export copies."""
+        yield from self.source_table(source_id).iter_rows()
 
 
 def prepare_business(
