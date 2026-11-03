@@ -37,4 +37,13 @@ chỉ cho một aggregate/window, có hint hữu hạn cho metric và relative-t
 requested bounds sai (gồm quý/tháng/ngày/range tường minh) trước khi coverage clipping che lỗi, cùng scope cues bị model bỏ. Một số aliases label/paragraph exceptions được kiểm tra hữu hạn; không phải full-document policy interpretation.
 Không phải chứng nhận mọi paraphrase/alias/negation hoặc latency toàn dataset.
 
-Nghiệm thu S1 hẹp: mỗi lượt subset dev 12 correct/0 wrong/1 abstain (13 câu), hai lượt giống nhau; 42 model calls gồm synthetic, 0 timeout, generation median 25,47 s/p95 48,81 s. Không là PA đại diện hoặc SLA toàn dataset; model Docker/GPU vẫn chưa nghiệm thu.
+Nghiệm thu S1 hẹp trên host: mỗi lượt subset dev 12 correct/0 wrong/1 abstain (13 câu), hai lượt giống nhau; 42 model calls gồm synthetic, 0 timeout, generation median 25,47 s/p95 48,81 s. Bằng chứng lịch sử theo revision tại planner report.
+
+Đóng gói ngày 03/11/2026: Docker LLM CPU và CUDA/GTX 1650 đã đạt hai lượt/backend
+trên cùng 13 câu đã khóa, mỗi lượt 12 correct/0 wrong/1 abstain, không missing/malformed;
+predictions khớp cả bốn lượt, source/model/input hashes giống nhau, GPU offload 29 layer.
+Labels không có trong container; evaluator host chỉ đọc sau inference. 285 tests và
+lint/format/lockfile đạt. [Docker LLM report](../reports/docker_llm_verification.json)
+ghi latency/RSS/VRAM và giới hạn so sánh sau laptop reset. Đây là bằng chứng vận hành
+các capability S1 đã bật, không mở thêm metric/shape hoặc chứng nhận PA đại diện,
+SLA toàn dataset hay Blackwell.

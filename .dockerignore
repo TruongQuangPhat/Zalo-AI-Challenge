@@ -20,3 +20,4 @@ docs
 *.xlsx
 *.safetensors
 *.gguf
+!llm/model.gguf

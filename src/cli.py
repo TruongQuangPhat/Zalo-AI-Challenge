@@ -30,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     predict.add_argument("--question-timeout", type=float, default=120)
     predict.add_argument("--model-load-timeout", type=float, default=180)
     predict.add_argument("--model-threads", type=int, default=4)
+    predict.add_argument("--gpu-layers", type=int, default=0, help="0 CPU, -1 all layers on GPU")
     predict.add_argument(
         "--question-id", action="append", help="explicit subset, input order retained"
     )
@@ -60,7 +61,10 @@ def main(argv: list[str] | None = None) -> int:
                 from src.agent.planner import LocalPlanner
 
                 model = LocalModel(
-                    args.model, load_timeout=args.model_load_timeout, threads=args.model_threads
+                    args.model,
+                    load_timeout=args.model_load_timeout,
+                    threads=args.model_threads,
+                    gpu_layers=args.gpu_layers,
                 )
                 try:
                     report = run_inference(

@@ -249,6 +249,82 @@ CSV trên. Header-only revenue, JOIN, Excel order normalization và S2–S4 vẫ
 parser/guards hữu hạn chưa chứng minh hiểu mọi paraphrase/ngoại lệ. Chi tiết và source hashes
 nằm trong [planner report](reports/planner_verification.json).
 
+## Docker LLM offline
+
+Target `llm` dùng cùng entrypoint, đóng gói GGUF local, sáu dependency runtime theo
+`uv.lock`, license và thư viện OpenMP cần thiết. Build context chỉ lấy allowlist; không
+copy toàn `.venv`, dataset, credentials hoặc reports. Kiểm tra RECORD trước khi bundle;
+base image Python 3.11 Bookworm được pin digest trong Dockerfile. Setup cần môi trường
+Linux x86_64/Python 3.11 đã sync group `llm`; inference không cài hoặc tải artifact.
+
+```bash
+uv run --no-sync python -m scripts.build_context \
+  --model .artifacts/models/qwen2.5-1.5b-instruct/model.gguf \
+  --output .artifacts/llm-cpu-context.tar --manifest .artifacts/llm-cpu-context.json
+# Base image pin trong Dockerfile phải có sẵn local; không pull trong lượt offline.
+docker build --network none --pull=false --target llm \
+  -t datamate-llm-cpu:local - < .artifacts/llm-cpu-context.tar
+uv run --no-sync python -m scripts.verify_runtime --scope llm \
+  --image datamate-llm-cpu:local --context-manifest .artifacts/llm-cpu-context.json
+```
+
+Verifier dùng 13 câu S1 dev đã khóa trong planner report, hai container mới với cache
+preparation dùng lại ở lượt hai. Chỉ mount questions/rulebook/calendar/raw data read-only;
+labels/reports không có trong container. Root read-only, network none, output/cache nằm
+ngoài dataset. Chỉ evaluator host đọc nhãn sau khi cả hai inference đã thoát. Runs/facts/gold
+được dọn tự động; image và model local được giữ. Target `runtime` mặc định vẫn là source-only.
+
+`--gpu-layers 0` giữ CPU; `-1` yêu cầu offload toàn bộ layers. Adapter ghi số layer thực sự
+offloaded từ native log và bác yêu cầu GPU nếu không offload được, không âm thầm tính CPU.
+GPU cần backend CUDA riêng và Docker GPU access; verifier chỉ cho so sánh sau khi CPU đã đạt
+trên cùng source runtime. Không dùng Torch/CUDA host làm bằng chứng LLM Docker đã tương thích.
+
+Bản CUDA local dùng wheel cùng version `0.3.16`, CUDA 12.4/cp311 x86_64 từ
+[upstream release](https://github.com/abetlen/llama-cpp-python/releases/tag/v0.3.16-cu124).
+SHA-256 wheel: `a455263e7608a51c26079e82fe524f9b7f1f73ee9fc563221a297de8da2a8c51`.
+Tải ở bước setup vào `.artifacts/wheels/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl`,
+kiểm hash trước khi stage. Phiên bản dependency vẫn theo `uv.lock`; checksum binary build
+được ghi riêng trong build-context manifest. Không thay `.venv` CPU.
+
+```bash
+uv pip install --no-cache --no-index --no-deps --link-mode copy --python .venv/bin/python \
+  --target .artifacts/llama-cuda \
+  .artifacts/wheels/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
+uv run --no-sync python -m scripts.build_context --cuda-runtime .artifacts/llama-cuda \
+  --output .artifacts/llm-cuda-context.tar --manifest .artifacts/llm-cuda-context.json
+docker build --network none --pull=false --target cuda \
+  -t datamate-llm-cuda:local - < .artifacts/llm-cuda-context.tar
+uv run --no-sync python -m scripts.verify_runtime --scope llm --gpu-layers -1 \
+  --image datamate-llm-cuda:local --context-manifest .artifacts/llm-cuda-context.json
+```
+
+Target CUDA kế thừa model/source từ `datamate-llm-cpu:local` đã nghiệm thu, thêm binding
+và các thư viện cần từ hai package NVIDIA đã khóa. Không bundle bản CMake `lib/` trùng
+với `llama_cpp/lib`, không copy Torch hay toàn bộ CUDA environment. Verifier so sánh cùng
+source, weights và input hashes; GPU memory là số đo toàn device, gồm desktop/process khác.
+Hai backend cập nhật cùng report Docker, không tạo các báo cáo lặp theo từng run.
+Kết quả và giới hạn tại [reports/docker_llm_verification.json](reports/docker_llm_verification.json).
+
+**Nghiệm thu ngày 03/11/2026:** CPU trước, sau đó CUDA trên GTX 1650 4 GiB,
+driver 555.97; mỗi backend hai lượt trên cùng 13 câu đã khóa. Cả bốn lượt đều
+**12 correct / 0 wrong / 1 abstain**, không missing/malformed; predictions bằng nhau
+giữa các lượt và CPU/GPU, weights/source/input hashes khớp.
+
+| Số đo | CPU | CUDA, 29 layer offload |
+|---|---|---|
+| Generation median / p95, 26 calls/backend | 33,27 / 73,64 s | 5,77 / 10,30 s |
+| Wall time hai lượt, gồm startup/preparation | 505,93 / 601,67 s | 171,05 / 169,02 s |
+| Peak worker RSS lớn nhất | 1.870,79 MiB | 1.313,64 MiB |
+| Peak VRAM toàn device, sampling 500 ms | Không đo | 1197 MiB |
+
+Lượt GPU đầu bị laptop reset gián đoạn đã được loại khỏi nghiệm thu; hai lượt trên
+được chạy lại đầy đủ sau khi khôi phục Docker Desktop. Tải host và OS cache không được
+kiểm soát, nên số đo latency chỉ mô tả các lượt này. Chứng nhận giới hạn ở model/runtime,
+GTX 1650 và subset S1 trên; chưa chứng nhận Blackwell, toàn dataset hoặc SLA.
+Quality sau thay đổi đóng gói: **285 tests**, lint/format và lockfile đạt.
+Tar build context và thư mục stage CUDA có thể dọn sau khi build; giữ image, model,
+wheel và manifest nhỏ để chạy/rebuild offline.
+
 ## M1 ban đầu — inventory snapshot tại mốc xác nhận
 
 M1 đã kiểm chứng ngày 03/11/2026 qua **một câu train-dev**, không thay đổi gate coverage lịch sử.

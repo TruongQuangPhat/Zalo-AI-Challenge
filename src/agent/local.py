@@ -1,9 +1,10 @@
-"""One persistent CPU llama.cpp worker with local-only loading and a hard timeout."""
+"""One persistent local llama.cpp worker, explicit offload and a hard timeout."""
 
 from __future__ import annotations
 
 import importlib.metadata
 import multiprocessing
+import re
 import resource
 import time
 from pathlib import Path
@@ -12,10 +13,27 @@ from src.data.catalog import digest
 from src.jsonio import ContractError
 
 
-def _worker(pipe, model_path: str, n_ctx: int, threads: int) -> None:
+def _worker(pipe, model_path: str, n_ctx: int, threads: int, gpu_layers: int = 0) -> None:
     # Import only inside the worker: mock/CPU tooling never requires the LLM group.
     try:
-        from llama_cpp import Llama, llama_perf_context, llama_perf_context_reset
+        from llama_cpp import (
+            Llama,
+            llama_log_callback,
+            llama_log_set,
+            llama_perf_context,
+            llama_perf_context_reset,
+            llama_supports_gpu_offload,
+        )
+
+        native_log = []
+
+        @llama_log_callback
+        def capture_log(level, message, user_data):
+            line = message.decode("utf-8", "replace").strip()
+            if len(native_log) < 64 and re.search(r"offload|CUDA|device", line, re.I):
+                native_log.append(line[:512])
+
+        llama_log_set(capture_log, None)
 
         started = time.monotonic()
         model = Llama(
@@ -24,11 +42,24 @@ def _worker(pipe, model_path: str, n_ctx: int, threads: int) -> None:
             n_batch=128,
             n_threads=threads,
             n_threads_batch=threads,
-            n_gpu_layers=0,
+            n_gpu_layers=gpu_layers,
             seed=0,
             chat_format="chatml",
             verbose=False,
         )
+        offloaded = max(
+            (
+                int(match[1])
+                for line in native_log
+                if (match := re.search(r"offloaded (\d+)/\d+ layers", line))
+            ),
+            default=0,
+        )
+        gpu_supported = llama_supports_gpu_offload()
+        if gpu_layers != 0 and (not gpu_supported or offloaded == 0):
+            raise ContractError(
+                "GPU requested but no model layers offloaded; CPU fallback rejected"
+            )
         pipe.send(
             {
                 "ready": True,
@@ -36,6 +67,9 @@ def _worker(pipe, model_path: str, n_ctx: int, threads: int) -> None:
                 "runtime": importlib.metadata.version("llama-cpp-python"),
                 "batch_threads": model.n_threads_batch,
                 "n_batch": model.n_batch,
+                "gpu_offload_supported": gpu_supported,
+                "layers_offloaded": offloaded,
+                "native_device_log": native_log,
                 "gguf": {
                     key: model.metadata.get(key)
                     for key in (
@@ -86,18 +120,23 @@ def _worker(pipe, model_path: str, n_ctx: int, threads: int) -> None:
 class LocalModel:
     """No model ID, downloader, HTTP client, remote code, or auto GPU fallback."""
 
-    def __init__(self, path: Path, *, load_timeout: float = 180, threads: int = 4):
+    def __init__(
+        self, path: Path, *, load_timeout: float = 180, threads: int = 4, gpu_layers: int = 0
+    ):
         started = time.monotonic()
         if not path.is_file() or path.is_symlink() or path.suffix.lower() != ".gguf":
             raise ContractError("provide an existing local GGUF file")
         if threads < 1 or load_timeout <= 0:
             raise ContractError("threads and model load timeout must be positive")
+        if type(gpu_layers) is not int or not -1 <= gpu_layers < 2**31:
+            raise ContractError("gpu_layers must be -1 (all), 0 (CPU), or a positive layer count")
         self.metadata = {
             "file": path.name,
             "sha256": digest(path),
             "bytes": path.stat().st_size,
             "backend": "llama-cpp-python",
-            "device": "cpu",
+            "device": "gpu" if gpu_layers else "cpu",
+            "requested_gpu_layers": gpu_layers,
             "n_ctx": 4096,
             "max_output_tokens": 256,
             "threads": threads,
@@ -107,7 +146,9 @@ class LocalModel:
         }
         mp = multiprocessing.get_context("spawn")
         self.pipe, child = mp.Pipe()
-        self.process = mp.Process(target=_worker, args=(child, str(path.resolve()), 4096, threads))
+        self.process = mp.Process(
+            target=_worker, args=(child, str(path.resolve()), 4096, threads, gpu_layers)
+        )
         self.process.start()
         child.close()
         try:
