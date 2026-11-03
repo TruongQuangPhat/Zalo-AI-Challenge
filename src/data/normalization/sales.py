@@ -1,4 +1,4 @@
-"""Conservative README-driven normalization of a single CSV order-line source."""
+"""README-driven preparation of a single CSV order-line or order-header source."""
 
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ class SalesMapping:
     inherit_headers: bool
     convention: str | None
     negative_returns: bool
+    shape: str = "csv_order_lines"
 
 
 def sales_mapping(context: BusinessContext) -> SalesMapping:
@@ -47,7 +48,10 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
         raise ContractError("only resolved single-table CSV order-line sources are enabled")
     readme = catalog["readme"]
     text = normalized(readme)
-    if not re.search(r"(?:mot dong hang|moi dong mot san pham|one order line per row)", text):
+    header_only = bool(re.search(r"moi dong mot don hang.*khong co chi tiet mat hang", text))
+    if not header_only and not re.search(
+        r"(?:mot dong hang|moi dong mot san pham|one order line per row)", text
+    ):
         raise ContractError("README does not establish order-line grain")
     if context.rules is None or context.rules.require("dedup").operator != "exact_within_order":
         raise ContractError("runtime rulebook does not establish exact within-order deduplication")
@@ -79,7 +83,10 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
             raise ContractError(f"ambiguous README mapping for {field}")
         if candidates:
             fields[field] = candidates[0]
-    if not {"order_id", "ordered_at", "status", "amount", "item"} <= fields.keys():
+    required = {"order_id", "ordered_at", "status"}
+    if not header_only:
+        required.update({"amount", "item"})
+    if not required <= fields.keys():
         raise ContractError("README lacks unambiguous order/date/status/line amount/item mappings")
     conventions = {
         "comma_grouped": "dau phay nhom nghin",
@@ -99,7 +106,12 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
     if negative_returns and context.rules.require("return_policy").operator != "whole_order_return":
         raise ContractError("runtime return policy is not supported")
     return SalesMapping(
-        table["source_id"], fields, inheritance, next(iter(declared), None), negative_returns
+        table["source_id"],
+        fields,
+        inheritance,
+        next(iter(declared), None),
+        negative_returns,
+        "csv_order_headers" if header_only else "csv_order_lines",
     )
 
 
@@ -114,12 +126,15 @@ def _signature(cells: dict[int, Cell]) -> str:
 
 
 def _summary(row: SourceRow, mapping: SalesMapping) -> bool:
-    item = row.cells.get(mapping.fields["item"])
-    return bool(
-        item
+    candidates = (
+        [row.cells.get(mapping.fields["item"])] if "item" in mapping.fields else row.cells.values()
+    )
+    return any(
+        cell
         and re.match(
-            r"^(tong|cong)\s+(ngay|cong|thang|ky)\b", normalized(str(item.raw_value)).strip()
+            r"^(tong|cong)\s+(ngay|cong|thang|ky)\b", normalized(str(cell.raw_value)).strip()
         )
+        for cell in candidates
     )
 
 
@@ -163,7 +178,7 @@ def build_sales(
         raise ContractError("resolved source has no accessible header")
     evidence, evidence_refs = set(), []
     for row in table.iter_rows():
-        if _row_role(row, header, mapping) == "data":
+        if _row_role(row, header, mapping) == "data" and "amount" in mapping.fields:
             cell = row.cells.get(mapping.fields["amount"])
             style = number_evidence(str(cell.raw_value)) if cell else None
             if style:
@@ -326,77 +341,91 @@ def build_sales(
                     )
             else:
                 group = {}
-            amount = None
-            try:
-                if convention_conflict:
-                    raise ParseError("number_convention_conflict", "source conventions conflict")
-                amount = parse_money(cell_value(cells.get(mapping.fields["amount"])), convention)
-                if amount < 0 and line_role != "return_item":
-                    line_role = "unknown"
-                    raise ParseError("row_role_unknown", "negative amounts require a role parser")
-            except ParseError as exc:
-                issue(
-                    exc.code,
-                    row.reference(table, mapping.fields["amount"]),
-                    cells.get(mapping.fields["amount"]).raw_value
-                    if cells.get(mapping.fields["amount"])
-                    else None,
-                    ["revenue", "order_count"] if exc.code == "row_role_unknown" else ["revenue"],
-                )
-            item = cells.get(mapping.fields["item"])
-            item_text = normalized(str(item.raw_value)).strip() if item else ""
-            if not item_text or re.search(r"voucher|diem|phi (?:ship|phuc vu)|topping", item_text):
-                line_role = "unknown"
-                issue(
-                    "row_role_unknown",
-                    reference,
-                    item.raw_value if item else None,
-                    ["revenue", "order_count"],
-                )
-            for position, cell in row.cells.items():
-                if position not in mapping.fields.values():
-                    try:
-                        cell_value(cell)
-                    except ParseError as exc:
-                        if exc.code != "source_missing":
-                            issue(
-                                exc.code,
-                                row.reference(table, position),
-                                cell.raw_value,
-                                [],
-                                "warning",
-                            )
-            if valid_headers:
-                source_values = _signature(cells)
-                fact_key = fingerprint({"order_key": order_key, "source_values": source_values})
-                duplicate = connection.execute(
-                    "SELECT source_values FROM order_lines WHERE line_key=?", (fact_key,)
-                ).fetchone()
-                if duplicate and duplicate[0] != source_values:
-                    raise ContractError("line identity collision")
-                disposition = "duplicate" if duplicate else "kept"
-                if not duplicate:
-                    connection.execute(
-                        "INSERT INTO order_lines VALUES (?,?,?,?,?,?)",
-                        (
-                            fact_key,
-                            order_key,
-                            str(amount) if amount is not None else None,
-                            line_role,
-                            source_values,
-                            event_at,
-                        ),
-                    )
-                methods.extend(
-                    [
-                        "parse_date",
-                        "normalize_status",
-                        "parse_money" if amount is not None else "parse_money_failed",
-                        "exact_duplicate" if duplicate else "create_fact",
-                    ]
-                )
+            if mapping.shape == "csv_order_headers":
+                disposition = "kept" if valid_headers else "quarantined"
+                methods.extend(["parse_date", "normalize_status", "create_order"])
             else:
-                disposition = "quarantined"
+                amount = None
+                try:
+                    if convention_conflict:
+                        raise ParseError(
+                            "number_convention_conflict", "source conventions conflict"
+                        )
+                    amount = parse_money(
+                        cell_value(cells.get(mapping.fields["amount"])), convention
+                    )
+                    if amount < 0 and line_role != "return_item":
+                        line_role = "unknown"
+                        raise ParseError(
+                            "row_role_unknown", "negative amounts require a role parser"
+                        )
+                except ParseError as exc:
+                    issue(
+                        exc.code,
+                        row.reference(table, mapping.fields["amount"]),
+                        cells.get(mapping.fields["amount"]).raw_value
+                        if cells.get(mapping.fields["amount"])
+                        else None,
+                        ["revenue", "order_count"]
+                        if exc.code == "row_role_unknown"
+                        else ["revenue"],
+                    )
+                item = cells.get(mapping.fields["item"])
+                item_text = normalized(str(item.raw_value)).strip() if item else ""
+                if not item_text or re.search(
+                    r"voucher|diem|phi (?:ship|phuc vu)|topping", item_text
+                ):
+                    line_role = "unknown"
+                    issue(
+                        "row_role_unknown",
+                        reference,
+                        item.raw_value if item else None,
+                        ["revenue", "order_count"],
+                    )
+                for position, cell in row.cells.items():
+                    if position not in mapping.fields.values():
+                        try:
+                            cell_value(cell)
+                        except ParseError as exc:
+                            if exc.code != "source_missing":
+                                issue(
+                                    exc.code,
+                                    row.reference(table, position),
+                                    cell.raw_value,
+                                    [],
+                                    "warning",
+                                )
+                if valid_headers:
+                    source_values = _signature(cells)
+                    fact_key = fingerprint({"order_key": order_key, "source_values": source_values})
+                    duplicate = connection.execute(
+                        "SELECT source_values FROM order_lines WHERE line_key=?", (fact_key,)
+                    ).fetchone()
+                    if duplicate and duplicate[0] != source_values:
+                        raise ContractError("line identity collision")
+                    disposition = "duplicate" if duplicate else "kept"
+                    if not duplicate:
+                        connection.execute(
+                            "INSERT INTO order_lines VALUES (?,?,?,?,?,?)",
+                            (
+                                fact_key,
+                                order_key,
+                                str(amount) if amount is not None else None,
+                                line_role,
+                                source_values,
+                                event_at,
+                            ),
+                        )
+                    methods.extend(
+                        [
+                            "parse_date",
+                            "normalize_status",
+                            "parse_money" if amount is not None else "parse_money_failed",
+                            "exact_duplicate" if duplicate else "create_fact",
+                        ]
+                    )
+                else:
+                    disposition = "quarantined"
         accounting[disposition] += 1
         connection.execute(
             "INSERT INTO lineage VALUES (?,?,?,?,?,?,?)",
@@ -427,6 +456,7 @@ def build_sales(
         r"Dữ liệu đầy đủ từ (\d{1,2}/\d{1,2}/\d{4}) đến hết (\d{1,2}/\d{1,2}/\d{4})", readme
     )
     available = None
+    observed_span = {"start": observed[0][:10], "end": observed[1][:10]} if observed[0] else None
     if complete_span:
         start, end = (parse_date(complete_span[i]).isoformat() for i in [1, 2])
         if start > end or (observed[0] and (observed[0][:10] < start or observed[1][:10] > end)):
@@ -435,13 +465,15 @@ def build_sales(
             )
         else:
             available = {"start": start, "end": end}
+    elif "order_count" not in blocked:
+        available = observed_span
     counts = {
         name: connection.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
         for name in ["orders", "order_lines", "lineage", "issues"]
     }
     return {
         "status": "blocked" if blocked else "ready",
-        "shape": "csv_order_lines",
+        "shape": mapping.shape,
         "source_id": mapping.source_id,
         "mapping": {
             "fields": mapping.fields,
@@ -459,18 +491,25 @@ def build_sales(
         "issue_counts": dict(sorted(issue_counts.items())),
         "blocking_metrics": sorted(blocked),
         "diagnostic_line_totals_by_status": totals,
-        "diagnostic_totals_complete": "revenue" not in blocked,
+        "diagnostic_totals_complete": mapping.shape == "csv_order_lines"
+        and "revenue" not in blocked,
         "coverage": {
             "fact_type": "orders",
             "time_axis": "ordered_at",
-            "observed_span": {"start": observed[0][:10], "end": observed[1][:10]}
-            if observed[0]
-            else None,
+            "observed_span": observed_span,
             "available_span": available,
             "available_end_hint": context.catalog["coverage"]["available_end_hint"],
-            "availability_basis": [complete_span[0]] if complete_span else [],
+            "availability_basis": [complete_span[0]]
+            if complete_span
+            else (["observed_order_dates"] if available else []),
             "parse_status": "partial" if "order_count" in blocked else "complete",
-            "uncertainties": [] if available else ["available start/completeness unknown"],
+            "uncertainties": []
+            if complete_span and available
+            else [
+                "Export extent accepted as coverage; missing interior records cannot be detected."
+            ]
+            if available
+            else ["available start/completeness unknown"],
         },
-        "metric_execution": "not_implemented",
+        "metric_execution": "separate_query_time_executor",
     }

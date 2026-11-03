@@ -6,8 +6,8 @@ from dataclasses import asdict, dataclass
 
 from src.semantics.rulebook import RuleProfile, SemanticError
 
-VERSION = "metric-contracts-v1"
-METRICS = ("revenue", "order_count")
+VERSION = "metric-contracts-v2"
+METRICS = ("revenue", "order_count", "inventory_on_hand")
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,38 @@ def metric_contract(rules: RuleProfile, metric_id: str) -> MetricContract:
     """A contract authorizes no output until requirements/execution are verified."""
     if metric_id not in METRICS:
         raise SemanticError("metric_unsupported", f"metric is not implemented: {metric_id}")
+    if metric_id == "inventory_on_hand":
+        return MetricContract(
+            metric_id=metric_id,
+            rulebook_hash=rules.sha256,
+            required_fields={
+                "inventory_snapshot": [
+                    "product_code",
+                    "product_name",
+                    "base_unit",
+                    "quantity",
+                    "snapshot_at",
+                    "source_ref",
+                ]
+            },
+            input_grain="product_snapshot",
+            count_unit=None,
+            status_policy=[],
+            row_roles=["inventory_snapshot"],
+            time_axis="snapshot_at",
+            history_requirement="explicit_source_snapshot_only",
+            unit="source_base_unit",
+            price_basis=None,
+            formula="exact_snapshot_quantity",
+            numerator_scope=None,
+            denominator_scope=None,
+            empty_policy="abstain",
+            undefined_policy="abstain",
+            rounding={"mode": "exact_source"},
+            output={"type": "number", "ordering": "not_applicable"},
+            rule_refs=[],
+            acceptance_refs=["C12", "C17", "C18", "C30"],
+        )
     refs = ["dedup", "return_policy", "recorded_status", "time_axis"]
     refs.append("revenue_status" if metric_id == "revenue" else "order_count_status")
     if metric_id == "revenue":

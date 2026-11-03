@@ -158,9 +158,9 @@ def parse_date(value, *, year: int | None = None, date_system: str | None = None
 def normalize_status(value) -> str:
     statuses = {
         "completed": {"completed", "hoan thanh", "da hoan thanh", "xong"},
-        "cancelled": {"cancelled", "huy", "da huy"},
-        "returned": {"returned", "tra hang", "doi tra"},
-        "shipping": {"shipping", "in_delivery", "dang giao", "dang giao hang"},
+        "cancelled": {"cancelled", "huy", "da huy", "khach huy"},
+        "returned": {"returned", "tra hang", "doi tra", "hoan tra"},
+        "shipping": {"shipping", "in_delivery", "dang giao", "dang giao hang", "cho giao"},
     }
     token = normalized(str(value)).strip()
     for status, labels in statuses.items():

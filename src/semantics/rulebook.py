@@ -16,7 +16,7 @@ from typing import Any
 from src.data.profiling import normalized
 from src.jsonio import ContractError
 
-VERSION = "runtime-rules-v1"
+VERSION = "runtime-rules-v2"
 
 
 class SemanticError(ContractError):
@@ -84,6 +84,40 @@ LABELS = {
     "tet": "tet nam y, dip tet, mua tet",
     "return_policy": "don tra mot phan",
 }
+
+# Deliberately small wording variants for the same finite clauses. The value
+# still has to match a supported meaning in full, including qualifications.
+LABEL_ALIASES = {
+    "revenue_status": {"don duoc tinh vao doanh thu"},
+    "order_count_status": {"dem so don", "so luong don hang"},
+    "revenue_basis": {"cach tinh doanh thu mot don"},
+    "time_axis": {"ngay xac dinh ky cua don"},
+}
+
+
+def _unhandled_qualifications(text: str, section: str) -> set[str]:
+    """Flag explicit policy amendments outside parsed clauses; never invent policy.
+
+    This catches a bounded set of paragraph/section exceptions. It is not a
+    document-wide entailment checker and cannot certify arbitrary paraphrases.
+    """
+    exception = (
+        r"\b(ngoai le|ngoai tru|tuy nhien|khong ap dung|thay vi|rieng|"
+        r"khong duoc tinh|khong tinh vao|khong tinh doanh thu|khong theo)\b"
+    )
+    if not re.search(exception, text + " " + plain(section)):
+        return set()
+    targets = {
+        "revenue_status": r"\b(don dang giao|don huy|don tra hang)\b",
+        "order_count_status": r"\b(so don|dem don)\b",
+        "revenue_basis": r"\b(doanh thu|tien ban|tien hang)\b",
+        "time_axis": r"\b(ngay dat|ngay giao|ngay thu tien)\b",
+        "week": r"\btuan\b",
+        "current_month": r"\bthang nay\b",
+        "rounding": r"\blam tron\b",
+        "coverage": r"\b(khoang ngay|pham vi du lieu)\b",
+    }
+    return {key for key, pattern in targets.items() if re.search(pattern, text)}
 
 
 def _decode(rule_id: str, value: str) -> tuple[str, dict] | None:
@@ -232,6 +266,7 @@ def parse_rulebook(
         candidates.setdefault(rule_id, []).append((scope, value, ref))
 
     for number, raw in enumerate(text.splitlines(), 1):
+        before = sum(len(entries) for entries in candidates.values())
         heading = raw.lstrip()
         if heading.startswith("## "):
             section, scope = heading[3:].strip(), None
@@ -244,9 +279,9 @@ def parse_rulebook(
             label = plain(parts[0])
             value = plain(parts[1]) if len(parts) == 2 else ""
             for rule_id, expected in LABELS.items():
-                if label == expected:
+                if label in {expected, *LABEL_ALIASES.get(rule_id, ())}:
                     add(rule_id, value, number, raw)
-            if label == LABELS["revenue_status"]:
+            if label in {LABELS["revenue_status"], *LABEL_ALIASES["revenue_status"]}:
                 # Classification and query-time filtering refer to the same clause.
                 value = "bo ca don" if _decode("revenue_status", value) else value
                 add("return_policy", value, number, raw)
@@ -272,6 +307,11 @@ def parse_rulebook(
                 add("outside_coverage", cleaned[2:], number, raw)
             if cleaned.startswith("- lam tron:"):
                 add("rounding", cleaned[2:], number, raw)
+        if not heading.startswith(("#", "|")) and before == sum(
+            len(entries) for entries in candidates.values()
+        ):
+            for rule_id in _unhandled_qualifications(plain(raw), section):
+                add(rule_id, "unhandled qualification: " + plain(raw), number, raw)
     rules = {}
     for rule_id in [
         *LABELS,

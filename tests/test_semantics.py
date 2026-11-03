@@ -83,6 +83,35 @@ def test_extra_rule_columns_do_not_silently_drop_qualifications(rulebook_text):
         metric_contract(profile, "revenue")
 
 
+@pytest.mark.parametrize(
+    "amendment,rule_id",
+    [
+        ("Ngoại lệ: đơn đang giao không tính doanh thu.", "revenue_status"),
+        ("Đơn đang giao không được tính vào doanh thu.", "revenue_status"),
+        ("## Ngoại lệ doanh thu\nĐơn đang giao chỉ tính một nửa.", "revenue_status"),
+        ("Tuy nhiên, số đơn phải tính cả đơn huỷ.", "order_count_status"),
+        ("Ngoại lệ: tuần bắt đầu chủ nhật.", "week"),
+    ],
+)
+def test_paragraph_or_section_amendment_blocks_affected_policy(rulebook_text, amendment, rule_id):
+    text = rulebook_text + "\n## Bổ sung\n" + amendment
+    rules = parse_rulebook(text, "synthetic")
+    assert rules.rules[rule_id].status == "unsupported"
+    assert rules.rules[rule_id].source_refs[-1]["line"] == len(text.splitlines())
+    assert rules.rules[rule_id].source_refs[-1]["quote"] == text.splitlines()[-1]
+    if rule_id == "revenue_status":
+        # An unresolved revenue amendment does not silently change count policy.
+        assert metric_contract(rules, "order_count").status_policy == ["completed", "shipping"]
+
+
+def test_finite_label_alias_still_requires_complete_supported_meaning(rulebook_text):
+    text = rulebook_text.replace("| Số đơn |", "| Đếm số đơn |")
+    assert metric_contract(parse_rulebook(text, "split"), "order_count").metric_id == "order_count"
+    text = text.replace("| Đếm số đơn |", "| Đếm số đơn | trừ ngoại lệ khác. ")
+    with pytest.raises(SemanticError):
+        metric_contract(parse_rulebook(text, "split"), "order_count")
+
+
 def test_preflight_partial_and_independent_missing_baseline(semantic_source):
     context = semantic_source()
     partial = check(
@@ -106,16 +135,37 @@ def test_preflight_partial_and_independent_missing_baseline(semantic_source):
     assert current["contract"]["rounding"]["unspecified_tie"] == "abstain"
 
 
-def test_unknown_start_is_not_observed_min_but_confirmed_end_can_prove_outside(semantic_source):
+def test_observed_export_is_coverage_without_explicit_completeness(semantic_source):
     context = semantic_source(complete=False)
-    assert context.semantics["coverage"]["available_span"] is None
-    assert context.semantics["coverage"]["confirmed_end"] == "2026-01-03"
-    assert check(context)["reason"] == "coverage_unknown"
-    outside = check(context, expression={"kind": "day", "date": "2026-01-04"})
-    assert outside["decision"] == "unanswerable"
-    assert outside["reason"] == "outside_confirmed_end"
-    before = check(context, expression={"kind": "day", "date": "2025-12-01"})
-    assert before["decision"] == "abstain"
+    coverage = context.semantics["coverage"]
+    assert (
+        coverage["available_span"]
+        == coverage["observed_span"]
+        == {"start": "2026-01-01", "end": "2026-01-03"}
+    )
+    assert "observed_order_dates" in coverage["availability_basis"]
+    assert coverage["uncertainties"] and len(coverage["source_refs"]) == 2
+    assert check(context)["decision"] == "eligible_to_execute"
+    # Gaps inside the export are zero; both sides outside are unanswerable.
+    for day in ["2025-12-31", "2026-01-04"]:
+        outside = check(context, expression={"kind": "day", "date": day})
+        assert outside["decision"] == "unanswerable"
+        assert outside["reason"] == "outside_available_span"
+
+
+def test_empty_and_unparseable_exports_do_not_invent_a_span(semantic_source):
+    empty = semantic_source(complete=False, rows=[])
+    assert empty.semantics["coverage"]["available_span"] is None
+    assert check(empty)["decision"] == "abstain"
+    broken = semantic_source(
+        complete=False,
+        rows=[
+            ["1", "01/01/2026", "Xong", "10", "A"],
+            ["2", "bad date", "Xong", "10", "B"],
+        ],
+    )
+    assert broken.semantics["coverage"]["available_span"] is None
+    assert check(broken)["decision"] == "abstain"
 
 
 def test_amount_error_blocks_only_revenue_and_keeps_issue_evidence(semantic_source):
@@ -222,7 +272,7 @@ def test_runtime_metadata_reuse_cache_and_isolation(
     first = loads((tmp_path / "first/catalogs/shop_a.json").read_text())
     second = loads((tmp_path / "warm/catalogs/shop_a.json").read_text())
     assert dumps(first["semantics"]) == dumps(second["semantics"])
-    assert first["semantics"]["metric_execution"] == "not_implemented"
+    assert first["semantics"]["metric_execution"] == "separate_validated_s1_executor"
     assert all(c["status"] != "supported" for c in first["semantics"]["capabilities"])
     monkeypatch.setattr(Path, "open", real_open)
     assert before == {p: p.read_bytes() for p in synthetic_split.rglob("*") if p.is_file()}

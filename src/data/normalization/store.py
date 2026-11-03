@@ -16,9 +16,10 @@ from pathlib import Path
 from src.data.cache import fingerprint
 from src.data.catalog import BusinessContext, digest, discover_sources, require_output
 from src.data.normalization.sales import build_sales, sales_mapping
+from src.data.normalization.stock import build_stock, stock_mapping
 from src.jsonio import ContractError, dumps, loads
 
-VERSION = "prepared-sales-v1"
+VERSION = "prepared-facts-v2"
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
@@ -39,6 +40,10 @@ CREATE TABLE lineage (
     source_ref TEXT NOT NULL, transformations TEXT NOT NULL
 ) STRICT;
 CREATE TABLE issues (issue_id TEXT PRIMARY KEY, detail TEXT NOT NULL) STRICT;
+CREATE TABLE inventory_snapshot (
+    product_code TEXT PRIMARY KEY, product_name TEXT NOT NULL, base_unit TEXT NOT NULL,
+    quantity TEXT NOT NULL, snapshot_at TEXT NOT NULL, source_ref TEXT NOT NULL
+) STRICT;
 """
 
 
@@ -57,7 +62,7 @@ class PreparedBusiness:
         return connection
 
     def iter_records(self, table: str) -> Iterator[dict]:
-        if table not in {"orders", "order_lines", "lineage", "issues"}:
+        if table not in {"orders", "order_lines", "lineage", "issues", "inventory_snapshot"}:
             raise ContractError("unknown prepared table")
         with closing(self.connect()) as connection:
             connection.row_factory = sqlite3.Row
@@ -65,6 +70,8 @@ class PreparedBusiness:
                 record = dict(row)
                 if table == "order_lines" and record["net_amount"] is not None:
                     record["net_amount"] = Decimal(record["net_amount"])
+                if table == "inventory_snapshot":
+                    record["quantity"] = Decimal(record["quantity"])
                 for field in ["source_values", "source_ref", "transformations", "detail"]:
                     if field in record:
                         record[field] = loads(record[field])
@@ -136,13 +143,21 @@ def prepare_facts(
     _assert_revision(context)
     try:
         mapping = sales_mapping(context)
-    except ContractError as exc:
+        builder = build_sales
+    except ContractError as sales_error:
+        try:
+            mapping = stock_mapping(context)
+            builder = build_stock
+        except ContractError as stock_error:
+            mapping = None
+            reason = f"{sales_error}; {stock_error}"
+    if mapping is None:
         result = PreparedBusiness(
             None,
             {
                 "version": VERSION,
                 "status": "unsupported",
-                "reason": str(exc),
+                "reason": reason,
                 "metric_execution": "not_implemented",
             },
             elapsed_seconds=time.perf_counter() - started,
@@ -184,7 +199,7 @@ def prepare_facts(
                 "business_id": context.catalog["business_id"],
                 "backend": "sqlite",
                 "money_storage": "exact_decimal_text",
-                **build_sales(context, connection, mapping),
+                **builder(context, connection, mapping),
             }
             for key, value in [("dependencies", dependencies), ("summary", summary)]:
                 connection.execute("INSERT INTO metadata VALUES (?,?)", (key, dumps(value)))

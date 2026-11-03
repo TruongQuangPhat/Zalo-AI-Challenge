@@ -21,9 +21,21 @@ from src.semantics.answerability import prepare_semantics
 
 
 def run_inference(
-    data_dir: Path, output_dir: Path, *, planner: Any = None, cache_dir: Path | None = None
+    data_dir: Path,
+    output_dir: Path,
+    *,
+    planner: Any = None,
+    cache_dir: Path | None = None,
+    question_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     split = load_split(data_dir)
+    questions = split.questions
+    if question_ids is not None:
+        selected = set(question_ids)
+        known = {q.id for q in questions}
+        if not selected or len(selected) != len(question_ids) or not selected <= known:
+            raise ContractError("question selection must contain distinct known IDs")
+        questions = tuple(q for q in questions if q.id in selected)
     output = output_dir.resolve()
     require_output(output_dir, split.root)
     if cache_dir is not None:
@@ -43,10 +55,12 @@ def run_inference(
         "status": "running",
         "adapter": adapter.name,
         "is_mock": adapter.is_mock,
+        "planner_metadata": getattr(adapter, "metadata", None),
         "started_at": datetime.now(UTC).isoformat(),
         "python": platform.python_version(),
         "platform": platform.platform(),
         "inputs": split.summary(),
+        "question_selection": question_ids,
         "questions_written": 0,
         "question_errors": 0,
         "preparation": {},
@@ -55,9 +69,10 @@ def run_inference(
     write_json(manifest_path, manifest)
     contexts = {}
     with (output / "submission.jsonl").open("x", encoding="utf-8") as predictions:
-        for index, question in enumerate(split.questions):
+        for index, question in enumerate(questions):
             question_start = time.perf_counter()
             error = None
+            execution = "not_performed"
             if question.business_id not in contexts:
                 try:
                     context = prepare_business(split, question.business_id, cache_dir=cache_dir)
@@ -94,6 +109,7 @@ def run_inference(
                 if answer["id"] != question.id:
                     raise ContractError("planner changed question id")
                 plan = decision["plan"]
+                execution = decision.get("execution", "not_performed")
                 dumps(plan)
             except Exception as exc:  # One question failure must not discard previous output.
                 answer = {"id": question.id, "type": "abstain"}
@@ -111,7 +127,7 @@ def run_inference(
                 "error": error,
                 "elapsed_seconds": time.perf_counter() - question_start,
                 "catalog": f"catalogs/{question.business_id}.json",
-                "execution": "not_performed",
+                "execution": execution,
             }
             digest = hashlib.sha256(question.id.encode()).hexdigest()[:16]
             write_json(logs / f"{index:06d}_{digest}.json", record)

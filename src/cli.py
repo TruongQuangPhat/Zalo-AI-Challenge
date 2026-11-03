@@ -22,10 +22,17 @@ def main(argv: list[str] | None = None) -> int:
         args_list.insert(0, "predict")
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    predict = commands.add_parser("predict", help="label-free mock abstention; no LLM")
+    predict = commands.add_parser("predict", help="label-free mock or local S1 planner")
     predict.add_argument("--data-dir", type=Path, required=True)
     predict.add_argument("--output-dir", type=Path, required=True)
     predict.add_argument("--cache-dir", type=Path)
+    predict.add_argument("--model", type=Path, help="local Qwen2.5 Instruct GGUF; enables S1")
+    predict.add_argument("--question-timeout", type=float, default=120)
+    predict.add_argument("--model-load-timeout", type=float, default=180)
+    predict.add_argument("--model-threads", type=int, default=4)
+    predict.add_argument(
+        "--question-id", action="append", help="explicit subset, input order retained"
+    )
     for command, help_text in [
         ("catalog", "inspect source tables without labels or metrics"),
         ("prepare", "normalize supported sources into exact, traceable local facts"),
@@ -48,7 +55,30 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(args_list)
     try:
         if args.command == "predict":
-            report = run_inference(args.data_dir, args.output_dir, cache_dir=args.cache_dir)
+            if args.model:
+                from src.agent.local import LocalModel
+                from src.agent.planner import LocalPlanner
+
+                model = LocalModel(
+                    args.model, load_timeout=args.model_load_timeout, threads=args.model_threads
+                )
+                try:
+                    report = run_inference(
+                        args.data_dir,
+                        args.output_dir,
+                        cache_dir=args.cache_dir,
+                        planner=LocalPlanner(model, timeout=args.question_timeout),
+                        question_ids=args.question_id,
+                    )
+                finally:
+                    model.close()
+            else:
+                report = run_inference(
+                    args.data_dir,
+                    args.output_dir,
+                    cache_dir=args.cache_dir,
+                    question_ids=args.question_id,
+                )
         elif args.command in {"catalog", "prepare"}:
             split = load_split(args.data_dir)
             require_output(args.output_dir, split.root)

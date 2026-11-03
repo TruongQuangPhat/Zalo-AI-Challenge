@@ -1,12 +1,13 @@
 [project]
 name = "datamate-baseline"
 version = "0.0.1"
-description = "Offline DataMate baseline; Phase 0 infrastructure"
+description = "Offline DataMate baseline with an opt-in local S1 planner"
 requires-python = ">=3.11,<3.12"
 dependencies = []
 
 [dependency-groups]
 dev = ["pytest==9.1.1", "ruff==0.15.22", "packaging==26.3"]
+llm = ["llama-cpp-python==0.3.16"]
 gpu = [
     "torch==2.6.0+cu124",
     "numpy==2.4.6",

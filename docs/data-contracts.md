@@ -51,7 +51,7 @@ Entity mapping rộng, QueryPlan và metric execution vẫn chờ các slice/pha
 | `ColumnProfile` **S1** | `name: string`, `position: int`, `non_null_count: int`, `row_count: int`, `native_types: {type: count}`, `semantic_role: string/null`, `inferred_type: string/null`, `parse_status: not_checked/complete/partial/failed`, `issue_refs: ID[]` | Counts không âm, non-null ≤ row count; thống kê raw khác dữ liệu chuẩn. Date min/max sơ bộ không chứng minh coverage. Extension: distinct/sample values, native error/formula flags. |
 | `EntityMapping` **S1 cho mã đơn** | `entity_kind: string`, `namespace: {split,business_id}`, `raw_key: scalar`, `canonical_key: ID/null`, `status: resolved/unknown/ambiguous`, `source_refs: SourceRef[]`, `rule_refs: string[]` | Giữ mã như chuỗi; khác mã vẫn khác entity dù cùng tên. Null key không được gán mã giả để tạo count. Extension: alias candidates, SĐT/IMEI, product/customer resolution. |
 | `BusinessContext` **S1** | `split: ID`, `business_id: ID`, `rulebook_hash: sha256`, `readme_hash: sha256`, `calendar_hash: sha256`, `tables: SourceTable[]`, `coverage: Coverage[]`, `capabilities: Capability[]`, `issues: TransformationIssue[]` | Chỉ chứa nguồn của business hiện tại và authority đúng split. Không chứa answers/QA/annotations. Extension: source/parser/schema/config versions trong cache key. |
-| `Coverage` **S1** | `source_refs: SourceRef[]`, `fact_type: string`, `time_axis: string`, `observed_span: Span/null`, `available_span: Span/null`, `availability_basis: string[]`, `snapshot_at: Timestamp/Day/null`, `history_available: true/false/null`, `parse_status: enum`, `uncertainties: string[]` | Unknown không trở thành full coverage. Available span cần căn cứ; quan sát một dòng đầu/cuối không chứng minh không thiếu giai đoạn. Snapshot chỉ áp dụng tại mốc được xác nhận. Extension: coverage từng partition/file và lịch sử tái lập. |
+| `Coverage` **S1** | `source_refs: SourceRef[]`, `fact_type: string`, `time_axis: string`, `observed_span: Span/null`, `available_span: Span/null`, `availability_basis: string[]`, `snapshot_at: Timestamp/Day/null`, `history_available: true/false/null`, `parse_status: enum`, `uncertainties: string[]` | Chính sách export: min/max ngày order parse đầy đủ được dùng làm available span, có basis observed_order_dates và cảnh báo không chứng nhận completeness. README complete span ưu tiên, mâu thuẫn/parse thiếu giữ abstain, export rỗng chưa có authority giữ unknown. Snapshot chỉ áp dụng tại mốc được xác nhận. Extension: coverage từng partition/file và lịch sử tái lập. |
 | `TransformationIssue` **S1** | `issue_id: ID`, `code: string`, `source_refs: SourceRef[]`, `raw_value: scalar/null`, `affected_fields: string[]`, `affected_metrics: string[]`, `severity: warning/blocking`, `resolution: string/null` | Lỗi cột phụ không loại cả hàng; lỗi ảnh hưởng tổng phải chặn metric. Không chỉ ghi warning rồi tính phần còn đọc được như tổng đầy đủ. |
 
 Phase 2 bổ sung metadata có nơi sử dụng cho các contract trên:
@@ -151,7 +151,7 @@ tái tạo output bằng `--reviews`; metadata này không thuộc runtime infer
 `connect()` mở database read-only/query-only; `iter_records()` chỉ đọc bảng facts/audit đã cho phép.
 
 SQLite STRICT dùng một file `facts.sqlite`, không thêm dependency. Schema version là
-`prepared-sales-v1`; dependencies/quality summary nằm trong bảng `metadata`. Money là TEXT
+`prepared-facts-v2`; dependencies/quality summary nằm trong bảng `metadata`. Money là TEXT
 Decimal chính xác, qua API trả Decimal; không dùng SUM/AVG/CAST REAL cho tiền trong SQL.
 `orders` giữ raw ID/namespace key, ordered_at, canonical status, mapping_status.
 `order_lines` giữ key riêng, order FK, net_amount nullable khi lỗi có issue, row_role,
@@ -160,30 +160,32 @@ Return item nằm riêng role với sale item; event_at chưa biết giữ null,
 `lineage` map mỗi raw row tới line key hoặc disposition header/title/blank/summary/quarantined;
 bản trùng trỏ về line giữ lại. `issues.detail` có code, raw value, source ref, affected metrics và severity.
 
-Mapping chỉ mở trên một CSV resolved khi README xác nhận order-line grain và nghĩa các cột.
+Mapping mở trên một CSV resolved khi README xác nhận order-line hoặc một dòng/một đơn không có chi tiết hàng và nghĩa các cột. Header-only chỉ tạo orders/lineage, không tạo order_lines giả; chỉ bật order_count, revenue thiếu canonical line facts vẫn unsupported.
 Header inheritance/negative-return conventions cần README; dedup/whole-order return cần
 operator rulebook đã nhận diện. Mapping/locale/coverage có căn cứ và hashes; luật chưa hiểu
 hoặc shape khác trả unsupported. Day/timestamp giữ precision thời gian nguồn, không cắt theo as-of.
-Full available_span cần phát biểu coverage đầy đủ trong README và không mâu thuẫn nguồn;
-observed min/max và README end hint riêng không chứng minh availability.
+Available span ưu tiên khai báo đầy đủ hợp lệ trong README, nếu thiếu dùng min/max ngày đơn
+đã parse đầy đủ theo chính sách export được người dùng chấp nhận ngày 03/11. Metadata giữ
+observed_order_dates và cảnh báo missing interior records; không mở khi parse/đọc thiếu, rỗng
+chưa có authority hoặc nguồn mâu thuẫn README. Không dùng min/max calendar làm coverage.
 
 ## Semantic metadata S1 — implementation boundary
 
 `Split.rules` giữ rule profile, `Split.calendar` là tuple `CalendarDay` đã được loader
 kiểm tra; contexts cùng split chia sẻ chúng. Industry override chỉ chọn từ khai báo
 `Ngành: ...` trong README; scope chưa xác định khi có override liên quan giữ ambiguous.
-Rule parser là tập clause/operator hữu hạn, không phải bộ hiểu rulebook tự nhiên tổng quát.
+Rule parser là tập clause/operator hữu hạn, không phải bộ hiểu rulebook tự nhiên tổng quát. Có aliases hữu hạn cho labels và guard paragraph/section nêu ngoại lệ rõ ràng; qualifier chưa hỗ trợ chặn policy liên quan với source refs. Không chứng nhận phát hiện mọi mâu thuẫn/paraphrase trong tài liệu.
 Dedup/header inheritance/whole-order return ở preparation dùng cùng profile này.
 
 `prepare_semantics(context)` tạo `.semantics`, lưu cùng payload catalog hiện có, ngoài
 raw catalog cache và facts metadata. Có rules/source refs, contracts, schema facts,
-coverage, versions và revision; không mang cutoff câu đầu hay labels. Capability metric
-vẫn unsupported khi chưa có executor/verifier, dù contract đã resolved.
+coverage, versions và revision; không mang cutoff câu đầu hay labels. Metadata business
+không tự cấp quyền trả số dù contract đã resolved; mỗi câu vẫn cần validated plan/preflight/executor/verifier.
 
 `MetricContract` là dataclass tại `src/semantics/metric_registry.py`; `.summary()` trả JSON.
 `revenue` và `order_count` có required fields/status policy riêng. Contract tiền ghi rõ
 nearest đồng với tie chưa có luật thì abstain; không tự dùng ROUND_HALF_EVEN/HALF_UP
-cho mọi khoản tiền. Các phép tính và serializer cuối còn thuộc Phase 6–7.
+cho mọi khoản tiền. Executor Decimal và typed serializer đã được nối cho S1; các phép tính mở rộng thuộc S2 trở đi.
 
 `TimeWindow` giữ requested bounds inclusive, as-of/cutoff và rule refs; `contains()` xét
 ngày local của timestamp nguồn, giữ offset và bao trọn phần giây lẻ ngày cuối. Không
@@ -195,9 +197,24 @@ cấu trúc. Nonempty filters/metric/operator chưa hỗ trợ dẫn tới absta
 `decision`, `reason`, `contract`, `window`, `effective_window`, `evidence_refs`, `issue_refs`.
 `eligible_to_execute` không có answer value và chưa chứng nhận answerability cuối.
 Schema thiếu field canonical là engine chưa hỗ trợ, không là proof dữ liệu gốc thiếu.
-Available span cần completeness có căn cứ; confirmed end riêng chỉ chứng minh kỳ sau
-ngày kết thúc, không cấp quyền trả tổng trong kỳ. Source end mâu thuẫn hoặc parse ngày
+Available span theo chính sách export ở trên; confirmed end riêng chỉ chứng minh kỳ sau
+ngày kết thúc khi chưa xác định được available span. Source end mâu thuẫn hoặc parse ngày
 chưa đủ giữ unknown/conflict; issue chỉ chặn đúng metric phụ thuộc.
 
 Tests và bằng chứng nằm tại `tests/test_normalization.py` và roadmap; C01–C30 trong fixture
 vẫn là specifications toàn capability, không đổi thành passed chỉ từ một phần preparation.
+
+## Inventory snapshot — limited M1 dependency slice
+
+`inventory_snapshot(product_code, product_name, base_unit, quantity, snapshot_at, source_ref)`
+là grain product tại một mốc README xác nhận, quantity TEXT Decimal. Chỉ một XLSX table có
+đúng bốn header POS; authority date/base-unit declaration cần rõ và không conflict nhận diện.
+Đây không là transaction available_span: history vẫn unknown và không mở revenue/count.
+
+Cùng QueryPlan dùng `inventory_on_hand`, một entity, scope product, explicit base unit và today
+đúng declared snapshot. Nguồn phải có unique identity, giữ dấu/digits; case/punctuation/spacing
+aliases được nhận, fuzzy/deaccent không là proof. Candidate metadata không có quantity.
+Preflight giữ checks namespace/revision/quality, rồi snapshot date/entity/unit; executor SELECT
+read-only đúng một row và giữ exact quantity, không tiền-rounding. Other dates, unit conversion,
+JOIN/history/cost/lots/quantity ranking chưa có. Tests tại `tests/test_stock_snapshot.py`;
+M1 chỉ chứng nhận wiring train-dev đã ghi trong roadmap/report, không toàn bộ capability.
