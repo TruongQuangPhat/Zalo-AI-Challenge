@@ -86,12 +86,16 @@ def _worker(pipe, model_path: str, n_ctx: int, threads: int, gpu_layers: int = 0
             if request is None:
                 break
             started = time.monotonic()
+            # Two aggregates plus refs need more JSON than the S1 scalar draft.
+            token_budget = (
+                384 if request["schema"]["properties"]["aggregations"]["maxItems"] == 2 else 256
+            )
             llama_perf_context_reset(model.ctx)
             result = model.create_chat_completion(
                 messages=request["messages"],
                 temperature=0,
                 seed=0,
-                max_tokens=256,
+                max_tokens=token_budget,
                 response_format={"type": "json_object", "schema": request["schema"]},
             )
             perf = llama_perf_context(model.ctx)
@@ -100,6 +104,7 @@ def _worker(pipe, model_path: str, n_ctx: int, threads: int, gpu_layers: int = 0
                     "text": result["choices"][0]["message"]["content"],
                     "finish_reason": result["choices"][0]["finish_reason"],
                     "usage": result["usage"],
+                    "output_token_budget": token_budget,
                     "timings": {
                         "prompt_seconds": perf.t_p_eval_ms / 1000,
                         "decode_seconds": perf.t_eval_ms / 1000,
@@ -139,6 +144,7 @@ class LocalModel:
             "requested_gpu_layers": gpu_layers,
             "n_ctx": 4096,
             "max_output_tokens": 256,
+            "max_difference_output_tokens": 384,
             "threads": threads,
             "seed": 0,
             "temperature": 0,

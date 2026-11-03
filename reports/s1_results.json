@@ -1,0 +1,2203 @@
+{
+  "report_version": "stage-results-v1",
+  "generated_at": "2026-11-03T15:33:52.157630+00:00",
+  "evidence_source": {
+    "file": "reports/s2_verification.json",
+    "section": "native_growth_continuation",
+    "sha256": "c14d40740ae3ed6542d17cfc4237a068d6c5f59ed167187b1fdcb989edd9e31b",
+    "inference_started_at": "2026-11-03T14:48:49.177258+00:00",
+    "inference_finished_at": "2026-11-03T15:00:38.251003+00:00",
+    "method": "Derived only from saved inference/evaluator results; no model rerun or prediction changes."
+  },
+  "git": {
+    "branch": "feature/phase5-s2",
+    "base": "698f9dc",
+    "working_tree": "uncommitted; no commit/push"
+  },
+  "runtime": {
+    "backend": "CUDA",
+    "image": "datamate-s2-growth-cuda:local",
+    "image_id": "sha256:ba57590dbc0d3116cea82983588115d32ab9c0453e1bba26bcddfdccc1ce3d24",
+    "model_sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+    "model": {
+      "file": "model.gguf",
+      "backend": "llama-cpp-python",
+      "runtime": "0.3.16",
+      "device": "gpu",
+      "layers_offloaded": 29,
+      "n_ctx": 4096,
+      "threads": 4,
+      "seed": 0,
+      "temperature": 0,
+      "chat_format": "chatml",
+      "n_batch": 128,
+      "max_output_tokens": 256,
+      "max_difference_output_tokens": 384
+    },
+    "source_sha256": {
+      "src/__init__.py": "1743f57cc888b68e4ffca16f9eb57ffc77ec386ce1a8a8203e75846c8d55c54d",
+      "src/agent/__init__.py": "e275dc330418b8a41c94c14d6d64f7b1c4b2bafcb3564f7c36bd555c5f00c6a0",
+      "src/agent/context.py": "cbfa07bcce1c655f84d0e184f88d8f3140e3706ee0b37b8c42db608cef658315",
+      "src/agent/execution.py": "74027ae4ba680bad9b8c1fc5679c8d5c10d69e3845a9f9ddfd33d0f1e863c7e3",
+      "src/agent/local.py": "a97827aeec37bea2cf126565a97c2042b4be9ac0cc337070d1e4c53629df897c",
+      "src/agent/mock.py": "6f8662acdf8be8364802c68a801e6ecf90f294b260b13ac5f0ac5f67060331a0",
+      "src/agent/plan.py": "1290b6ce30b9d4c4f82b4e30540241bda1db3bb990f063713bb405e97210a87d",
+      "src/agent/planner.py": "de1811254c176f7f12981f7b12a43aa3eb2fbe7e7549f9fdcfd1fa84485569a1",
+      "src/cli.py": "a8786353e4b1ff73b26fd8de104febe46c28115ca8c2b66640176fc004a1fd32",
+      "src/contracts.py": "6ed37baec45b6c77bbc2bb54a5858a0a65e8297ab4f805a318e76a68198dd0bd",
+      "src/data/__init__.py": "55f7f66620d679b480ed5ddaa0996c7990c21581efe8a689fb3427ddbcf76918",
+      "src/data/cache.py": "c8859849aac01c64a6e6902c5c9a07606125e47e84f8febbf3d0878f0a156da0",
+      "src/data/catalog.py": "13725e21ff006ca9cfdcb60f720de0e4baf1374fd177fe4f144e9c499e8758f3",
+      "src/data/ingestion/__init__.py": "3b0681cd48ecfce0bb9395222f33b09f2b02be9c42751d81882c8b7b7268e9ac",
+      "src/data/ingestion/csv_reader.py": "bbed3eb71debed0442c27b8f59ff24b846266b7463203faa168f3c6c6ce31add",
+      "src/data/ingestion/excel_reader.py": "0fd51ad80cdfb5af1bcd37875b4cc187b1a6b4416a5c1d5e9462e347d583e6b8",
+      "src/data/ingestion/source.py": "7ae15b32afeaeab72124bc33658ca89f6f19823f8219d19bce74f98c45e5bde4",
+      "src/data/ingestion/sqlite_reader.py": "c2c39b59d350816a8baffeae3e8b0cc2e951a6767218a6976aa5b7bd72c5d882",
+      "src/data/normalization/__init__.py": "4456e45a4484a99f533ba4e655f2399419ba0474910f879716d70b19dc8a9395",
+      "src/data/normalization/sales.py": "6ee855a333e47cd0b673e27adfe597c7df3b0862df1a5f9e9d745c0c66a790d4",
+      "src/data/normalization/stock.py": "afa97e0f0cfac055484846ce09595bed23b513a2d712f5d0475738ce7a1d50b6",
+      "src/data/normalization/store.py": "5a0c134fd37f4ef271dac51e95c393970d64655aa75c54b076a0d3f9da0f4749",
+      "src/data/normalization/values.py": "fcfda9345d04d0606dea3da06ff56515fd07e4f6b856139fcd872a8490155c39",
+      "src/data/profiling/__init__.py": "009ac3a31b3059934a11edc2edb4e04c2786e351ffaec5e642243fb8bb5a1800",
+      "src/data/profiling/profiler.py": "a0924e6252513e9b990850910e5da2a858a6735c3c7fd0e5dc396103d43d76b4",
+      "src/data/split.py": "df072537f06911ff33f333fde5255c09ed36f42750a38cf19d2c178cc4cce6ee",
+      "src/environment.py": "fbf100da148272135437ca52068f9486117de541a14d7636bd50c068d0f13f27",
+      "src/evaluation/__init__.py": "302c1c2e57475c18d9d1d2725858ff4050c1491796f1b5a60745f1cf4f43540b",
+      "src/evaluation/scorer.py": "4b0ca3e14a23dd604771998a93acb3bc29318e6b78351fc95f8e1e3f08f1f39d",
+      "src/jsonio.py": "703d470f3bd75fbfa94330c4d06ed6d5c3335064808904527744899c69e7ec46",
+      "src/runtime.py": "649c0c596e38dd5fe7f82c2ff57d06d9e3ecb5ec77d0b88fea38b9ef6a029637",
+      "src/semantics/__init__.py": "828c1429db1e832069966a5bea04c2a7e316b1021614f0087b2da6036bab22fd",
+      "src/semantics/answerability.py": "8d7b3773e22691076d1331f7cbd462d72e514e1c9621770a6b9aef23b388a99e",
+      "src/semantics/metric_registry.py": "dce659c3269baac1a5d397b4210615107a3c7d18513a1b68a475e895ff091b79",
+      "src/semantics/rulebook.py": "b15369ba7a5154f9205f4c90d482749fdd5d1732ac40963781f9cab7d682d857",
+      "src/temporal/__init__.py": "67640881e7c5589c4b6beb414537178f8878b71666b49314cdaaf3d428195a8d",
+      "src/temporal/resolver.py": "68c741cebff4d52457dac20029a8cf84aed73db4771a68477e93b92c67bde2e1",
+      "scripts/__init__.py": "65608d1a3604a8037505dd73fbc28a6a095b36ff333dd0427bc25924d6abadcc",
+      "scripts/annotate_questions.py": "624dca9c57672305a66ca43133cc6550b7988b4cb21d9cd5009d27302f2cc194",
+      "scripts/audit_dataset.py": "d2a009f3b00f18ac7a4136fe7e344d54dbcf11550e7439bc4eae795770d3ca36",
+      "scripts/build_context.py": "92977cd5e3d6ed5467b42904cde3134917de143ec43c632ca05988c74bbe8ed0",
+      "scripts/probe_environment.py": "9ede84ae5ff52687d841058ea3ab15db005bcf007a25dd61d84e696a442685fa",
+      "scripts/verify_ingestion.py": "6eb2b260854dee866edd047b063703fc975a6c601bca41933ed6197b909ed5c3",
+      "scripts/verify_runtime.py": "28eedeff14a2b9dbb260939b90edb22bcabc4957e3ddcc5a1daf06fe3ad5e3db",
+      "tests/conftest.py": "581b6d7c865b5e75ac581c965016dc956e8c28adc2fb6205c69aaa9582a6df8a",
+      "tests/test_catalog.py": "3ebd154bfeb7d6f7a303e2b4fcbb02370ade8e5c8ea6c2f16a4b2309300e628d",
+      "tests/test_contracts.py": "026b6115ec1f30919f1f7c82a79fc493459a4ff322f902582048880ef1bcb81b",
+      "tests/test_dataset_tools.py": "c91a77a4a3a6c1a434e47906d5a4bf1b1bad61df3bc268123bde2bf68c464616",
+      "tests/test_evaluator.py": "030d9e2d4c3acda8b2c1041f3c167b1061fde5c252bd7dc12fd41ca86f5c99cf",
+      "tests/test_ingestion.py": "150c9b8913c70146e6400d662d931aebe91c7b5199377e6c35acc24d554719e6",
+      "tests/test_normalization.py": "2c94352af00b77420c7c08589a934d43220087b8bf80063e000656a8d3948198",
+      "tests/test_packaging.py": "701b8557c898adad5753c027ac1932b5703bee5150ddb2330c3c778fda1eaaac",
+      "tests/test_planner_execution.py": "e69ff9d45de3507b7b33e7ea712732c71a9b438f1bcb3d9b76fc0ae40c5dc4d0",
+      "tests/test_semantics.py": "540e47d1b2f112af8cf854373cd135eee04598f25eae9de32ad3f0fbb28f55f3",
+      "tests/test_split_runtime.py": "15d83c88982d05796093bd8796bc9aa70b9d657de26e6fc0a114bec9cacc6564",
+      "tests/test_stock_snapshot.py": "2cc7ebe384ef3738381de99b3a16d5af9d26407e39687f14c3981311e19a34cb",
+      "tests/test_temporal.py": "d9959c134e77bc79ab6607673cb499ff4089b31cf968bd0474b197219735d5e8",
+      "Dockerfile": "4e6d3d3754def346c35adb6d98075daafd492592b457db8658d496d13008488a",
+      "predict.sh": "16c859c5dfe2d629ec496079fd8b533f6257aa6d1046ac0ca3cf477e90bb759f",
+      "pyproject.toml": "5b487661159993b8123125a75ae258b9b90f974651db44cb613ba4eed3a5a8c7",
+      "uv.lock": "b969e719efdfa6d214556857e5bfb3954c3c737bc9a3ed7c1ea91dfde2f8c5ff"
+    }
+  },
+  "quality": {
+    "tests": 343,
+    "lint": "passed",
+    "format": "passed",
+    "lockfile_offline": "passed",
+    "documentation_links": "passed",
+    "markdown_tables_and_gold_actual": "passed",
+    "git_diff_check": "passed",
+    "source_and_input_hashes_rechecked": "passed"
+  },
+  "metric_definitions": {
+    "correct_rate_pct": "100*C/N",
+    "answer_rate_pct": "100*(C+W)/N",
+    "accuracy_answered_pct": "100*C/(C+W); null when no answers",
+    "pa_normalized": "(C-W)/N",
+    "points": "correct +1; wrong -1; abstain 0",
+    "runtime_behavior_matches": "Scope/fallback conformance; expected abstain is still 0 evaluator points.",
+    "percentages": "Displayed to two decimal places; native answers preserve exact JSON numeric tokens.",
+    "repeats": "Two repeats of the same questions, not twice as many independent samples."
+  },
+  "selection_policy": {
+    "partition": "common dev in both frozen protocols",
+    "protocol_sha256": "8865437dc135b920b7c492ffd0a2ddb8cc945a71fb76239d4c9e04f6e8b37c7f",
+    "representative_dataset_accuracy": false,
+    "blind_holdout": false,
+    "exposure_note": "6 values were not inspected or used for implementation before selection/inference; 2 values were already displayed. Earlier evaluator/reporting streamed the labels file, and all train labels have historical EDA exposure per protocol. This is dev engineering acceptance, not a blind holdout."
+  },
+  "gold_source": {
+    "file": "dataset/train/answers.jsonl",
+    "sha256": "0b5fe9d13edf5fae306bda9cafaf699c06b639846c8e1d9e41c39a86d1160b3d",
+    "read_after_both_containers_exited": true
+  },
+  "isolation": {
+    "all_inference_containers_exited_before_gold": true,
+    "original_inputs_unchanged": true,
+    "staged_inputs_unchanged": true,
+    "source_unchanged_during_runs": true,
+    "temporary_runs_facts_gold_staging_cleaned_on_exit": true
+  },
+  "evaluator": {
+    "name": "internal-rulebook-v0",
+    "official_equivalence": "unverified",
+    "numeric_absolute_tolerance": "1E-8"
+  },
+  "stage": "S1",
+  "scope": "One whole-business revenue/order_count total per question on verified CSV order-line or order-header count shapes.",
+  "readiness": {
+    "status": "verified_narrow_cuda_scope",
+    "scope_behavior_verified": true,
+    "all_s1_shapes_complete": false,
+    "current_source_cpu_model_run": false,
+    "historical_cpu_evidence": "reports/docker_llm_verification.json; historical source hashes apply"
+  },
+  "selection": {
+    "ids": [
+      "q_0cb7c9b93048",
+      "q_1af02cd5fe06",
+      "q_b90743fdcce6",
+      "q_2a3019504577",
+      "q_ed4fe0895229",
+      "q_c893acce3ef3",
+      "q_05f70ec18809",
+      "q_09f475fddfec",
+      "q_3790a635bd18",
+      "q_5d6431886ab9",
+      "q_99a0f6d709bd",
+      "q_c86e099eb394",
+      "q_62a9a454f35b"
+    ],
+    "unique_questions": 13,
+    "repetitions": 2
+  },
+  "summary": {
+    "questions": 13,
+    "correct": 12,
+    "wrong": 0,
+    "abstain": 1,
+    "missing": 0,
+    "malformed": 0,
+    "points": 12,
+    "correct_rate_pct": 92.31,
+    "answer_rate_pct": 92.31,
+    "accuracy_answered_pct": 100.00,
+    "pa_normalized": 0.9230769230769230769230769231
+  },
+  "predictions_identical": true,
+  "questions": [
+    {
+      "id": "q_0cb7c9b93048",
+      "business_id": "biz_101",
+      "question": "Cho tôi biết số đơn hôm qua.",
+      "as_of_date": "2025-09-24",
+      "gold": {
+        "id": "q_0cb7c9b93048",
+        "type": "number",
+        "answer": 37
+      },
+      "expected_runtime": {
+        "id": "q_0cb7c9b93048",
+        "type": "number",
+        "answer": 37
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_0cb7c9b93048",
+            "type": "number",
+            "answer": 37
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 28.966158064999036,
+          "windows": [
+            {
+              "id": "period",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2025-09-23",
+              "requested_end": "2025-09-23",
+              "inclusive": true,
+              "as_of_date": "2025-09-24",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2025-09-23",
+                "end": "2025-09-23",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "period",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2025-09-23",
+                "end": "2025-09-23",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 37,
+            "rounded_value": 37,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_0cb7c9b93048",
+            "type": "number",
+            "answer": 37
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 8.384973750000427,
+          "windows": [
+            {
+              "id": "period",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2025-09-23",
+              "requested_end": "2025-09-23",
+              "inclusive": true,
+              "as_of_date": "2025-09-24",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2025-09-23",
+                "end": "2025-09-23",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "period",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2025-09-23",
+                "end": "2025-09-23",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 37,
+            "rounded_value": 37,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_1af02cd5fe06",
+      "business_id": "biz_101",
+      "question": "Cho tôi biết số đơn hqua",
+      "as_of_date": "2026-04-14",
+      "gold": {
+        "id": "q_1af02cd5fe06",
+        "type": "number",
+        "answer": 44
+      },
+      "expected_runtime": {
+        "id": "q_1af02cd5fe06",
+        "type": "number",
+        "answer": 44
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_1af02cd5fe06",
+            "type": "number",
+            "answer": 44
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 3.555579503001354,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-04-13",
+              "requested_end": "2026-04-13",
+              "inclusive": true,
+              "as_of_date": "2026-04-14",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-04-13",
+                "end": "2026-04-13",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "order_count",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-04-13",
+                "end": "2026-04-13",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 44,
+            "rounded_value": 44,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_1af02cd5fe06",
+            "type": "number",
+            "answer": 44
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 3.497376064000491,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-04-13",
+              "requested_end": "2026-04-13",
+              "inclusive": true,
+              "as_of_date": "2026-04-14",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-04-13",
+                "end": "2026-04-13",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "order_count",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-04-13",
+                "end": "2026-04-13",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 44,
+            "rounded_value": 44,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_b90743fdcce6",
+      "business_id": "biz_101",
+      "question": "số bill hôm qua là bao nhiêu",
+      "as_of_date": "2026-07-06",
+      "gold": {
+        "id": "q_b90743fdcce6",
+        "type": "number",
+        "answer": 35
+      },
+      "expected_runtime": {
+        "id": "q_b90743fdcce6",
+        "type": "number",
+        "answer": 35
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_b90743fdcce6",
+            "type": "number",
+            "answer": 35
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 6.796830995999699,
+          "windows": [
+            {
+              "id": "c",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-07-05",
+              "requested_end": "2026-07-05",
+              "inclusive": true,
+              "as_of_date": "2026-07-06",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-07-05",
+                "end": "2026-07-05",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "a",
+              "window_ref": "c",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-07-05",
+                "end": "2026-07-05",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 35,
+            "rounded_value": 35,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_b90743fdcce6",
+            "type": "number",
+            "answer": 35
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.930377334998411,
+          "windows": [
+            {
+              "id": "c",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-07-05",
+              "requested_end": "2026-07-05",
+              "inclusive": true,
+              "as_of_date": "2026-07-06",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-07-05",
+                "end": "2026-07-05",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "a",
+              "window_ref": "c",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-07-05",
+                "end": "2026-07-05",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 35,
+            "rounded_value": 35,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_2a3019504577",
+      "business_id": "biz_101",
+      "question": "doanh thu hqua cua cua hang la bao nhiu",
+      "as_of_date": "2026-01-12",
+      "gold": {
+        "id": "q_2a3019504577",
+        "type": "number",
+        "answer": 3530400
+      },
+      "expected_runtime": {
+        "id": "q_2a3019504577",
+        "type": "number",
+        "answer": 3530400
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_2a3019504577",
+            "type": "number",
+            "answer": 3530400
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 3.6517290840001806,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-01-11",
+              "requested_end": "2026-01-11",
+              "inclusive": true,
+              "as_of_date": "2026-01-12",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-01-11",
+                "end": "2026-01-11",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "revenue",
+              "window_ref": "current_month",
+              "metric_id": "revenue",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-01-11",
+                "end": "2026-01-11",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "revenue",
+            "exact_value": 3530400,
+            "rounded_value": 3530400,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_2a3019504577",
+            "type": "number",
+            "answer": 3530400
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 3.8172811929998716,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-01-11",
+              "requested_end": "2026-01-11",
+              "inclusive": true,
+              "as_of_date": "2026-01-12",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-01-11",
+                "end": "2026-01-11",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "revenue",
+              "window_ref": "current_month",
+              "metric_id": "revenue",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-01-11",
+                "end": "2026-01-11",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "revenue",
+            "exact_value": 3530400,
+            "rounded_value": 3530400,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_ed4fe0895229",
+      "business_id": "biz_101",
+      "question": "Cho tôi biết doanh thu tháng 1/2026.",
+      "as_of_date": "2026-08-24",
+      "gold": {
+        "id": "q_ed4fe0895229",
+        "type": "number",
+        "answer": 245184900
+      },
+      "expected_runtime": {
+        "id": "q_ed4fe0895229",
+        "type": "number",
+        "answer": 245184900
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_ed4fe0895229",
+            "type": "number",
+            "answer": 245184900
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.015387708001072,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "month",
+                "year": 2026,
+                "month": 1
+              },
+              "expression_kind": "month",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-01-01",
+              "requested_end": "2026-01-31",
+              "inclusive": true,
+              "as_of_date": "2026-08-24",
+              "cutoff": null,
+              "rule_refs": [
+                "explicit_month"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-01-01",
+                "end": "2026-01-31",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "revenue",
+              "window_ref": "current_month",
+              "metric_id": "revenue",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-01-01",
+                "end": "2026-01-31",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "revenue",
+            "exact_value": 245184900,
+            "rounded_value": 245184900,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_ed4fe0895229",
+            "type": "number",
+            "answer": 245184900
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 4.4914077920002455,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "month",
+                "year": 2026,
+                "month": 1
+              },
+              "expression_kind": "month",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-01-01",
+              "requested_end": "2026-01-31",
+              "inclusive": true,
+              "as_of_date": "2026-08-24",
+              "cutoff": null,
+              "rule_refs": [
+                "explicit_month"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-01-01",
+                "end": "2026-01-31",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "revenue",
+              "window_ref": "current_month",
+              "metric_id": "revenue",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-01-01",
+                "end": "2026-01-31",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "revenue",
+            "exact_value": 245184900,
+            "rounded_value": 245184900,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_c893acce3ef3",
+      "business_id": "biz_101",
+      "question": "Xem giúp tổng doanh thu tháng 7 năm 2026 là bao nhiêu?",
+      "as_of_date": "2026-08-24",
+      "gold": {
+        "id": "q_c893acce3ef3",
+        "type": "number",
+        "answer": 236132200
+      },
+      "expected_runtime": {
+        "id": "q_c893acce3ef3",
+        "type": "number",
+        "answer": 236132200
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_c893acce3ef3",
+            "type": "number",
+            "answer": 236132200
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 8.84302573900095,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "month",
+                "year": 2026,
+                "month": 7
+              },
+              "expression_kind": "month",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-07-01",
+              "requested_end": "2026-07-31",
+              "inclusive": true,
+              "as_of_date": "2026-08-24",
+              "cutoff": null,
+              "rule_refs": [
+                "explicit_month"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-07-01",
+                "end": "2026-07-31",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current_month",
+              "metric_id": "revenue",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-07-01",
+                "end": "2026-07-31",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "revenue",
+            "exact_value": 236132200,
+            "rounded_value": 236132200,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_c893acce3ef3",
+            "type": "number",
+            "answer": 236132200
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 7.176546538999901,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "month",
+                "year": 2026,
+                "month": 7
+              },
+              "expression_kind": "month",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-07-01",
+              "requested_end": "2026-07-31",
+              "inclusive": true,
+              "as_of_date": "2026-08-24",
+              "cutoff": null,
+              "rule_refs": [
+                "explicit_month"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-07-01",
+                "end": "2026-07-31",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current_month",
+              "metric_id": "revenue",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-07-01",
+                "end": "2026-07-31",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "revenue",
+            "exact_value": 236132200,
+            "rounded_value": 236132200,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_05f70ec18809",
+      "business_id": "biz_110",
+      "question": "cho hỏi số đơn quý 2/2026 là nhiêu",
+      "as_of_date": "2026-07-03",
+      "gold": {
+        "id": "q_05f70ec18809",
+        "type": "number",
+        "answer": 5772
+      },
+      "expected_runtime": {
+        "id": "q_05f70ec18809",
+        "type": "number",
+        "answer": 5772
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_05f70ec18809",
+            "type": "number",
+            "answer": 5772
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 18.92236660999879,
+          "windows": [
+            {
+              "id": "c",
+              "expression": {
+                "kind": "quarter",
+                "year": 2026,
+                "quarter": 2
+              },
+              "expression_kind": "quarter",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-04-01",
+              "requested_end": "2026-06-30",
+              "inclusive": true,
+              "as_of_date": "2026-07-03",
+              "cutoff": null,
+              "rule_refs": [
+                "missing_year"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-04-01",
+                "end": "2026-06-30",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "a",
+              "window_ref": "c",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-04-01",
+                "end": "2026-06-30",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 5772,
+            "rounded_value": 5772,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_05f70ec18809",
+            "type": "number",
+            "answer": 5772
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 14.34510615599902,
+          "windows": [
+            {
+              "id": "c",
+              "expression": {
+                "kind": "quarter",
+                "year": 2026,
+                "quarter": 2
+              },
+              "expression_kind": "quarter",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-04-01",
+              "requested_end": "2026-06-30",
+              "inclusive": true,
+              "as_of_date": "2026-07-03",
+              "cutoff": null,
+              "rule_refs": [
+                "missing_year"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-04-01",
+                "end": "2026-06-30",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "a",
+              "window_ref": "c",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-04-01",
+                "end": "2026-06-30",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 5772,
+            "rounded_value": 5772,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_09f475fddfec",
+      "business_id": "biz_110",
+      "question": "xem giúp số đơn hôm nay là bao nhiêu",
+      "as_of_date": "2025-06-25",
+      "gold": {
+        "id": "q_09f475fddfec",
+        "type": "number",
+        "answer": 74
+      },
+      "expected_runtime": {
+        "id": "q_09f475fddfec",
+        "type": "number",
+        "answer": 74
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_09f475fddfec",
+            "type": "number",
+            "answer": 74
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 6.7784651780002605,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "today"
+              },
+              "expression_kind": "today",
+              "time_axis": "ordered_at",
+              "requested_start": "2025-06-25",
+              "requested_end": "2025-06-25",
+              "inclusive": true,
+              "as_of_date": "2025-06-25",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2025-06-25",
+                "end": "2025-06-25",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2025-06-25",
+                "end": "2025-06-25",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 74,
+            "rounded_value": 74,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_09f475fddfec",
+            "type": "number",
+            "answer": 74
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.648839728999519,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "today"
+              },
+              "expression_kind": "today",
+              "time_axis": "ordered_at",
+              "requested_start": "2025-06-25",
+              "requested_end": "2025-06-25",
+              "inclusive": true,
+              "as_of_date": "2025-06-25",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2025-06-25",
+                "end": "2025-06-25",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2025-06-25",
+                "end": "2025-06-25",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 74,
+            "rounded_value": 74,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_3790a635bd18",
+      "business_id": "biz_110",
+      "question": "Cho tôi biết số đơn hqua.",
+      "as_of_date": "2026-02-10",
+      "gold": {
+        "id": "q_3790a635bd18",
+        "type": "number",
+        "answer": 63
+      },
+      "expected_runtime": {
+        "id": "q_3790a635bd18",
+        "type": "number",
+        "answer": 63
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_3790a635bd18",
+            "type": "number",
+            "answer": 63
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.598595830000704,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-02-09",
+              "requested_end": "2026-02-09",
+              "inclusive": true,
+              "as_of_date": "2026-02-10",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-02-09",
+                "end": "2026-02-09",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "order_count",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-02-09",
+                "end": "2026-02-09",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 63,
+            "rounded_value": 63,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_3790a635bd18",
+            "type": "number",
+            "answer": 63
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.6892864360015665,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "yesterday"
+              },
+              "expression_kind": "yesterday",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-02-09",
+              "requested_end": "2026-02-09",
+              "inclusive": true,
+              "as_of_date": "2026-02-10",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-02-09",
+                "end": "2026-02-09",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "order_count",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-02-09",
+                "end": "2026-02-09",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 63,
+            "rounded_value": 63,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_5d6431886ab9",
+      "business_id": "biz_110",
+      "question": "hnay bán được mấy đơn hàng?",
+      "as_of_date": "2026-06-11",
+      "gold": {
+        "id": "q_5d6431886ab9",
+        "type": "number",
+        "answer": 89
+      },
+      "expected_runtime": {
+        "id": "q_5d6431886ab9",
+        "type": "number",
+        "answer": 89
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_5d6431886ab9",
+            "type": "number",
+            "answer": 89
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.669856210999569,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "today"
+              },
+              "expression_kind": "today",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-06-11",
+              "requested_end": "2026-06-11",
+              "inclusive": true,
+              "as_of_date": "2026-06-11",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-06-11",
+                "end": "2026-06-11",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-06-11",
+                "end": "2026-06-11",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 89,
+            "rounded_value": 89,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_5d6431886ab9",
+            "type": "number",
+            "answer": 89
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.5490712789996905,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "today"
+              },
+              "expression_kind": "today",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-06-11",
+              "requested_end": "2026-06-11",
+              "inclusive": true,
+              "as_of_date": "2026-06-11",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-06-11",
+                "end": "2026-06-11",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-06-11",
+                "end": "2026-06-11",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 89,
+            "rounded_value": 89,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_99a0f6d709bd",
+      "business_id": "biz_110",
+      "question": "Tính riêng ngày hôm nay, cửa hàng bán được bao nhiêu đơn hàng?",
+      "as_of_date": "2026-02-21",
+      "gold": {
+        "id": "q_99a0f6d709bd",
+        "type": "number",
+        "answer": 31
+      },
+      "expected_runtime": {
+        "id": "q_99a0f6d709bd",
+        "type": "number",
+        "answer": 31
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_99a0f6d709bd",
+            "type": "number",
+            "answer": 31
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.523534240999652,
+          "windows": [
+            {
+              "id": "current",
+              "expression": {
+                "kind": "today"
+              },
+              "expression_kind": "today",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-02-21",
+              "requested_end": "2026-02-21",
+              "inclusive": true,
+              "as_of_date": "2026-02-21",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-02-21",
+                "end": "2026-02-21",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-02-21",
+                "end": "2026-02-21",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 31,
+            "rounded_value": 31,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_99a0f6d709bd",
+            "type": "number",
+            "answer": 31
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.376956194999366,
+          "windows": [
+            {
+              "id": "current",
+              "expression": {
+                "kind": "today"
+              },
+              "expression_kind": "today",
+              "time_axis": "ordered_at",
+              "requested_start": "2026-02-21",
+              "requested_end": "2026-02-21",
+              "inclusive": true,
+              "as_of_date": "2026-02-21",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2026-02-21",
+                "end": "2026-02-21",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2026-02-21",
+                "end": "2026-02-21",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 31,
+            "rounded_value": 31,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_c86e099eb394",
+      "business_id": "biz_110",
+      "question": "Tính riêng ngày hôm nay, cửa hàng bán được bao nhiêu đơn hàng?",
+      "as_of_date": "2025-05-14",
+      "gold": {
+        "id": "q_c86e099eb394",
+        "type": "number",
+        "answer": 79
+      },
+      "expected_runtime": {
+        "id": "q_c86e099eb394",
+        "type": "number",
+        "answer": 79
+      },
+      "expectation_reason": "Supported whole-business revenue/order_count",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_c86e099eb394",
+            "type": "number",
+            "answer": 79
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 6.06837478899979,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "today"
+              },
+              "expression_kind": "today",
+              "time_axis": "ordered_at",
+              "requested_start": "2025-05-14",
+              "requested_end": "2025-05-14",
+              "inclusive": true,
+              "as_of_date": "2025-05-14",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2025-05-14",
+                "end": "2025-05-14",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2025-05-14",
+                "end": "2025-05-14",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 79,
+            "rounded_value": 79,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_c86e099eb394",
+            "type": "number",
+            "answer": 79
+          },
+          "evaluator_verdict": "correct",
+          "points": 1,
+          "runtime_behavior_matches": true,
+          "execution_status": "verified",
+          "planning_errors": [],
+          "elapsed_seconds": 5.740158130000054,
+          "windows": [
+            {
+              "id": "current_month",
+              "expression": {
+                "kind": "today"
+              },
+              "expression_kind": "today",
+              "time_axis": "ordered_at",
+              "requested_start": "2025-05-14",
+              "requested_end": "2025-05-14",
+              "inclusive": true,
+              "as_of_date": "2025-05-14",
+              "cutoff": null,
+              "rule_refs": [
+                "as_of"
+              ],
+              "timezone_policy": "source_local_date",
+              "effective_window": {
+                "start": "2025-05-14",
+                "end": "2025-05-14",
+                "inclusive": true
+              },
+              "coverage_status": "full",
+              "availability_basis": [
+                "README end validated against fully parsed order dates",
+                "observed_order_dates"
+              ]
+            }
+          ],
+          "preflight": [
+            {
+              "aggregation_ref": "total",
+              "window_ref": "current_month",
+              "metric_id": "order_count",
+              "decision": "eligible_to_execute",
+              "reason": "dependencies_and_coverage_verified",
+              "effective_window": {
+                "start": "2025-05-14",
+                "end": "2025-05-14",
+                "inclusive": true
+              }
+            }
+          ],
+          "verified_result": {
+            "metric_id": "order_count",
+            "exact_value": 79,
+            "rounded_value": 79,
+            "checks": [
+              "coverage",
+              "status",
+              "mapping",
+              "grain",
+              "finite",
+              "rounding"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_62a9a454f35b",
+      "business_id": "biz_101",
+      "question": "Doanh thu của Coca Cola 330ml trong tháng 5 năm 2026 là bao nhiêu?",
+      "as_of_date": "2026-08-24",
+      "gold": {
+        "id": "q_62a9a454f35b",
+        "type": "number",
+        "answer": 2726000
+      },
+      "expected_runtime": {
+        "id": "q_62a9a454f35b",
+        "type": "abstain"
+      },
+      "expectation_reason": "Product/entity filter unsupported in the locked scope",
+      "actual_results": [
+        {
+          "repeat": 0,
+          "actual": {
+            "id": "q_62a9a454f35b",
+            "type": "abstain"
+          },
+          "evaluator_verdict": "abstain",
+          "points": 0,
+          "runtime_behavior_matches": true,
+          "execution_status": "not_performed",
+          "planning_errors": [
+            "question_owner_filter_unsupported"
+          ],
+          "elapsed_seconds": 6.205454799999643,
+          "execution_reason": "planning_failed"
+        },
+        {
+          "repeat": 1,
+          "actual": {
+            "id": "q_62a9a454f35b",
+            "type": "abstain"
+          },
+          "evaluator_verdict": "abstain",
+          "points": 0,
+          "runtime_behavior_matches": true,
+          "execution_status": "not_performed",
+          "planning_errors": [
+            "question_owner_filter_unsupported"
+          ],
+          "elapsed_seconds": 6.086231852999845,
+          "execution_reason": "planning_failed"
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "repeat": 0,
+      "metrics": {
+        "questions": 13,
+        "correct": 12,
+        "wrong": 0,
+        "abstain": 1,
+        "missing": 0,
+        "malformed": 0,
+        "points": 12,
+        "correct_rate_pct": 92.31,
+        "answer_rate_pct": 92.31,
+        "accuracy_answered_pct": 100.00,
+        "pa_normalized": 0.9230769230769230769230769231
+      },
+      "shared_inference_batch_questions": 36,
+      "shared_batch_question_errors": 0
+    },
+    {
+      "repeat": 1,
+      "metrics": {
+        "questions": 13,
+        "correct": 12,
+        "wrong": 0,
+        "abstain": 1,
+        "missing": 0,
+        "malformed": 0,
+        "points": 12,
+        "correct_rate_pct": 92.31,
+        "answer_rate_pct": 92.31,
+        "accuracy_answered_pct": 100.00,
+        "pa_normalized": 0.9230769230769230769230769231
+      },
+      "shared_inference_batch_questions": 36,
+      "shared_batch_question_errors": 0
+    }
+  ],
+  "limitations": [
+    "Only the locked 13-question development subset; not representative full-dataset accuracy or all S1 shapes.",
+    "Product filter question has true gold 2726000 but abstains because entity filters are not enabled; this is 0 points, not correct.",
+    "Source-current live model proof is CUDA; historical CPU runs do not certify current source.",
+    "Header-only revenue, multi-sheet/JOIN and general rule/language understanding remain unverified/unsupported."
+  ]
+}

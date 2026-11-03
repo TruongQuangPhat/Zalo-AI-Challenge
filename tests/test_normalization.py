@@ -506,3 +506,157 @@ def test_reordering_questions_and_dates_reuses_identical_uncut_facts(synthetic_s
     assert (tmp_path / "first/prepared/shop_a/facts.sqlite").read_bytes() == (
         tmp_path / "second/prepared/shop_a/facts.sqlite"
     ).read_bytes()
+
+
+def xlsx_order_source(
+    root,
+    rulebook_text,
+    *,
+    extra_sheet=False,
+    readme_change=None,
+    bad_amount=False,
+    suspicious_summary=False,
+):
+    from tests.test_ingestion import text_cell, workbook
+
+    folder = root / "data/shop_a"
+    (folder / "sales.csv").unlink(missing_ok=True)
+    readme = """File đơn hàng mỗi dòng một sản phẩm, thông tin đơn lặp lại ở mọi dòng của đơn.
+## Cột trong `sales.xlsx`
+- **id**: mã đơn
+- **day**: ngày bán
+- **status**: trạng thái đơn
+- **item**: tên hàng
+- **amount**: thành tiền sau giảm
+- **note**: auxiliary
+## Cột trong `units.xlsx`
+- **product**: tên hàng (file chỉ có mặt hàng có đơn vị lớn)
+- **large**: đơn vị lớn (hộp)
+- **factor**: hệ số: số đơn vị cơ bản trong 1 đơn vị lớn
+- **base**: đơn vị cơ bản
+## Quy ước
+Dữ liệu đầy đủ từ 01/01/2026 đến hết 03/01/2026.
+"""
+    if readme_change:
+        readme = readme_change(readme)
+    (folder / "README.md").write_text(readme)
+    (root / "rulebook.md").write_text(rulebook_text)
+    records = [
+        ["001", "01/01/2026", "Xong", "A", "bad" if bad_amount else "1,000", ""],
+        ["001", "01/01/2026", "Xong", "Topping Pudding trứng", "50", ""],
+        ["001", "01/01/2026", "Xong", "Topping Pudding trứng", "50", ""],
+        ["002", "03/01/2026", "Đang giao", "B", None, ""],
+        [
+            "003" if suspicious_summary else "",
+            "03/01/2026" if suspicious_summary else "",
+            "Xong" if suspicious_summary else "",
+            "",
+            "1,000,000",
+            "Tổng ngày 03/01",
+        ],
+    ]
+    data = (
+        "<sheetData><row r='1'>"
+        + "".join(
+            text_cell(f"{c}1", v)
+            for c, v in zip(
+                "ABCDEF", ["id", "day", "status", "item", "amount", "note"], strict=True
+            )
+        )
+        + "</row>"
+    )
+    for number, row in enumerate(records, 2):
+        data += f"<row r='{number}'>"
+        for column, value in zip("ABCDEF", row, strict=True):
+            if column == "E" and value is None:
+                data += f'<c r="E{number}"><v>0.125</v></c>'
+            elif value:
+                data += text_cell(f"{column}{number}", value)
+        data += "</row>"
+    data += "</sheetData>"
+    sheets = [("Orders", "visible", data)]
+    if extra_sheet:
+        sheets.append(("AnotherMonth", "visible", data))
+    workbook(folder / "sales.xlsx", sheets)
+    lookup = (
+        "<sheetData><row r='1'>"
+        + "".join(
+            text_cell(f"{c}1", v)
+            for c, v in zip("ABCD", ["product", "large", "factor", "base"], strict=True)
+        )
+        + "</row><row r='2'>"
+        + "".join(
+            text_cell(f"{c}2", v) for c, v in zip("ABCD", ["A", "hộp", "6", "cái"], strict=True)
+        )
+        + "</row></sheetData>"
+    )
+    workbook(folder / "units.xlsx", [("Conversion", "visible", lookup)])
+    return prepare_business(load_split(root), "shop_a")
+
+
+def test_xlsx_order_lines_exact_native_money_lookup_isolation_summary_and_dedup(
+    synthetic_split, tmp_path, rulebook_text
+):
+    context = xlsx_order_source(synthetic_split, rulebook_text)
+    before = {p: p.read_bytes() for p in (synthetic_split / "data/shop_a").iterdir()}
+    result = prepare_facts(context, tmp_path / "prepared")
+    assert result.summary["status"] == "ready"
+    assert result.summary["shape"] == "xlsx_order_lines"
+    assert result.summary["counts"] == {"orders": 2, "order_lines": 3, "lineage": 6, "issues": 0}
+    assert result.summary["row_accounting"]["summary"] == 1
+    assert result.summary["row_accounting"]["duplicate"] == 1
+    assert len(result.summary["unused_source_ids"]) == 1
+    assert result.summary["mapping"]["money_convention"] == "comma_grouped"
+    assert result.summary["mapping"]["numeric_evidence"][0]["row_role"] == "summary"
+    assert result.summary["diagnostic_line_totals_by_status"] == {
+        "completed": Decimal("1050"),
+        "shipping": Decimal(".125"),
+    }
+    assert all(p.read_bytes() == original for p, original in before.items())
+    from src.semantics.answerability import preflight, prepare_semantics
+
+    prepare_semantics(context)
+    assert (
+        preflight(context, "revenue", {"kind": "current_month"}, as_of_date="2026-01-03")[
+            "decision"
+        ]
+        == "eligible_to_execute"
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda s: s.replace("thông tin đơn lặp lại ở mọi dòng", "thông tin đơn chỉ ghi ở đầu"),
+        lambda s: s.replace("## Cột trong `sales.xlsx`", "## Cột trong `other.xlsx`"),
+        lambda s: s.replace("thành tiền sau giảm", "tổng khách phải trả"),
+        lambda s: s.replace("hệ số: số đơn vị cơ bản trong 1 đơn vị lớn", "không có mô tả hệ số"),
+    ],
+)
+def test_xlsx_missing_or_wrong_authority_does_not_enable_facts(
+    synthetic_split, tmp_path, rulebook_text, change
+):
+    context = xlsx_order_source(synthetic_split, rulebook_text, readme_change=change)
+    result = prepare_facts(context, tmp_path / "unsupported")
+    assert result.path is None and result.summary["status"] == "unsupported"
+
+
+def test_xlsx_multi_sheet_is_not_silently_clipped_to_one_sheet(
+    synthetic_split, tmp_path, rulebook_text
+):
+    context = xlsx_order_source(synthetic_split, rulebook_text, extra_sheet=True)
+    result = prepare_facts(context, tmp_path / "unsupported")
+    assert result.path is None and result.summary["status"] == "unsupported"
+
+
+@pytest.mark.parametrize("suspicious", [False, True])
+def test_xlsx_invalid_amount_or_summary_with_order_identity_blocks_dependencies(
+    synthetic_split, tmp_path, rulebook_text, suspicious
+):
+    context = xlsx_order_source(
+        synthetic_split, rulebook_text, bad_amount=not suspicious, suspicious_summary=suspicious
+    )
+    result = prepare_facts(context, tmp_path / "blocked")
+    assert result.summary["status"] == "blocked"
+    assert "revenue" in result.summary["blocking_metrics"]
+    assert ("order_count" in result.summary["blocking_metrics"]) == suspicious

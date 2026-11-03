@@ -1,4 +1,4 @@
-"""Versioned S1 prompt, bounded model repair and deterministic execution fallback."""
+"""Versioned bounded planner and deterministic execution fallback."""
 
 from __future__ import annotations
 
@@ -11,12 +11,32 @@ from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError, dumps, loads
 
-PROMPT_VERSION = "planner-v7"
+PROMPT_VERSION = "planner-v9"
 SYSTEM = """Lập QueryPlan JSON theo schema, không trả lời số hoặc sinh SQL/code.
 S1: một kỳ, toàn shop, output number. Doanh thu/tiền bán/dthu=revenue;
 số đơn/mấy đơn/số bill=order_count. Số lượng hàng/kg không phải số đơn.
 Riêng sản phẩm/khách/nhân viên, trạng thái riêng, phủ định điều kiện, ranking,
-so sánh/tỷ lệ/trung bình/nhiều kỳ: uncertainties=["unsupported_scope_or_operator"].
+tỷ trọng/trung bình/ratio: uncertainties=["unsupported_scope_or_operator"].
+S2 mở thêm tăng trưởng/phần trăm thay đổi doanh thu toàn shop giữa hai kỳ:
+operator=percent_change; current_ref là aggregate kỳ hỏi, baseline_ref là kỳ so;
+output.expected_type=percent và result_refs trỏ ID percent_change. Không tự tính số.
+Tháng M/Y so với tháng trước: kỳ so là M-1 của kỳ hỏi (tháng 1 thì tháng 12 năm trước),
+không lấy tháng trước của as_of_date. Ví dụ tháng 3/2026 so tháng trước: 3/2026 và 2/2026.
+Hai tháng/năm ghi rõ: giữ đúng hai kỳ nêu. "So với kỳ so, kỳ hỏi..." vẫn kỳ hỏi trừ kỳ so.
+Baseline bằng 0/âm hoặc thiếu dữ liệu: executor abstain, không tự suy giá trị %.
+S2 difference là chênh lệch số có dấu: hai kỳ, cùng revenue hoặc order_count, toàn shop.
+Phép difference = kỳ hỏi trừ kỳ so; current_ref/baseline_ref trỏ hai aggregations.
+Mỗi aggregation dùng window_ref riêng. output.result_refs trỏ ID của difference.
+Ví dụ doanh thu hôm nay so với hôm qua chênh lệch bao nhiêu:
+{"entities":[],"time_windows":[{"id":"c","expression":{"kind":"today"}},
+{"id":"b","expression":{"kind":"yesterday"}}],"aggregations":[
+{"id":"a","metric_id":"revenue","window_ref":"c","scope":"whole_business","filters":[],"group_by":[]},
+{"id":"z","metric_id":"revenue","window_ref":"b","scope":"whole_business","filters":[],"group_by":[]}],
+"derived_measures":[{"id":"d","operator":"difference","current_ref":"a","baseline_ref":"z"}],
+"output":{"expected_type":"number","result_refs":["d"]},"uncertainties":[]}
+Tháng này so với tháng trước: current_month và previous_mtd (cùng số ngày).
+So với <kỳ so>, <kỳ hỏi> chênh bao nhiêu: vẫn kỳ hỏi trừ kỳ so.
+Chỉ một kỳ thì derived_measures=[]; không tự thêm phép trừ khi câu chỉ hỏi tổng.
 Giữ mọi điều kiện, không biến câu ngoài phạm vi thành tổng toàn shop.
 Coverage unknown vẫn lập plan; preflight riêng kiểm tra dữ liệu, không tự suy coverage.
 Ví dụ số đơn tháng này:
@@ -56,7 +76,7 @@ mốc snapshot, identity và đơn vị, không mở coverage cho revenue/order_
 
 
 class LocalPlanner:
-    name = "local-s1"
+    name = "local-planner"
     is_mock = False
 
     def __init__(self, model, *, attempts: int = 2, timeout: float = 120):

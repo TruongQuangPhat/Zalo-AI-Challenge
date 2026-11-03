@@ -16,7 +16,7 @@ from typing import Any
 from src.data.profiling import normalized
 from src.jsonio import ContractError
 
-VERSION = "runtime-rules-v2"
+VERSION = "runtime-rules-v4"
 
 
 class SemanticError(ContractError):
@@ -83,6 +83,8 @@ LABELS = {
     "missing_year": "thang m, quy q khong ghi nam",
     "tet": "tet nam y, dip tet, mua tet",
     "return_policy": "don tra mot phan",
+    "difference": "chenh lech, hon / kem, tang / giam bao nhieu (so, khong phai %)",
+    "percent_change": "phan tram thay doi, tang truong",
 }
 
 # Deliberately small wording variants for the same finite clauses. The value
@@ -116,6 +118,8 @@ def _unhandled_qualifications(text: str, section: str) -> set[str]:
         "current_month": r"\bthang nay\b",
         "rounding": r"\blam tron\b",
         "coverage": r"\b(khoang ngay|pham vi du lieu)\b",
+        "difference": r"\b(chenh lech|ky hoi|ky so)\b",
+        "percent_change": r"\b(tang truong|phan tram thay doi)\b",
     }
     return {key for key, pattern in targets.items() if re.search(pattern, text)}
 
@@ -123,6 +127,16 @@ def _unhandled_qualifications(text: str, section: str) -> set[str]:
 def _decode(rule_id: str, value: str) -> tuple[str, dict] | None:
     """Finite supported meanings. Full matches reject unhandled qualifications."""
     patterns = {
+        "percent_change": (
+            r"so voi ky truoc; giam thi ra so am",
+            "current_minus_baseline_over_baseline_percent",
+            {},
+        ),
+        "difference": (
+            r"ky hoi [−-] ky so: it hon ra so am, giu don vi cua so do",
+            "current_minus_baseline",
+            {},
+        ),
         "dedup": (
             r"loi xuat file, tinh mot lan(?:\. hai dong giong nhau cua hai don khac nhau "
             r"la hai lan ban, tinh ca hai)?",

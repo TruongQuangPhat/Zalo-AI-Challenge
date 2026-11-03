@@ -159,8 +159,17 @@ def normalize_status(value) -> str:
     statuses = {
         "completed": {"completed", "hoan thanh", "da hoan thanh", "xong"},
         "cancelled": {"cancelled", "huy", "da huy", "khach huy"},
-        "returned": {"returned", "tra hang", "doi tra", "hoan tra"},
-        "shipping": {"shipping", "in_delivery", "dang giao", "dang giao hang", "cho giao"},
+        "returned": {"returned", "tra hang", "doi tra", "hoan tra", "hoan hang", "da hoan hang"},
+        # Active recorded order: revenue/count exclude cancellation and returns.
+        # This alias does not certify a physical shipment for future shipping metrics.
+        "shipping": {
+            "shipping",
+            "in_delivery",
+            "dang giao",
+            "dang giao hang",
+            "cho giao",
+            "dang giao dich",
+        },
     }
     token = normalized(str(value)).strip()
     for status, labels in statuses.items():

@@ -1,4 +1,4 @@
-"""README-driven preparation of a single CSV order-line or order-header source."""
+"""README-driven preparation of one CSV or a narrowly mapped XLSX order-line sheet."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import sqlite3
 from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.data.cache import fingerprint
@@ -37,15 +38,13 @@ class SalesMapping:
     convention: str | None
     negative_returns: bool
     shape: str = "csv_order_lines"
+    unused_source_ids: tuple[str, ...] = ()
 
 
 def sales_mapping(context: BusinessContext) -> SalesMapping:
     catalog = context.catalog
-    if not catalog["read_complete"] or len(catalog["tables"]) != 1:
-        raise ContractError("requires one completely read order-line table; joins are unsupported")
-    table = catalog["tables"][0]
-    if table["format"] != "csv" or table["structure_status"] != "resolved":
-        raise ContractError("only resolved single-table CSV order-line sources are enabled")
+    if not catalog["read_complete"]:
+        raise ContractError("requires completely read sources")
     readme = catalog["readme"]
     text = normalized(readme)
     header_only = bool(re.search(r"moi dong mot don hang.*khong co chi tiet mat hang", text))
@@ -66,23 +65,80 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
         "customer": {"ten khach", "ten khach hang", "customer name"},
         "note": {"ghi chu don", "order note"},
     }
-    descriptions = {}
-    for label, meaning in re.findall(r"^\s*-\s+\*\*(.+?)\*\*\s*:\s*(.+)$", readme, re.M):
-        key = normalized(label).strip()
-        if key in descriptions:
-            raise ContractError("duplicate README field definitions require explicit resolution")
-        descriptions[key] = normalized(meaning).strip().rstrip(".")
-    fields = {}
-    for field, definitions in meanings.items():
-        candidates = [
-            column["position"]
-            for column in table["columns"]
-            if descriptions.get(normalized(column["display_name"]).strip()) in definitions
-        ]
-        if len(candidates) > 1:
-            raise ContractError(f"ambiguous README mapping for {field}")
-        if candidates:
-            fields[field] = candidates[0]
+
+    def descriptions(section: str) -> dict[str, str]:
+        result = {}
+        for label, meaning in re.findall(r"^\s*-\s+\*\*(.+?)\*\*\s*:\s*(.+)$", section, re.M):
+            key = normalized(label).strip()
+            if key in result:
+                raise ContractError(
+                    "duplicate README field definitions require explicit resolution"
+                )
+            result[key] = normalized(meaning).strip().rstrip(".")
+        return result
+
+    def mapped_fields(table: dict, definitions: dict) -> dict:
+        fields = {}
+        for field, definitions_for_field in meanings.items():
+            candidates = [
+                column["position"]
+                for column in table["columns"]
+                if definitions.get(normalized(column["display_name"]).strip())
+                in definitions_for_field
+            ]
+            if len(candidates) > 1:
+                raise ContractError(f"ambiguous README mapping for {field}")
+            if candidates:
+                fields[field] = candidates[0]
+        return fields
+
+    tables = catalog["tables"]
+    unused = ()
+    xlsx = False
+    if len(tables) == 1 and tables[0]["format"] == "csv":
+        table = tables[0]
+        fields = mapped_fields(table, descriptions(readme))
+    else:
+        # Bind column meanings to the exact filename declared by README. Never mix
+        # similarly named columns from the conversion lookup into transaction facts.
+        sections = {}
+        for filename, section in re.findall(
+            r"^## Cột trong `([^`]+)`\s*\n(.*?)(?=^## |\Z)", readme, re.M | re.S
+        ):
+            if filename in sections:
+                raise ContractError("duplicate README source sections")
+            sections[filename] = descriptions(section)
+        candidates, lookups = [], []
+        for candidate in tables:
+            definitions = sections.get(Path(candidate["source_ref"]["file"]).name, {})
+            fields_for_table = mapped_fields(candidate, definitions)
+            if {"order_id", "ordered_at", "status"} & fields_for_table.keys():
+                candidates.append((candidate, fields_for_table))
+            elif (
+                candidate["format"] == "xlsx"
+                and candidate["structure_status"] == "resolved"
+                and definitions
+                and all(
+                    normalized(c["display_name"]).strip() in definitions
+                    for c in candidate["columns"]
+                )
+                and any(v.startswith("he so: so don vi co ban") for v in definitions.values())
+                and "don vi co ban" in definitions.values()
+            ):
+                lookups.append(candidate["source_id"])
+            else:
+                raise ContractError("unclassified source cannot be omitted from order preparation")
+        if len(candidates) != 1 or header_only:
+            raise ContractError("only one explicitly mapped XLSX order-line sheet is enabled")
+        table, fields = candidates[0]
+        if table["format"] != "xlsx" or "thong tin don lap lai o moi dong" not in text:
+            raise ContractError("XLSX requires README repeated order headers on each product row")
+        if sum(t["source_ref"]["file"] == table["source_ref"]["file"] for t in tables) != 1:
+            raise ContractError("multi-sheet order normalization is not enabled")
+        unused = tuple(lookups)
+        xlsx = True
+    if table["structure_status"] != "resolved":
+        raise ContractError("requires a resolved order source")
     required = {"order_id", "ordered_at", "status"}
     if not header_only:
         required.update({"amount", "item"})
@@ -111,7 +167,8 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
         inheritance,
         next(iter(declared), None),
         negative_returns,
-        "csv_order_headers" if header_only else "csv_order_lines",
+        "xlsx_order_lines" if xlsx else "csv_order_headers" if header_only else "csv_order_lines",
+        unused,
     )
 
 
@@ -127,7 +184,9 @@ def _signature(cells: dict[int, Cell]) -> str:
 
 def _summary(row: SourceRow, mapping: SalesMapping) -> bool:
     candidates = (
-        [row.cells.get(mapping.fields["item"])] if "item" in mapping.fields else row.cells.values()
+        [row.cells.get(mapping.fields["item"])]
+        if "item" in mapping.fields and mapping.shape != "xlsx_order_lines"
+        else row.cells.values()
     )
     return any(
         cell
@@ -171,22 +230,30 @@ def _time_value(value) -> str:
 def build_sales(
     context: BusinessContext, connection: sqlite3.Connection, mapping: SalesMapping
 ) -> dict:
-    profile = context.catalog["tables"][0]
+    profile = next(t for t in context.catalog["tables"] if t["source_id"] == mapping.source_id)
     table = context.source_table(mapping.source_id)
     header = next((r for r in table.iter_rows() if r.row in profile["header_rows"]), None)
     if header is None:
         raise ContractError("resolved source has no accessible header")
     evidence, evidence_refs = set(), []
     for row in table.iter_rows():
-        if _row_role(row, header, mapping) == "data" and "amount" in mapping.fields:
+        role = _row_role(row, header, mapping)
+        if (
+            role == "data" or (mapping.shape == "xlsx_order_lines" and role == "summary")
+        ) and "amount" in mapping.fields:
             cell = row.cells.get(mapping.fields["amount"])
-            style = number_evidence(str(cell.raw_value)) if cell else None
+            style = (
+                number_evidence(str(cell.raw_value))
+                if cell and cell.native_type != "numeric"
+                else None
+            )
             if style:
                 evidence.add(style)
                 if len(evidence_refs) < 5:
                     evidence_refs.append(
                         {
                             "style": style,
+                            "row_role": role,
                             "raw_value": cell.raw_value,
                             "source_ref": row.reference(table, mapping.fields["amount"]),
                         }
@@ -352,7 +419,11 @@ def build_sales(
                             "number_convention_conflict", "source conventions conflict"
                         )
                     amount = parse_money(
-                        cell_value(cells.get(mapping.fields["amount"])), convention
+                        cell_value(cells.get(mapping.fields["amount"])),
+                        "decimal_dot"
+                        if cells.get(mapping.fields["amount"])
+                        and cells[mapping.fields["amount"]].native_type == "numeric"
+                        else convention,
                     )
                     if amount < 0 and line_role != "return_item":
                         line_role = "unknown"
@@ -373,7 +444,9 @@ def build_sales(
                 item = cells.get(mapping.fields["item"])
                 item_text = normalized(str(item.raw_value)).strip() if item else ""
                 if not item_text or re.search(
-                    r"voucher|diem|phi (?:ship|phuc vu)|topping", item_text
+                    r"voucher|diem|phi (?:ship|phuc vu)"
+                    + ("|topping" if mapping.shape != "xlsx_order_lines" else ""),
+                    item_text,
                 ):
                     line_role = "unknown"
                     issue(
@@ -475,6 +548,7 @@ def build_sales(
         "status": "blocked" if blocked else "ready",
         "shape": mapping.shape,
         "source_id": mapping.source_id,
+        "unused_source_ids": list(mapping.unused_source_ids),
         "mapping": {
             "fields": mapping.fields,
             "inherit_headers": mapping.inherit_headers,
@@ -491,7 +565,7 @@ def build_sales(
         "issue_counts": dict(sorted(issue_counts.items())),
         "blocking_metrics": sorted(blocked),
         "diagnostic_line_totals_by_status": totals,
-        "diagnostic_totals_complete": mapping.shape == "csv_order_lines"
+        "diagnostic_totals_complete": mapping.shape in {"csv_order_lines", "xlsx_order_lines"}
         and "revenue" not in blocked,
         "coverage": {
             "fact_type": "orders",

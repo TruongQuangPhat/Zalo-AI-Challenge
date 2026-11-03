@@ -5,8 +5,7 @@ FROM ${BASE_IMAGE} AS source
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATAMATE_CONTAINER=1
 WORKDIR /app
 COPY src/ /app/src/
-COPY predict.sh /app/
-RUN chmod 0555 /app/predict.sh
+COPY --chmod=0555 predict.sh /app/
 USER 65532:65532
 ENTRYPOINT ["/app/predict.sh"]
 

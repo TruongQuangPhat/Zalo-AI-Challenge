@@ -1,6 +1,6 @@
 # Zalo AI Challenge — DataMate
 
-Runtime đọc CSV/XLSX/SQLite, chuẩn bị context một lần/business và ghi JSONL/log theo câu. Mặc định vẫn **mock abstain**; `--model` bật local planner S1, QueryPlan validator, resolve/preflight và executor revenue/order_count toàn business. Tiền tính bằng Python Decimal trên SQLite read-only, rồi verifier và output validator kiểm tra trước khi ghi đáp án. Coverage dùng khoảng ngày đơn quan sát được khi đọc/parse đầy đủ, ưu tiên khoảng đầy đủ được README khai báo và chặn mâu thuẫn. CSV một dòng/một hóa đơn hỗ trợ count, chưa hỗ trợ revenue. Có thêm lookup inventory snapshot tại đúng mốc được README xác nhận, một sản phẩm và base unit. M1 và S1 hẹp đã có bằng chứng LLM thật → execution → evaluator trên train-dev; các shape mở rộng và toàn baseline chưa hoàn thành. Tiến độ và bằng chứng nằm trong [roadmap.md](roadmap.md).
+Runtime đọc CSV/XLSX/SQLite, chuẩn bị context một lần/business và ghi JSONL/log theo câu. Mặc định vẫn **mock abstain**; `--model` bật local planner S1, S2 difference và revenue growth hẹp, QueryPlan validator, resolve/preflight và executor revenue/order_count toàn business. Tiền tính bằng Python Decimal trên SQLite read-only, rồi verifier và output validator kiểm tra trước khi ghi đáp án. Coverage dùng khoảng ngày đơn quan sát được khi đọc/parse đầy đủ, ưu tiên khoảng đầy đủ được README khai báo và chặn mâu thuẫn. CSV một dòng/một hóa đơn hỗ trợ count, chưa hỗ trợ revenue. Có thêm lookup inventory snapshot tại đúng mốc được README xác nhận, một sản phẩm và base unit. M1 và S1 hẹp đã có bằng chứng LLM thật → execution → evaluator trên train-dev; các shape mở rộng và toàn baseline chưa hoàn thành. Tiến độ và bằng chứng nằm trong [roadmap.md](roadmap.md).
 
 ## Môi trường riêng
 
@@ -110,7 +110,7 @@ uv run --no-sync python -m src.cli prepare \
 Lệnh ghi `<business>.json` gồm catalog, summary chuẩn hóa và metadata `semantics`. Nguồn phù hợp có thêm
 `<business>/facts.sqlite`: `orders`, `order_lines`, `lineage`, `issues`, `metadata`.
 Mapping dựa vào mô tả cột/grain trong README và rulebook runtime, không dựa business ID.
-Hiện hỗ trợ CSV order-line có cấu trúc rõ, CSV header-only cho order_count và một XLSX inventory snapshot bốn cột có authority rõ (xem phần M1). Các shape khác ghi `unsupported`, không tạo facts rỗng.
+Hiện hỗ trợ CSV order-line có cấu trúc rõ, CSV header-only cho order_count, một sheet XLSX order-line có README mapping/grain rõ và một XLSX inventory snapshot bốn cột có authority rõ (xem phần M1). Các shape khác ghi `unsupported`, không tạo facts rỗng.
 Summary `ready` chỉ xác nhận preparation không bị blocking issue; không chứng minh đủ coverage
 hoặc metric đã có executor. `blocked` giữ lỗi/facts để kiểm tra và chặn metric phụ thuộc;
 CLI `prepare` trả exit 1 khi có blocking issues.
@@ -146,7 +146,8 @@ và tet/before_tet theo calendar. Kỳ tường minh giữ nguyên; chỉ cắt 
 
 `preflight(context, metric_id, expression, as_of_date=...)` trả `eligible_to_execute`,
 `unanswerable` hoặc `abstain`, cùng contract, requested/effective windows và evidence.
-Eligibility chưa phải đáp án. Executor S1 chỉ bật với validated plan; entity filters và derived execution chưa hỗ trợ.
+Eligibility chưa phải đáp án. Executor chỉ bật với validated plan; entity filters chưa hỗ trợ.
+S2 mở hẹp difference hai kỳ như phần local planner dưới đây.
 Coverage theo quyết định người dùng ngày 03/11: dùng khoảng min/max ngày của **mọi đơn**
 đã parse đầy đủ trong export, kể cả đơn huỷ/trả/đang giao; không tính min/max trên riêng kỳ hỏi
 hoặc chỉ các đơn được cộng. README khai báo khoảng đầy đủ thì ưu tiên khoảng đó.
@@ -162,7 +163,7 @@ không phải chứng nhận completeness từ bên ngoài.
 Kiểm tra bằng `uv run --no-sync python -m pytest tests/test_semantics.py tests/test_temporal.py`.
 Bằng chứng dev/cold/warm nằm trong [reports/semantics_verification.json](reports/semantics_verification.json).
 
-## Local planner S1
+## Local planner S1 và S2 difference/growth
 
 Cài dependency ở bước setup (cần C/C++ compiler và CMake nếu build từ source), trước inference:
 
@@ -188,7 +189,8 @@ Khi đánh giá subset, chỉ evaluator riêng được tạo/đọc nhãn của
 không coi PA subset là PA toàn train. Lệnh mẫu chọn câu thuộc dev của cả hai protocol.
 
 Runtime `llama-cpp-python==0.3.16` dùng CPU, ChatML, seed 0, temperature 0,
-context 4096, batch 128, decode/batch threads mặc định cùng bằng 4, tối đa 256 output tokens.
+context 4096, batch 128, decode/batch threads mặc định cùng bằng 4, tối đa 256 output tokens
+cho S1 và 384 cho draft S2 hai kỳ (hai aggregate cùng refs cần JSON dài hơn).
 Worker giữ model một lần/run; load timeout riêng,
 question timeout chung cho tối đa hai attempts, quá hạn dừng worker và abstain.
 Retry sửa JSON lỗi; plan parse được nhưng có intent/scope chưa hỗ trợ giữ abstain.
@@ -197,7 +199,9 @@ Nếu worker đã dừng, các câu sau abstain; không tải hoặc tự reload
 `src/agent/plan.py` giữ schema draft của **cùng QueryPlan theo Phụ lục E**.
 LLM chọn metric/time/scope; server gắn identity, authority, requirements, units/policy,
 rule refs và resolved/effective windows. S1 giới hạn một aggregate/một window;
-mảng windows/aggregations và derived_measures giữ đường mở S2. Identity, SQL, policy hay
+S2 cho hai windows, hai aggregations cùng metric revenue hoặc order_count toàn business,
+một `derived_measures` với `operator=difference` hoặc `percent_change`, `current_ref`, `baseline_ref` trỏ aggregate.
+Difference trả number; growth revenue trả percent và chỉ tính khi baseline dương. Không có derived chain hoặc graph tổng quát. Identity, SQL, policy hay
 numeric answer do model tự thêm bị từ chối. Không có free-form code execution.
 Context chỉ lấy metadata schema/contracts/coverage/rule refs/warnings, không đưa raw rows vào prompt.
 Authority hashes được chia sẻ thay vì lặp theo từng rule; metadata business đứng trước
@@ -210,7 +214,91 @@ vẫn abstain. Zero chỉ có nghĩa khi coverage đủ; ngoài coverage đã ch
 Validator kiểm tra contract của plan, chưa chứng minh model luôn hiểu đúng mọi câu tiếng Việt;
 phải kiểm tra lỗi bỏ filter/phủ định trước khi mở phạm vi.
 
-Bằng chứng mới được ghi tại [reports/planner_verification.json](reports/planner_verification.json).
+Difference cần rule runtime xác nhận **kỳ hỏi − kỳ so**, giữ dấu và đơn vị. Validator
+kiểm tra IDs/refs/scope/metric/unit và hai requested windows trước coverage clipping.
+Mỗi window có preflight, requested/effective bounds, coverage status và basis riêng;
+unknown/quality issue khiến abstain, kỳ ngoài nguồn khiến unanswerable khi không có
+dependency chưa rõ. Partial lấy giao theo luật, không thay kỳ thiếu bằng 0.
+Executor dùng các tổng Decimal chưa làm tròn, trừ chính xác, kiểm tra recomposition
+và làm tròn một lần ở output; count difference được phép âm. Half tie chưa rõ vẫn abstain.
+
+Guard S2 hữu hạn nhận “kỳ hỏi … so với kỳ so … chênh lệch/hơn/kém/tăng/giảm” hoặc
+“So với kỳ so, kỳ hỏi …”, mỗi vế có một ngày/range/tháng/quý tường minh hoặc cue hôm nay/qua, tuần này/trước,
+tháng này/trước. “Tháng này so với tháng trước” dùng `current_month` và `previous_mtd` theo
+runtime rule, gồm trường hợp tháng trước ngắn hơn. Tháng tường minh so với “tháng trước”
+chưa resolve anchor riêng thì abstain cho difference; growth hẹp có anchor tháng trước theo kỳ hỏi như bên dưới. Ratio/average/entity/ranking/JOIN vẫn chưa bật.
+Không coi các guard này là parser tiếng Việt tổng quát.
+
+Report JSON riêng cho từng giai đoạn: [S1 JSON](reports/s1_results.json) và
+[S2 JSON](reports/s2_results.json). Hai file được format để đọc trực tiếp; `questions[]`
+chứa nguyên văn câu hỏi, gold, `expected_runtime`, `actual_results` hai lượt và verdict.
+S2 có thêm synthetic, source/period/operand evidence và `readiness`: ổn trong lát cắt
+native revenue growth CUDA đã khóa, chưa chứng nhận toàn S2/holdout/CPU/Blackwell.
+
+Bảng câu hỏi → gold → runtime mong đợi → actual hai lượt → điểm tại
+[báo cáo S1/S2](reports/s1_s2_results.md). **Native S2 mới nhất: 8 correct / 0 wrong / 0 abstain
+ở cả hai lượt CUDA**; 6 giá trị gold không dùng để triển khai trước khi khóa/inference và 2 đã exposed.
+Đây là common-dev đã chọn, có historical EDA exposure, không phải blind holdout hoặc PA toàn dataset.
+Regression S1 giữ 12 correct/0 wrong/1 abstain (92,31% toàn 13 câu; 100% trong 12 câu đã trả lời).
+Các bảng 0 correct/2 abstain của checkpoint trước growth được giữ riêng làm lịch sử, không phải kết quả mới.
+
+Growth dùng cùng QueryPlan hai windows và aggregate revenue; operator `percent_change` tính
+`(current - baseline) / baseline * 100`, output percent làm tròn 2 chữ số. Tiền giữ Decimal;
+tỷ số dùng exact Fraction từ Decimal để không sai sát half-tie. Baseline 0/âm, undefined,
+unknown/outside hoặc authority thiếu không được đoán số; giữ preflight/fallback theo từng kỳ.
+Tháng tường minh so tháng trước được anchor vào **tháng hỏi**, gồm rollover tháng 1 → tháng 12 năm trước.
+Không lấy tháng trước của as_of khi câu hỏi đã ghi rõ kỳ hỏi.
+
+Preparation mới chỉ bật một sheet XLSX order-line với README xác nhận mỗi dòng một sản phẩm,
+header đơn lặp đủ và mapping theo đúng filename/section. Lookup quy đổi không JOIN vào revenue/count;
+multi-sheet, file chưa phân loại hoặc thiếu authority vẫn unsupported. Native source đã chuẩn bị
+39.006 orders / 62.451 lines, 443 summary, 0 issues; coverage all-order dates 01/04/2025–02/06/2026.
+Topping có dòng sản phẩm/thành tiền riêng theo README được giữ là sale item; không mở embedded-role parser.
+Dòng tổng chỉ cấp bằng chứng định dạng số của cột tiền, không tạo transaction. Alias trạng thái
+`Đã hoàn hàng` là returned; `Đang giao dịch` là active không huỷ/trả cho revenue/count, không chứng minh shipment vật lý.
+
+Source mới có **343 tests**, lint/format và lockfile đạt. Hai fresh CUDA workers chạy cùng 36 câu/case:
+13 S1 native + 8 S2 native + 15 synthetic; predictions 36/36 giống nhau. Synthetic behavior đạt 15/15;
+11 fixture có gold xác định chấm 9 correct/0 wrong/2 abstain, 4 diagnostic không được gán placeholder gold.
+Source/model/input hashes và read-only/network-none/label isolation đạt; gold chỉ evaluator host đọc sau cả hai containers.
+Evidence hiện tại ở `native_growth_continuation` trong JSON; các root fields giữ checkpoint cũ theo đúng hashes.
+Image mới: `datamate-s2-growth-cuda:local`, build source target offline trên `datamate-llm-cuda:local` bằng
+`scripts.build_context`/Dockerfile hiện có. Chưa nghiệm thu model CPU growth, Blackwell hoặc toàn S2/Phase 5–7.
+
+Bằng chứng S2 mới nhất và các checkpoint lịch sử theo source hashes tại
+[reports/s2_verification.json](reports/s2_verification.json). Dev của cả hai protocol
+không có câu comparison trên hai shape CSV đã bật (`biz_101`, `biz_110`); checkpoint ban đầu chỉ kiểm chứng numeric S2 bằng synthetic; continuation mới nhất đã có 8/8 native revenue growth. Đây vẫn chưa là PA đại diện toàn dataset.
+
+**Checkpoint S2 difference trước growth — lịch sử 03/11/2026:** 318 tests, lint/format và lockfile đạt. Docker CUDA
+trên source cuối có 12/12 expected behaviors synthetic đạt: 6 number, 1 unanswerable,
+5 abstain; evaluator giữ đủ mẫu số: **7 correct / 0 wrong / 5 abstain**. Regression S1
+trên cùng image: **12 correct / 0 wrong / 1 abstain**; hai câu native S2 phần trăm giữ
+abstain. Model offload thực 29 layers trên GTX 1650, không CPU fallback. Source/model
+hashes khớp, input/root read-only, network none; evaluator host đọc nhãn sau khi mọi
+container đã thoát. Output/facts/gold tạm đã tự dọn. Mỗi group trên source cuối có một lượt
+CUDA; diagnostics trên revision trước giữ riêng trong S2 report.
+
+Hai lượt CPU synthetic ở hai revision S2 đều timeout tại câu đầu trong budget 120 s,
+worker bị dừng; các câu sau worker-unavailable không phải evidence cho scope guards.
+**Chưa nghiệm thu numeric S2 trên CPU** hoặc CPU/GPU prediction equivalence. WSL có dùng
+swap và host load/cache không kiểm soát; startup/preparation/generation chỉ là quan sát,
+không phải SLA. Không tăng budget để đổi kết quả. Native numeric S2 cũng chưa được nghiệm thu.
+
+Image source cuối được giữ tại `datamate-s2-cpu:local` và `datamate-s2-cuda:local`.
+Dùng lại source target trên hai image LLM S1 local để giữ nguyên weights/dependencies;
+COPY entrypoint dùng `--chmod` nên hoạt động cả khi base image có USER non-root.
+Có thể rebuild source layer offline bằng entrypoint hiện có:
+
+```bash
+uv run --no-sync python -m scripts.build_context \
+  --output .artifacts/s2-context.tar --manifest .artifacts/s2-context.json
+docker build --network none --pull=false --target source \
+  --build-arg BASE_IMAGE=datamate-llm-cpu:local -t datamate-s2-cpu:local - < .artifacts/s2-context.tar
+docker build --network none --pull=false --target source \
+  --build-arg BASE_IMAGE=datamate-llm-cuda:local -t datamate-s2-cuda:local - < .artifacts/s2-context.tar
+```
+
+Bằng chứng S1 trước thay đổi S2 tại [reports/planner_verification.json](reports/planner_verification.json).
 Hai report normalization/semantics trước đó giữ phạm vi lịch sử; không chứng nhận thay đổi S1 mới.
 Chính sách ban đầu giữ coverage unknown đã được thay bằng khoảng quan sát theo yêu cầu
 người dùng. Raw input/nhãn không thay đổi. Trạng thái và kết quả numeric train hiện tại
@@ -245,7 +333,7 @@ Docker smoke CPU numeric synthetic có host/container bằng nhau, network none,
 read-only; image này chưa đóng gói LLM hoặc chứng nhận GPU/Blackwell.
 
 Phạm vi nghiệm thu là một aggregate/window, toàn business, output number trên hai shape
-CSV trên. Header-only revenue, JOIN, Excel order normalization và S2–S4 vẫn planned;
+CSV trên. Header-only revenue, JOIN, Excel order normalization và phần S2–S4 ngoài difference vẫn planned;
 parser/guards hữu hạn chưa chứng minh hiểu mọi paraphrase/ngoại lệ. Chi tiết và source hashes
 nằm trong [planner report](reports/planner_verification.json).
 

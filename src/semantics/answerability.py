@@ -26,7 +26,9 @@ def _coverage(context: BusinessContext) -> dict:
     prepared = context.prepared
     source = (
         prepared.summary.get("coverage", {})
-        if prepared and prepared.summary.get("shape") in {"csv_order_lines", "csv_order_headers"}
+        if prepared
+        and prepared.summary.get("shape")
+        in {"csv_order_lines", "csv_order_headers", "xlsx_order_lines"}
         else {}
     )
     readme_ref = {
@@ -177,7 +179,7 @@ def preflight(
 ) -> dict:
     """Check a single aggregate/window. Nonempty entity/filter scopes are unsupported.
 
-    A future multi-window plan calls this for each dependency independently.
+    Multi-window plans call this for each dependency independently.
     This API never reads labels, executes numeric aggregates or emits predictions.
     """
     result = {

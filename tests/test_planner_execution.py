@@ -16,7 +16,7 @@ import pytest
 from src.agent.context import build_context
 from src.agent.execution import execute_plan
 from src.agent.local import LocalModel
-from src.agent.plan import PLAN_SCHEMA, generation_schema, validate_query_plan
+from src.agent.plan import PLAN_SCHEMA, _schema, generation_schema, validate_query_plan
 from src.agent.planner import LocalPlanner
 from src.data.split import Question
 from src.evaluation.scorer import evaluate
@@ -319,7 +319,9 @@ def test_generation_schema_bounds_match_validator_and_preserve_unsupported_inten
     context = semantic_source()
     for name in ["time_windows", "aggregations"]:
         schema = PLAN_SCHEMA["properties"][name]
-        assert schema["minItems"] == schema["maxItems"] == 1
+        assert (schema["minItems"], schema["maxItems"]) == (1, 2)
+        narrowed = generation_schema(question())["properties"][name]
+        assert narrowed["minItems"] == narrowed["maxItems"] == 1
     for change in [
         lambda p: p.update(uncertainties=["x" * 257]),
         lambda p: p["aggregations"][0].update(filters=["item"] * 5),
@@ -488,6 +490,11 @@ Dữ liệu có đến hết 03/01/2026.
     else:
         assert result["answer"]["answer"] == 3
         assert prepared.summary["issue_counts"] == {}
+        delta = execute_plan(
+            difference_draft("order_count"), difference_question("order_count"), context
+        )
+        assert delta["answer"]["answer"] == 2
+        assert all(a["lines_selected"] == 0 for a in delta["execution"]["aggregations"].values())
     revenue = execute_plan(draft(), question(), context)
     assert revenue["answer"]["type"] == "abstain"
     assert revenue["execution"]["reason"] == "required_facts_unsupported"
@@ -508,3 +515,402 @@ def test_native_worker_timeout_terminates_process():
     finally:
         child.close()
         model.close()
+
+
+def difference_draft(metric="revenue", current=None, baseline=None):
+    candidate = draft(metric, current or {"kind": "today"})
+    candidate["time_windows"].append(
+        {"id": "baseline_period", "expression": baseline or {"kind": "yesterday"}}
+    )
+    other = deepcopy(candidate["aggregations"][0])
+    other.update(id="baseline_total", window_ref="baseline_period")
+    candidate["aggregations"].append(other)
+    candidate["derived_measures"] = [
+        {
+            "id": "delta",
+            "operator": "difference",
+            "current_ref": "total",
+            "baseline_ref": "baseline_total",
+        }
+    ]
+    candidate["output"]["result_refs"] = ["delta"]
+    return candidate
+
+
+def difference_question(metric="revenue", **changes):
+    name = "Doanh thu" if metric == "revenue" else "Số đơn"
+    return question(question=f"{name} hôm nay so với hôm qua chênh lệch bao nhiêu?", **changes)
+
+
+@pytest.mark.parametrize(
+    "current,baseline,expected",
+    [
+        ("100.50", "99.25", "1"),
+        ("123456789012345678901234567890.51", "0.02", "123456789012345678901234567890"),
+        ("0.02", "123456789012345678901234567890.51", "-123456789012345678901234567890"),
+        ("0.50", "0.50", "0"),
+    ],
+)
+def test_difference_uses_exact_operands_and_rounds_only_final_money(
+    semantic_source, current, baseline, expected
+):
+    context = semantic_source(
+        rows=[
+            ["1", "03/01/2026", "Xong", current, "A"],
+            ["2", "02/01/2026", "Đang giao", baseline, "B"],
+            ["3", "03/01/2026", "Huỷ", "9999", "C"],
+            ["4", "02/01/2026", "Đổi trả", "9999", "D"],
+        ]
+    )
+    before = context.prepared.path.read_bytes()
+    result = execute_plan(difference_draft(), difference_question(), context)
+    assert result["answer"]["answer"] == Decimal(expected)
+    assert result["execution"]["aggregations"]["total"]["exact_value"] == Decimal(current)
+    assert result["execution"]["aggregations"]["total"]["rounded_value"] is None
+    assert len(result["plan"]["preflight"]) == 2
+    assert result["plan"]["derived_measures"][0]["unit"] == "VND"
+    assert "difference" in result["plan"]["rule_refs"]
+    assert context.prepared.path.read_bytes() == before
+
+
+def test_difference_zero_negative_count_and_reference_order(semantic_source):
+    context = semantic_source(
+        rows=[
+            ["1", "02/01/2026", "Xong", "100", "A"],
+            ["1", "02/01/2026", "Xong", "100", "A"],
+            ["2", "02/01/2026", "Đang giao", "200", "B"],
+        ]
+    )
+    candidate = difference_draft("order_count")
+    candidate["aggregations"].reverse()
+    candidate["time_windows"].reverse()
+    result = execute_plan(candidate, difference_question("order_count"), context)
+    assert result["answer"]["answer"] == -2
+    assert result["execution"]["unit"] == "order"
+    q = question(question="So với hôm qua, số đơn hôm nay chênh lệch bao nhiêu?")
+    assert execute_plan(candidate, q, context)["answer"]["answer"] == -2
+
+
+def test_difference_partial_and_outside_windows_preflight_independently(semantic_source):
+    context = semantic_source()
+    current = {"kind": "range", "start": "2026-01-01", "end": "2026-01-05"}
+    baseline = {"kind": "range", "start": "2025-12-25", "end": "2026-01-01"}
+    q = question(
+        question="Số đơn từ 01/01/2026 đến 05/01/2026 so với "
+        "từ 25/12/2025 đến 01/01/2026 chênh lệch bao nhiêu?"
+    )
+    result = execute_plan(difference_draft("order_count", current, baseline), q, context)
+    assert result["answer"]["answer"] == 1
+    windows = result["plan"]["time_windows"]
+    assert [w["coverage_status"] for w in windows] == ["partial", "partial"]
+    assert windows[0]["requested_end"] == "2026-01-05"
+    assert windows[0]["effective_window"]["end"] == "2026-01-03"
+    assert windows[1]["requested_start"] == "2025-12-25"
+    assert windows[1]["effective_window"]["start"] == "2026-01-01"
+    q = difference_question(as_of_date="2026-01-01")
+    result = execute_plan(difference_draft(), q, context)
+    assert result["answer"]["type"] == "unanswerable"
+    assert result["execution"]["status"] == "not_performed"
+    assert [w["coverage_status"] for w in result["plan"]["time_windows"]] == ["full", "outside"]
+
+
+def test_difference_unknown_operand_blocks_all_queries_even_with_other_outside(
+    semantic_source, monkeypatch
+):
+    context = semantic_source(rows=[], complete=False)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("numeric query before all dependencies are eligible")
+
+    monkeypatch.setattr("src.agent.execution._compute", forbidden)
+    result = execute_plan(difference_draft(), difference_question(as_of_date="2026-01-04"), context)
+    assert result["answer"]["type"] == "abstain"
+    assert [w["coverage_status"] for w in result["plan"]["time_windows"]] == ["outside", "unknown"]
+    assert len(result["plan"]["preflight"]) == 2
+
+
+def test_difference_month_to_date_uses_runtime_comparison_and_ignores_future(semantic_source):
+    context = semantic_source(
+        coverage_end="31/03/2026",
+        rows=[
+            ["1", "05/03/2026", "Xong", "100", "A"],
+            ["2", "05/02/2026", "Xong", "50", "B"],
+            ["3", "20/02/2026", "Xong", "9999", "C"],
+            ["4", "20/03/2026", "Xong", "9999", "D"],
+        ],
+    )
+    candidate = difference_draft(
+        current={"kind": "current_month"}, baseline={"kind": "previous_mtd"}
+    )
+    q = question(
+        question="Doanh thu tháng này so với tháng trước chênh lệch bao nhiêu?",
+        as_of_date="2026-03-05",
+    )
+    result = execute_plan(candidate, q, context)
+    assert result["answer"]["answer"] == 50
+    assert result["plan"]["time_windows"][1]["requested_end"] == "2026-02-05"
+    candidate["time_windows"][1]["expression"] = {"kind": "previous_month"}
+    with pytest.raises(ContractError, match="question_time_mismatch"):
+        validate_query_plan(candidate, q, context)
+    candidate["time_windows"][1]["expression"] = {"kind": "previous_mtd"}
+    q = replace(q, as_of_date="2026-03-31")
+    assert (
+        validate_query_plan(candidate, q, context)["time_windows"][1]["requested_end"]
+        == "2026-02-28"
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda p: p["derived_measures"][0].update(
+            current_ref="baseline_total", baseline_ref="total"
+        ),
+        lambda p: p["derived_measures"][0].update(current_ref="delta"),
+        lambda p: p["derived_measures"][0].update(baseline_ref="missing"),
+        lambda p: p["derived_measures"][0].update(baseline_ref="total"),
+        lambda p: p["derived_measures"][0].update(operator="percent_change"),
+        lambda p: p["derived_measures"][0].update(id="total"),
+        lambda p: p["derived_measures"][0].update(answer=99),
+        lambda p: p["aggregations"][1].update(metric_id="order_count"),
+        lambda p: p["aggregations"][1].update(unit="USD"),
+        lambda p: p["aggregations"][1].update(filters=["status=shipping"]),
+        lambda p: p["aggregations"][1].update(window_ref="period"),
+        lambda p: p["output"].update(result_refs=["total"]),
+    ],
+)
+def test_difference_rejects_reversal_cycles_mixed_units_scope_and_unbound_refs(
+    semantic_source, change
+):
+    context = semantic_source()
+    candidate = difference_draft()
+    change(candidate)
+    with pytest.raises(ContractError):
+        validate_query_plan(candidate, difference_question(), context)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Doanh thu hôm nay so với hôm qua tăng bao nhiêu phần trăm?",
+        "Doanh thu hôm nay so với hôm qua chênh bao nhiêu %?",
+        "Doanh thu hôm nay so với hôm qua tăng trưởng bao nhiêu?",
+        "Doanh thu riêng sản phẩm A hôm nay so với hôm qua chênh lệch bao nhiêu?",
+        "Doanh thu không tính đơn đang giao hôm nay so với hôm qua chênh lệch bao nhiêu?",
+        "Doanh thu hôm nay và hôm qua?",
+        "Doanh thu hôm nay so với hôm qua?",
+        "Doanh thu tháng 2/2026 so với tháng trước chênh bao nhiêu?",
+        "Doanh thu hôm nay so với hôm qua chênh lệch tuyệt đối bao nhiêu?",
+        "Tỉ trọng doanh thu hôm nay bao nhiêu?",
+        "Bình quân doanh thu hôm nay bao nhiêu?",
+    ],
+)
+def test_difference_or_comparison_cannot_be_repaired_into_single_total(semantic_source, text):
+    context = semantic_source()
+    for candidate in (draft(), difference_draft()):
+        model = ScriptedModel(dumps(candidate), dumps(draft()))
+        result = LocalPlanner(model).decide(question(question=text), context=context)
+        assert result["answer"]["type"] == "abstain"
+        assert model.calls == 1
+
+
+def test_difference_requires_resolved_runtime_rule_and_final_tie_abstains(
+    semantic_source, rulebook_text
+):
+    context = semantic_source(
+        rows=[
+            ["1", "03/01/2026", "Xong", "100.75", "A"],
+            ["2", "02/01/2026", "Xong", "100.25", "B"],
+        ]
+    )
+    result = execute_plan(difference_draft(), difference_question(), context)
+    assert result["answer"]["type"] == "abstain"
+    assert result["execution"]["reason"] == "rounding_tie_unspecified"
+    context = semantic_source(rules=rulebook_text.replace("kỳ hỏi − kỳ so", "kỳ so − kỳ hỏi"))
+    with pytest.raises(ContractError):
+        validate_query_plan(difference_draft(), difference_question(), context)
+    assert (
+        execute_plan(draft("order_count"), question(question="Số đơn tháng này?"), context)[
+            "answer"
+        ]["type"]
+        == "number"
+    )
+
+
+def test_difference_generation_preserves_prior_mtd_before_coverage_clipping(semantic_source):
+    context = semantic_source(coverage_end="31/03/2026")
+    q = question(
+        question="Doanh thu tháng này so với tháng trước chênh lệch bao nhiêu?",
+        as_of_date="2026-03-05",
+    )
+    candidate = difference_draft(
+        current={"kind": "current_month"}, baseline={"kind": "previous_mtd"}
+    )
+    schema = generation_schema(q)
+    _schema(candidate, schema)
+    candidate["time_windows"][1]["expression"] = {"kind": "previous_month"}
+    with pytest.raises(ContractError):
+        _schema(candidate, schema)
+    with pytest.raises(ContractError, match="question_time_mismatch"):
+        validate_query_plan(candidate, q, context)
+    # Narrowing generation never authorizes reversed operand refs.
+    candidate["time_windows"][1]["expression"] = {"kind": "previous_mtd"}
+    candidate["derived_measures"][0].update(current_ref="baseline_total", baseline_ref="total")
+    _schema(candidate, schema)
+    with pytest.raises(ContractError, match="question_time_mismatch"):
+        validate_query_plan(candidate, q, context)
+
+
+def growth_draft(current=None, baseline=None):
+    candidate = difference_draft(current=current, baseline=baseline)
+    candidate["derived_measures"][0]["operator"] = "percent_change"
+    candidate["output"]["expected_type"] = "percent"
+    return candidate
+
+
+def growth_question(**changes):
+    return question(
+        question="Doanh thu hôm nay so với hôm qua tăng bao nhiêu phần trăm?", **changes
+    )
+
+
+@pytest.mark.parametrize(
+    "current,baseline,expected",
+    [
+        ("100.50", "99.25", "1.26"),
+        ("50.25", "100.50", "-50.00"),
+        ("0", "100", "-100.00"),
+        ("100.50", "100.50", "0.00"),
+        ("123456789012345678901234567890.25", "123456789012345678901234567890.24", "0.00"),
+    ],
+)
+def test_growth_exact_rational_round_once_and_signed_result(
+    semantic_source, current, baseline, expected
+):
+    context = semantic_source(
+        rows=[
+            ["1", "03/01/2026", "Xong", current, "A"],
+            ["2", "02/01/2026", "Xong", baseline, "B"],
+        ]
+    )
+    result = execute_plan(growth_draft(), growth_question(), context)
+    assert result["answer"] == {"id": "synthetic", "type": "percent", "answer": Decimal(expected)}
+    assert result["execution"]["operator"] == "percent_change"
+    assert result["execution"]["baseline_value"] == Decimal(baseline)
+    assert result["execution"]["aggregations"]["total"]["rounded_value"] is None
+    assert result["plan"]["derived_measures"][0]["unit"] == "percent"
+    assert result["plan"]["output"]["rounding"]["decimal_places"] == 2
+
+
+def test_growth_zero_baseline_unknown_and_outside_are_distinct(semantic_source):
+    context = semantic_source(rows=[["1", "03/01/2026", "Xong", "100", "A"]])
+    result = execute_plan(growth_draft(), growth_question(), context)
+    assert result["answer"]["type"] == "abstain"
+    assert result["execution"]["reason"] == "percent_change_nonpositive_baseline_undefined"
+    context = semantic_source(rows=[], complete=False)
+    result = execute_plan(growth_draft(), growth_question(), context)
+    assert result["answer"]["type"] == "abstain"
+    assert result["execution"]["reason"] == "coverage_unknown"
+    context = semantic_source()
+    result = execute_plan(growth_draft(), growth_question(as_of_date="2026-01-01"), context)
+    assert result["answer"]["type"] == "unanswerable"
+    assert result["execution"]["status"] == "not_performed"
+
+
+def test_growth_rounding_half_tie_abstains_and_near_tie_is_exact():
+    from src.agent.execution import _percent_change
+
+    policy = {"decimal_places": 2}
+    with pytest.raises(ContractError, match="tie"):
+        _percent_change(Decimal("1"), Decimal("20000"), policy)
+    with pytest.raises(ContractError, match="nonpositive"):
+        _percent_change(Decimal("1"), Decimal("-1"), policy)
+    # Difference is beyond ordinary Decimal precision, but on opposite sides of .005%.
+    assert (
+        _percent_change(Decimal("1"), Decimal("20000.000000000000000000000001"), policy)[
+            "rounded_value"
+        ]
+        == 0
+    )
+    assert _percent_change(Decimal("1"), Decimal("19999.999999999999999999999999"), policy)[
+        "rounded_value"
+    ] == Decimal(".01")
+
+
+@pytest.mark.parametrize(
+    "text,year,month",
+    [
+        ("Doanh thu tháng 1/2026 so với tháng trước tăng bao nhiêu phần trăm?", 2025, 12),
+        ("So với tháng liền trước, doanh thu tháng 5 năm 2025 thay đổi bao nhiêu %?", 2025, 4),
+        (
+            "Cho mình hỏi so với tháng trước đó, doanh thu tháng 2/2026 "
+            "tăng hay giảm mấy phần trăm?",
+            2026,
+            1,
+        ),
+        ("so vs th truoc do, dthu thang 10/2025 tang hay giam may %", 2025, 9),
+    ],
+)
+def test_growth_prior_month_is_anchored_to_asked_month_not_asof(semantic_source, text, year, month):
+    context = semantic_source()
+    q = question(question=text, as_of_date="2026-06-02")
+    from src.agent.plan import _difference_windows
+
+    expressions = _difference_windows(q, percent_change=True)
+    assert expressions[1] == {"kind": "month", "year": year, "month": month}
+    candidate = growth_draft(*expressions)
+    _schema(candidate, generation_schema(q))
+    validate_query_plan(candidate, q, context)
+    candidate["derived_measures"][0].update(current_ref="baseline_total", baseline_ref="total")
+    with pytest.raises(ContractError, match="time_mismatch"):
+        validate_query_plan(candidate, q, context)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Tỉ trọng doanh thu hôm nay so với hôm qua tăng bao nhiêu phần trăm?",
+        "Doanh thu riêng sản phẩm A hôm nay so với hôm qua tăng bao nhiêu phần trăm?",
+        "Doanh thu không tính đơn đang giao hôm nay so với hôm qua tăng bao nhiêu phần trăm?",
+        "Doanh thu hôm nay so với hôm qua chênh lệch bao nhiêu?",
+    ],
+)
+def test_growth_never_erases_filter_ratio_or_difference_semantics(semantic_source, text):
+    with pytest.raises(ContractError):
+        validate_query_plan(growth_draft(), question(question=text), semantic_source())
+
+
+def test_growth_requires_its_runtime_rule_and_rejects_unsupported_count(
+    semantic_source, rulebook_text
+):
+    context = semantic_source(
+        rules=rulebook_text.replace("so với kỳ trước; giảm thì ra số âm", "không có quy định")
+    )
+    with pytest.raises(ContractError):
+        validate_query_plan(growth_draft(), growth_question(), context)
+    context = semantic_source()
+    p = growth_draft()
+    for a in p["aggregations"]:
+        a["metric_id"] = "order_count"
+    with pytest.raises(ContractError, match="revenue_only"):
+        validate_query_plan(
+            p, question(question="Số đơn hôm nay so với hôm qua tăng bao nhiêu phần trăm?"), context
+        )
+
+
+def test_recorded_active_and_return_aliases_follow_metric_exclusion_policy(semantic_source):
+    context = semantic_source(
+        rows=[
+            ["1", "03/01/2026", "Đang giao dịch", "100", "A"],
+            ["2", "03/01/2026", "Đã hoàn hàng", "9999", "B"],
+        ]
+    )
+    assert execute_plan(draft(), question(), context)["answer"]["answer"] == 100
+    assert (
+        execute_plan(draft("order_count"), question(question="Số đơn tháng này?"), context)[
+            "answer"
+        ]["answer"]
+        == 1
+    )
+    rows = list(context.prepared.iter_records("order_lines"))
+    assert any("Đang giao dịch" in dumps(row["source_values"]) for row in rows)
