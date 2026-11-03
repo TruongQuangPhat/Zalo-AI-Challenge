@@ -105,21 +105,29 @@ def semantic_source(synthetic_split, tmp_path, rulebook_text):
 
     revision = 0
 
-    def prepare(*, rows=None, complete=True, rules=None, readme_extra="", cache_dir=None):
+    def prepare(
+        *,
+        rows=None,
+        complete=True,
+        rules=None,
+        readme_extra="",
+        cache_dir=None,
+        coverage_end="03/01/2026",
+    ):
         nonlocal revision
         revision += 1
         business = synthetic_split / "data/shop_a"
-        readme = """One order line per row.
+        readme = f"""One order line per row.
 - **order_id**: order id
 - **date**: order date
 - **status**: order status
 - **amount**: line net amount
 - **item**: product name
 Tiền dùng dấu chấm thập phân, không nhóm nghìn.
-Dữ liệu có đến hết 03/01/2026.
+Dữ liệu có đến hết {coverage_end}.
 """
         if complete:
-            readme += "Dữ liệu đầy đủ từ 01/01/2026 đến hết 03/01/2026.\n"
+            readme += f"Dữ liệu đầy đủ từ 01/01/2026 đến hết {coverage_end}.\n"
         (business / "README.md").write_text(readme + readme_extra)
         (synthetic_split / "rulebook.md").write_text(rulebook_text if rules is None else rules)
         with (business / "sales.csv").open("w", newline="") as handle:

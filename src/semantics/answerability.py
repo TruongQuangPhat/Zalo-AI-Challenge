@@ -19,12 +19,16 @@ from src.temporal.resolver import iso_day, resolve_window
 if TYPE_CHECKING:
     from src.data.catalog import BusinessContext
 
-VERSION = "business-semantics-v1"
+VERSION = "business-semantics-v3"
 
 
 def _coverage(context: BusinessContext) -> dict:
     prepared = context.prepared
-    source = prepared.summary.get("coverage", {}) if prepared else {}
+    source = (
+        prepared.summary.get("coverage", {})
+        if prepared and prepared.summary.get("shape") in {"csv_order_lines", "csv_order_headers"}
+        else {}
+    )
     readme_ref = {
         "split": context.catalog["split"],
         "file": f"data/{context.catalog['business_id']}/README.md",
@@ -61,6 +65,9 @@ def _coverage(context: BusinessContext) -> dict:
         return result
     if source.get("parse_status") != "complete":
         return result
+    if prepared:
+        table = context.source_table(prepared.summary["source_id"])
+        result["source_refs"].append(table.source_ref)
     if end_days:
         end = next(iter(end_days))
         if observed and observed["end"] > end:
@@ -78,6 +85,14 @@ def _coverage(context: BusinessContext) -> dict:
             result["available_span"] = {"start": start, "end": end}
             result["availability_basis"].append("README explicitly declares complete start/end")
             result["uncertainties"] = []
+    elif observed:
+        # Project policy: answer from the released export, using its fully parsed
+        # order-date extent. This is not an external completeness certification.
+        result["available_span"] = dict(observed)
+        result["availability_basis"].append("observed_order_dates")
+        result["uncertainties"] = [
+            "Export extent accepted as coverage; missing interior records cannot be detected."
+        ]
     return result
 
 
@@ -108,7 +123,13 @@ def prepare_semantics(context: BusinessContext) -> dict:
         with closing(prepared.connect()) as connection:
             facts_schema = {
                 table: [row[1] for row in connection.execute(f"PRAGMA table_info({table})")]
-                for table in ["orders", "order_lines"]
+                for table in (
+                    ["inventory_snapshot"]
+                    if summary.get("shape") == "inventory_snapshot"
+                    else ["orders"]
+                    if summary.get("shape") == "csv_order_headers"
+                    else ["orders", "order_lines"]
+                )
             }
     contracts = {}
     for metric_id in METRICS:
@@ -127,16 +148,17 @@ def prepare_semantics(context: BusinessContext) -> dict:
         "temporal_version": TEMPORAL_VERSION,
         "rules": rules.summary(),
         "coverage": _coverage(context),
+        "snapshot": prepared.summary.get("snapshot") if prepared else None,
         "metrics": contracts,
         "capabilities": [
             {
                 "metric_id": key,
                 "status": "unsupported",
-                "reason": "numeric execution/verifier not implemented",
+                "reason": "validated S1 plan and successful preflight required before output",
             }
             for key in METRICS
         ],
-        "metric_execution": "not_implemented",
+        "metric_execution": "separate_validated_s1_executor",
         "prepared_revision": fingerprint(prepared.summary) if prepared else None,
         "facts_schema": facts_schema,
     }
@@ -180,7 +202,11 @@ def preflight(
             fingerprint(prepared.summary) if prepared else None
         ):
             raise SemanticError("stale_context", "prepared revision changed after semantics")
-        if filters is not None and (not isinstance(filters, dict) or filters):
+        if (
+            filters is not None
+            and (not isinstance(filters, dict) or filters)
+            and metric_id != "inventory_on_hand"
+        ):
             return stop("abstain", "filter_unsupported")
         if context.rules is None:
             return stop("abstain", "rule_unresolved")
@@ -191,7 +217,11 @@ def preflight(
         contract = metric_contract(context.rules, metric_id)
         result["contract"] = contract.summary()
         window = resolve_window(expression, as_of_date, context.rules, context.calendar)
-        result["window"] = {**window.summary(), "expression": expression}
+        result["window"] = {
+            **window.summary(),
+            "expression": expression,
+            "time_axis": contract.time_axis,
+        }
         coverage = context.semantics["coverage"]
         result["evidence_refs"] = coverage["source_refs"] + [
             ref
@@ -216,6 +246,34 @@ def preflight(
                 and row["detail"]["severity"] == "blocking"
             ]
             return stop("abstain", "dependent_quality_issue")
+        if metric_id == "inventory_on_hand":
+            snapshot = context.semantics.get("snapshot")
+            if not snapshot or prepared.summary.get("shape") != "inventory_snapshot":
+                return stop("abstain", "snapshot_authority_missing")
+            result["evidence_refs"] += snapshot["source_refs"]
+            if window.start != window.end or window.start.isoformat() != snapshot["snapshot_at"]:
+                return stop("abstain", "snapshot_date_unsupported")
+            if not isinstance(filters, dict) or set(filters) != {"entity", "unit", "question"}:
+                return stop("abstain", "snapshot_product_scope_required")
+            from src.data.normalization.stock import resolve_stock_entity
+
+            try:
+                record = resolve_stock_entity(
+                    context, filters["question"], filters["entity"], filters["unit"]
+                )
+            except (ValueError, TypeError) as exc:
+                return {
+                    **stop("abstain", "snapshot_entity_or_unit_unsupported"),
+                    "diagnostic": str(exc),
+                }
+            result["entity"] = {k: record[k] for k in ["product_code", "product_name", "base_unit"]}
+            result["evidence_refs"].append(record["source_ref"])
+            result["effective_window"] = {
+                "start": snapshot["snapshot_at"],
+                "end": snapshot["snapshot_at"],
+                "inclusive": True,
+            }
+            return stop("eligible_to_execute", "snapshot_date_entity_unit_verified")
         end = min(window.end, window.cutoff or window.end)
         if end < window.start:
             return stop("abstain", "empty_after_cutoff")

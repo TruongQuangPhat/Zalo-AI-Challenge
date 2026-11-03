@@ -168,7 +168,10 @@ def test_group_restoration_dedup_and_lineage_preserve_grain(synthetic_split, tmp
     assert "inherit:order_id" in duplicate["transformations"]
     assert duplicate["line_key"] in {r["line_key"] for r in lineage if r["disposition"] == "kept"}
     assert all(r["source_ref"]["sha256"] for r in lineage)
-    assert prepared.summary["coverage"]["available_span"] is None
+    assert prepared.summary["coverage"]["available_span"] == {
+        "start": "2026-01-01",
+        "end": "2026-01-03",
+    }
     assert prepared.summary["coverage"]["observed_span"] == {
         "start": "2026-01-01",
         "end": "2026-01-03",
