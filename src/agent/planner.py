@@ -1,7 +1,8 @@
-"""Versioned S1 prompt, bounded model repair and deterministic execution fallback."""
+"""Versioned bounded planner and deterministic execution fallback."""
 
 from __future__ import annotations
 
+import re
 import time
 
 from src.agent.context import build_context
@@ -11,29 +12,44 @@ from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError, dumps, loads
 
-PROMPT_VERSION = "planner-v7"
-SYSTEM = """Lập QueryPlan JSON theo schema, không trả lời số hoặc sinh SQL/code.
-S1: một kỳ, toàn shop, output number. Doanh thu/tiền bán/dthu=revenue;
-số đơn/mấy đơn/số bill=order_count. Số lượng hàng/kg không phải số đơn.
-Riêng sản phẩm/khách/nhân viên, trạng thái riêng, phủ định điều kiện, ranking,
-so sánh/tỷ lệ/trung bình/nhiều kỳ: uncertainties=["unsupported_scope_or_operator"].
-Giữ mọi điều kiện, không biến câu ngoài phạm vi thành tổng toàn shop.
-Coverage unknown vẫn lập plan; preflight riêng kiểm tra dữ liệu, không tự suy coverage.
-Ví dụ số đơn tháng này:
+PROMPT_VERSION = "planner-v13"
+SYSTEM = """Lập QueryPlan JSON theo schema; không trả số đáp án, SQL hoặc code.
+Giữ mọi điều kiện. Ngoài scope/schema: uncertainties=["unsupported_scope_or_operator"].
+Trong scope thì uncertainties=[]; không ghi uncertainty chỉ vì không có raw rows.
+revenue=doanh thu/dthu/tiền bán; order_count=số đơn không huỷ/trả;
+cancelled_order_count=số đơn huỷ; placed_order_count=mọi trạng thái.
+Một tổng: một window/aggregate, derived_measures=[], output number.
+Ví dụ số đơn tháng này (template, không phải đáp án):
 {"entities":[],"time_windows":[{"id":"period","expression":{"kind":"current_month"}}],
 "aggregations":[{"id":"total","metric_id":"order_count","window_ref":"period",
 "scope":"whole_business","filters":[],"group_by":[]}],"derived_measures":[],
 "output":{"expected_type":"number","result_refs":["total"]},"uncertainties":[]}
-Hôm nay=today; hôm qua/hqua=yesterday; tháng này=current_month;
-tháng trước=previous_month; tuần này/trước=current_week/previous_week;
-current_month chỉ từ ngày 1 đến as_of_date; month là trọn tháng, có thể gồm ngày sau as_of.
-Không đổi "tháng này" thành month(year,month), vì sẽ tính cả ngày chưa xảy ra.
-N ngày gần nhất=last_n_days(days); ngày cụ thể=day(date ISO);
-khoảng ngày=range(start,end ISO); tháng M/Y=month(year,month);
-quý Q/Y=quarter(year,quarter); năm Y=year(year); từ đầu năm=year_to_date.
-Thiếu năm tháng/quý: luật missing_year theo as_of_date, không theo ngày máy.
-Tết=tet(year), trước Tết=before_tet(year). Không đoán khi thời gian mơ hồ.
-Server gắn identity, requirements, policy, rule_refs từ runtime authority.
+S2 difference=current-baseline; percent_change=(current-baseline)/baseline*100,
+output percent. Dùng đúng refs/kỳ hỏi/kỳ so; không tự tính. Baseline 0/âm: executor abstain.
+Tháng M/Y so tháng trước: baseline M-1 của kỳ hỏi, không theo as_of_date.
+Tháng này so tháng trước: current_month/previous_mtd, cùng số ngày.
+AOV: average_order_value, revenue/order_count, number.
+Tỉ lệ huỷ: cancellation_rate, cancelled_order_count/placed_order_count, percent.
+Trung bình ngày/thứ: average_daily, metric/calendar_day_count, number;
+weekday=0 thứ Hai,...,6 Chủ nhật trên cả hai aggregates; đếm cả ngày không bán.
+Doanh thu nhóm: một revenue có item_group/customer_group theo câu hỏi.
+Tỉ trọng: share, revenue/revenue, percent; chỉ tử có item_group=<nhóm>,
+customer_group=<nhóm khách> không dấu hoặc channel=phone; mẫu toàn shop filters=[].
+Ca sáng shift=morning; ca chiều shift=afternoon. So ca dùng một window, hai
+aggregates cùng metric, filters riêng. Ca chiều so ca sáng: baseline là sáng.
+Nhiều số độc lập: output list, result_refs đúng thứ tự hỏi, derived_measures=[].
+Chuỗi 3 tháng kết thúc M/Y: 3 windows/aggregates theo thứ tự tháng cũ tới mới.
+Hai kênh: channel=phone/counter theo thứ tự hỏi; một window chung.
+Không sort kết quả theo giá trị. scope=whole_business, group_by=[], entities=[].
+Hôm nay=today; hôm qua/hqua=yesterday; tuần trc/trước=previous_week;
+tuần này=current_week; tháng này=current_month; tháng trước=previous_month;
+N ngày gần nhất=last_n_days; từ đầu năm=year_to_date; tháng M/Y=month;
+quý Q/Y=quarter; năm Y=year; ngày cụ thể=day; khoảng ngày=range;
+Tết=tet, trước Tết=before_tet. Dùng as_of_date, không dùng ngày máy.
+Current_month chỉ đến as_of; month là cả tháng, có thể có ngày sau as_of.
+Server gắn identity, policy, requirements, resolve/preflight. Coverage unknown vẫn
+lập plan; missing order_identity vẫn lập count để preflight xác minh unanswerable.
+Không thay count bằng số dòng. Không bỏ điều kiện sản phẩm/khách/ngưỡng/ranking.
 """
 
 STOCK_SYSTEM = """Lập QueryPlan JSON để tra tồn kho, không trả lời số và không sinh SQL/code.
@@ -56,7 +72,7 @@ mốc snapshot, identity và đơn vị, không mở coverage cho revenue/order_
 
 
 class LocalPlanner:
-    name = "local-s1"
+    name = "local-planner"
     is_mock = False
 
     def __init__(self, model, *, attempts: int = 2, timeout: float = 120):
@@ -75,7 +91,11 @@ class LocalPlanner:
 
     def decide(self, question: Question, *, context: BusinessContext) -> dict:
         selected = build_context(question, context)
-        stock = bool(selected.get("snapshot"))
+        from src.semantics.rulebook import plain
+
+        stock = bool(selected.get("snapshot")) and bool(
+            re.search(r"\b(ton|kho)\b", plain(question.question))
+        )
         schema = generation_schema(
             question,
             stock=stock,
@@ -96,7 +116,7 @@ class LocalPlanner:
                     raise ContractError("incomplete_generation")
                 draft = loads(record["text"])
                 validate_query_plan(draft, question, context)
-                decision = execute_plan(draft, question, context)
+                decision = execute_plan(draft, question, context, deadline=deadline)
                 decision["plan"]["planning"] = {
                     "prompt_version": PROMPT_VERSION,
                     "attempts": attempts,

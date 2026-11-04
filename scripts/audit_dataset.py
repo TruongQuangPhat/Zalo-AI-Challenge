@@ -112,7 +112,10 @@ def _membership(protocol: dict, split: Split, groups: dict, *, structure: bool) 
     summary = {}
     for name, part in parts.items():
         businesses, ids = part["businesses"], part["question_ids"]
-        if not businesses or len(set(businesses)) != len(businesses):
+        allowed_empty = (
+            name == "final_holdout" and protocol.get("allow_empty_final_holdout") is True
+        )
+        if (not businesses and not allowed_empty) or len(set(businesses)) != len(businesses):
             raise ContractError("empty/duplicate business membership")
         if seen_businesses.intersection(businesses):
             raise ContractError("business leakage across partitions")
@@ -137,8 +140,17 @@ def _membership(protocol: dict, split: Split, groups: dict, *, structure: bool) 
 
 
 def validate_manifest(manifest: dict, split: Split, current: dict) -> dict:
-    if manifest.get("version") != "validation-split-v1":
+    if manifest.get("version") not in {"validation-split-v1", "validation-split-v2"}:
         raise ContractError("unknown manifest version")
+    if manifest["version"] == "validation-split-v2":
+        revision = manifest.get("revision", {})
+        prior = revision.get("prior_manifest_sha256", "")
+        if (
+            len(prior) != 64
+            or any(c not in "0123456789abcdef" for c in prior)
+            or not revision.get("authority")
+        ):
+            raise ContractError("split revision needs prior hash and explicit authority")
     if manifest.get("source_files") != current["files"]:
         raise ContractError("source fingerprints changed; review frozen split")
     if manifest.get("source_fingerprint") != current["source_fingerprint"]:
@@ -153,8 +165,23 @@ def validate_manifest(manifest: dict, split: Split, current: dict) -> dict:
     protocols = manifest["protocols"]
     if set(protocols) != {"business", "structure"}:
         raise ContractError("missing evaluation protocol")
+    for name, protocol in protocols.items():
+        for flag in {"unseen_family_holdout", "allow_empty_final_holdout"} & protocol.keys():
+            if (
+                manifest["version"] != "validation-split-v2"
+                or name != "structure"
+                or type(protocol[flag]) is not bool
+            ):
+                raise ContractError(
+                    "protocol scope flags require an explicit v2 structure revision"
+                )
     summary = {
-        name: _membership(protocol, split, groups, structure=name == "structure")
+        name: _membership(
+            protocol,
+            split,
+            groups,
+            structure=name == "structure" and protocol.get("unseen_family_holdout", True),
+        )
         for name, protocol in protocols.items()
     }
     for name, protocol in protocols.items():

@@ -1,0 +1,6082 @@
+{
+  "schema_version": 1,
+  "notes": [
+    "Kết quả trên subset train/dev đã chọn, không đại diện toàn dataset hoặc blind holdout.",
+    "Native và synthetic được chấm riêng: correct +1, wrong -1, abstain 0. Diagnostic/scenario chỉ kiểm tra hành vi, không gán gold hay điểm.",
+    "Mỗi câu lưu một kết quả cho các repetitions giống nhau; không cộng repetitions thành câu mới."
+  ],
+  "evaluations": {
+    "before_fix_cuda": {
+      "method": "llm_cuda",
+      "repetitions": 2,
+      "predictions_identical": true,
+      "description": "Kết quả trước sửa lỗi subtotal; giữ lại lịch sử 13 câu sai."
+    },
+    "final_replay": {
+      "method": "saved_draft_replay",
+      "repetitions": 2,
+      "predictions_identical": true,
+      "description": "Draft LLM giữ nguyên, replay trên facts/executor cuối; không phải lượt LLM mới."
+    },
+    "final_cuda": {
+      "method": "llm_cuda",
+      "repetitions": 2,
+      "predictions_identical": true,
+      "description": "Hai lượt LLM mới trên source cuối: 44 native và 3 fixture mỗi lượt."
+    },
+    "final_cpu_smoke": {
+      "method": "llm_cpu",
+      "repetitions": 1,
+      "description": "Ba câu smoke trên source cuối; chưa chứng nhận CPU toàn bộ S1/S2."
+    }
+  },
+  "stages": {
+    "S1": {
+      "primary_evaluation": "final_replay",
+      "summaries": {
+        "before_fix_cuda": {
+          "native": {
+            "total": 59,
+            "correct": 49,
+            "wrong": 2,
+            "abstain": 8,
+            "points": 47
+          }
+        },
+        "final_replay": {
+          "native": {
+            "total": 59,
+            "correct": 51,
+            "wrong": 0,
+            "abstain": 8,
+            "points": 51
+          },
+          "scenario": {
+            "total": 1,
+            "passed": 1,
+            "failed": 0
+          }
+        },
+        "final_cuda": {
+          "native": {
+            "total": 19,
+            "correct": 16,
+            "wrong": 0,
+            "abstain": 3,
+            "points": 16
+          },
+          "synthetic": {
+            "total": 2,
+            "correct": 2,
+            "wrong": 0,
+            "abstain": 0,
+            "points": 2
+          }
+        },
+        "final_cpu_smoke": {
+          "native": {
+            "total": 1,
+            "correct": 1,
+            "wrong": 0,
+            "abstain": 0,
+            "points": 1
+          }
+        }
+      },
+      "questions": [
+        {
+          "id": "q_006c26c65d50",
+          "business_id": "biz_112",
+          "question": "thang 7/2026 co bao nhiu don co dthu tu 55.000 dong tro len",
+          "as_of_date": "2026-07-31",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 2345
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            }
+          }
+        },
+        {
+          "id": "q_00eadfc5c599",
+          "business_id": "biz_104",
+          "question": "đếm số đơn đã huỷ trong tháng 12/2025",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 64
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 64
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 64
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_01a47607f90c",
+          "business_id": "biz_128",
+          "question": "tổng dthu trong ngày hôm nay là bao nhiêu vaayj",
+          "as_of_date": "2026-08-11",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 39793500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 39793500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 39793500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_01bba93199de",
+          "business_id": "biz_130",
+          "question": "Doanh thu tháng 4/2026 bao nhiêu?",
+          "as_of_date": "2026-08-29",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 1380833500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 1380833500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 1380833500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_03d662023a15",
+          "business_id": "biz_116",
+          "question": "trong thang 9/2025, cua hang co may don o trang thai huy",
+          "as_of_date": "2026-09-03",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 23
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 23
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 23
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_05f70ec18809",
+          "business_id": "biz_110",
+          "question": "cho hỏi số đơn quý 2/2026 là nhiêu",
+          "as_of_date": "2026-07-03",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 5772
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 5772
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 5772
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 5772
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_06496e250b4a",
+          "business_id": "biz_104",
+          "question": "dthu cuar Sữa tươi trân châu đường đen (L) trong thangs 6 năm 2025 là bao nhiêu",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 2545000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            }
+          }
+        },
+        {
+          "id": "q_06fad07d2128",
+          "business_id": "biz_102",
+          "question": "Hôm qua cửa hàng bán được mấy đơn?",
+          "as_of_date": "2026-03-29",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 73
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 73
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 73
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_06fad2e085de",
+          "business_id": "biz_116",
+          "question": "dthu quý 4/2025 của cửa hàng là bao nhiêu",
+          "as_of_date": "2026-09-03",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 4441276600
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 4441276600
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 4441276600
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_09ae9e282fd3",
+          "business_id": "biz_106",
+          "question": "Tổng dthu tháng 2 năm 2025 là bao nhiêu?",
+          "as_of_date": "2026-09-14",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 216045000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 216045000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 216045000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0add21504f80",
+          "business_id": "biz_110",
+          "question": "Doanh thu hôm qua của cửa hàng là bao nhiêu?",
+          "as_of_date": "2026-06-27",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 4695500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 4695500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 4695500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 4695500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cpu_smoke": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 4695500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0c0a18470dcf",
+          "business_id": "biz_111",
+          "question": "Hôm qua cửa hàng bán đc mấy đơn?",
+          "as_of_date": "2026-07-20",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 137
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 137
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 137
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0c8f3e07768f",
+          "business_id": "biz_101",
+          "question": "e so don hang quy 4/2025 la bao nhiu vay",
+          "as_of_date": "2026-08-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 4032
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 4032
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 4032
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0d1d7ead3e7e",
+          "business_id": "biz_121",
+          "question": "Tháng này các thuốc có hoạt chất Cetirizin bán được bao nhiêu tiền?",
+          "as_of_date": "2026-09-20",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 1475400
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            }
+          }
+        },
+        {
+          "id": "q_0dea4845a4cd",
+          "business_id": "biz_109",
+          "question": "so don bi huy trong thang 7 nam 2026 la bao nhieu",
+          "as_of_date": "2026-08-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 62
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 62
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 62
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0dfc898d10a0",
+          "business_id": "biz_119",
+          "question": "dthu quý 2/2026 của cửa hàng là bnhiu",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 408903100
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 408903100
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 408903100
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0fb7868ac463",
+          "business_id": "biz_107",
+          "question": "Cho tôi biết doanh thu hôm qua.",
+          "as_of_date": "2026-04-18",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 7490000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 7490000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 7490000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0fe9a120b8f8",
+          "business_id": "biz_128",
+          "question": "Hôm nay bán được mấy đơn hàng?",
+          "as_of_date": "2026-04-19",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 36
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 36
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 36
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_117dc29c5798",
+          "business_id": "biz_123",
+          "question": "so bill hnay la bnhiu",
+          "as_of_date": "2026-04-09",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 54
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 54
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 54
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_162ac7bd3642",
+          "business_id": "biz_130",
+          "question": "quy 2/2026 cua hang co bn don hang ta",
+          "as_of_date": "2026-08-29",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 7599
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 7599
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 7599
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_189cb0ae43e6",
+          "business_id": "biz_102",
+          "question": "dthu hqua cua cua hang la bn z",
+          "as_of_date": "2025-11-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 8108700
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 8108700
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 8108700
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_1cc70c12aa27",
+          "business_id": "biz_101",
+          "question": "Hôm nay cửa hàng bán được bao nhiêu tiền?",
+          "as_of_date": "2026-02-22",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 13479900
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 13479900
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 13479900
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_1d614f702a45",
+          "business_id": "biz_121",
+          "question": "Tuần này có tổng cộng bao nhiêu đơn vậy?",
+          "as_of_date": "2025-11-26",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 211
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 211
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 211
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_1f722c6a3bec",
+          "business_id": "biz_123",
+          "question": "doanh thu tháng 10/2025 bnhiu",
+          "as_of_date": "2026-06-28",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 202375900
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 202375900
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 202375900
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_4fc9e1ac67a8",
+          "business_id": "biz_111",
+          "question": "check giùm tổng dthu tháng 3 năm 2026 là bn",
+          "as_of_date": "2026-08-19",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 251060500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 251060500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 251060500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_6b01da01500d",
+          "business_id": "biz_112",
+          "question": "hnay bán đc mấy đơn hàng",
+          "as_of_date": "2025-11-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 188
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 188
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 188
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_6eb6724619af",
+          "business_id": "biz_119",
+          "question": "coi gium trong thang 9/2025, cua hang co may don o trang thai huy",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 16
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 16
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 16
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_a54cc8dccf38",
+          "business_id": "biz_106",
+          "question": "xem giúp cửa hàng bán đươc bao nhiêu đơn trong quý 3 năm 2025",
+          "as_of_date": "2026-09-14",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 11568
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 11568
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 11568
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_122c8d717bba",
+          "business_id": "biz_102",
+          "question": "revenue hnay la bao nhiu",
+          "as_of_date": "2026-04-21",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 11111900
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 11111900
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 11111900
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_2f8b07fd6521",
+          "business_id": "biz_104",
+          "question": "Tháng 6/2025 cửa hàng bán được tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 194246000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 194246000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 194246000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_07436da15c57",
+          "business_id": "biz_104",
+          "question": "hom nay ban duoc may don",
+          "as_of_date": "2026-03-21",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 107
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 107
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 107
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_53b7fe7acdb7",
+          "business_id": "biz_109",
+          "question": "Trong quý 2 năm 2026, doanh thu của cửa hàng được bao nhiêu tiền?",
+          "as_of_date": "2026-08-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 726989600
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 726989600
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 726989600
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_2d390a634c19",
+          "business_id": "biz_109",
+          "question": "Cho tôi biết số đơn hôm qua.",
+          "as_of_date": "2026-08-03",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 39
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 39
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 39
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_3f0d3cd3c585",
+          "business_id": "biz_111",
+          "question": "Tháng 9/2025 cửa hàng bán được tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2026-08-19",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 229934500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 229934500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 229934500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_052517924e03",
+          "business_id": "biz_112",
+          "question": "Tháng 6/2025 có mấy ngày doanh thu đạt 9.800.000 đồng trở lên?",
+          "as_of_date": "2026-07-31",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 14
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            }
+          }
+        },
+        {
+          "id": "q_1039f11f81d8",
+          "business_id": "biz_116",
+          "question": "Trong quý 1 năm 2026 có tổng cộng bao nhiêu đơn ạ?",
+          "as_of_date": "2026-09-03",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 3078
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 3078
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 3078
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ca2b794ab372",
+          "business_id": "biz_119",
+          "question": "cửa hàng bán đc bn đơn trong quý 4 năm 2025 đó",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 5331
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 5331
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 5331
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_17b17408d4cc",
+          "business_id": "biz_121",
+          "question": "Cho tôi biết doanh thu tháng 6/2026.",
+          "as_of_date": "2026-09-20",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 257202500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 257202500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 257202500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_6f877dfe79e8",
+          "business_id": "biz_112",
+          "question": "dthu 30 ngay gan nhat cua cua hang la bao nhieu",
+          "as_of_date": "2026-06-18",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 313922000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 313922000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 313922000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0cb7c9b93048",
+          "business_id": "biz_101",
+          "question": "Cho tôi biết số đơn hôm qua.",
+          "as_of_date": "2025-09-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 37
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 37
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 37
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 37
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_1af02cd5fe06",
+          "business_id": "biz_101",
+          "question": "Cho tôi biết số đơn hqua",
+          "as_of_date": "2026-04-14",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 44
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 44
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 44
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 44
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_b90743fdcce6",
+          "business_id": "biz_101",
+          "question": "số bill hôm qua là bao nhiêu",
+          "as_of_date": "2026-07-06",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 35
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 35
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 35
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 35
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_2a3019504577",
+          "business_id": "biz_101",
+          "question": "doanh thu hqua cua cua hang la bao nhiu",
+          "as_of_date": "2026-01-12",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 3530400
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 3530400
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 3530400
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 3530400
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ed4fe0895229",
+          "business_id": "biz_101",
+          "question": "Cho tôi biết doanh thu tháng 1/2026.",
+          "as_of_date": "2026-08-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 245184900
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 245184900
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 245184900
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 245184900
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_c893acce3ef3",
+          "business_id": "biz_101",
+          "question": "Xem giúp tổng doanh thu tháng 7 năm 2026 là bao nhiêu?",
+          "as_of_date": "2026-08-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 236132200
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 236132200
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 236132200
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 236132200
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_09f475fddfec",
+          "business_id": "biz_110",
+          "question": "xem giúp số đơn hôm nay là bao nhiêu",
+          "as_of_date": "2025-06-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 74
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 74
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 74
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 74
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_3790a635bd18",
+          "business_id": "biz_110",
+          "question": "Cho tôi biết số đơn hqua.",
+          "as_of_date": "2026-02-10",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 63
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 63
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 63
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 63
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_5d6431886ab9",
+          "business_id": "biz_110",
+          "question": "hnay bán được mấy đơn hàng?",
+          "as_of_date": "2026-06-11",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 89
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 89
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 89
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 89
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_99a0f6d709bd",
+          "business_id": "biz_110",
+          "question": "Tính riêng ngày hôm nay, cửa hàng bán được bao nhiêu đơn hàng?",
+          "as_of_date": "2026-02-21",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 31
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 31
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 31
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 31
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_c86e099eb394",
+          "business_id": "biz_110",
+          "question": "Tính riêng ngày hôm nay, cửa hàng bán được bao nhiêu đơn hàng?",
+          "as_of_date": "2025-05-14",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 79
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 79
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 79
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 79
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_62a9a454f35b",
+          "business_id": "biz_101",
+          "question": "Doanh thu của Coca Cola 330ml trong tháng 5 năm 2026 là bao nhiêu?",
+          "as_of_date": "2026-08-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 2726000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            }
+          }
+        },
+        {
+          "id": "q_03cf8b6c4b16",
+          "business_id": "biz_105",
+          "question": "thang 3/2026 hang nuoc ep dua hau (l) thu ve bao nhieu tien ha",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 4012000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            }
+          }
+        },
+        {
+          "id": "q_5b5c9f36b825",
+          "business_id": "biz_105",
+          "question": "số đơn quý 1/2026 là bao nhiu",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 14698
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 14698
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 14698
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 14698
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_4470cd3d68b2",
+          "business_id": "biz_124",
+          "question": "số đơn từ đầu nawm tới hết bữa nay là bao nhiêu",
+          "as_of_date": "2025-05-08",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 11527
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 11527
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 11527
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_114c372f1eef",
+          "business_id": "biz_105",
+          "question": "trong thang 5/2026, xet theo dthu, ngay nao ban dat nhat",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "date",
+            "answer": "2026-05-02"
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            }
+          }
+        },
+        {
+          "id": "q_18497b6ca770",
+          "business_id": "biz_124",
+          "question": "coi gium tong tien hang nhap vao thang 2/2025 la bn",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 212577400
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "abstain",
+              "points": 0
+            }
+          }
+        },
+        {
+          "id": "q_1367a63a409f",
+          "business_id": "biz_105",
+          "question": "tinh tu ngay 1/1 den het hom nay, doanh thu nam nay la bao nhieu do",
+          "as_of_date": "2026-06-18",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 2086001100
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 3985924100
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 2086001100
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 2086001100
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_2b96cf7eb6b3",
+          "business_id": "biz_105",
+          "question": "Cho mình biết doanh thu tháng 1/2026.",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 389514000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 788374400
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 389514000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 389514000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_c3a500850ebb",
+          "business_id": "biz_124",
+          "question": "check giùm tính riêng ngày hôm nay, doanh thu của cửa hàng đươc bn tiền ta",
+          "as_of_date": "2025-09-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 10637600
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 10637600
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 10637600
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "header_channel_count",
+          "business_id": "synthetic_header",
+          "question": "Số đơn bán qua điện thoại tháng này?",
+          "as_of_date": "2026-01-03",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "number",
+            "answer": 1
+          },
+          "results": {
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 1
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "header_channel_revenue",
+          "business_id": "synthetic_header",
+          "question": "Doanh thu bán qua điện thoại tháng này?",
+          "as_of_date": "2026-01-03",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "number",
+            "answer": 100
+          },
+          "results": {
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 100
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "scenario_ledger_no_order_identity",
+          "business_id": "biz_107",
+          "question": "Số đơn tháng này là bao nhiêu?",
+          "as_of_date": "2026-06-18",
+          "case_type": "scenario",
+          "expected_answer": {
+            "type": "unanswerable",
+            "reason": "order_identity_not_recorded"
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "unanswerable",
+                "reason": "order_identity_not_recorded"
+              },
+              "verdict": "behavior_pass",
+              "points": null
+            }
+          }
+        }
+      ]
+    },
+    "S2": {
+      "primary_evaluation": "final_replay",
+      "summaries": {
+        "before_fix_cuda": {
+          "native": {
+            "total": 115,
+            "correct": 104,
+            "wrong": 11,
+            "abstain": 0,
+            "points": 93
+          }
+        },
+        "final_replay": {
+          "native": {
+            "total": 115,
+            "correct": 115,
+            "wrong": 0,
+            "abstain": 0,
+            "points": 115
+          },
+          "synthetic": {
+            "total": 15,
+            "correct": 15,
+            "wrong": 0,
+            "abstain": 0,
+            "points": 15
+          },
+          "diagnostic": {
+            "total": 2,
+            "passed": 2,
+            "failed": 0
+          }
+        },
+        "final_cuda": {
+          "native": {
+            "total": 25,
+            "correct": 25,
+            "wrong": 0,
+            "abstain": 0,
+            "points": 25
+          },
+          "synthetic": {
+            "total": 1,
+            "correct": 1,
+            "wrong": 0,
+            "abstain": 0,
+            "points": 1
+          }
+        },
+        "final_cpu_smoke": {
+          "native": {
+            "total": 2,
+            "correct": 2,
+            "wrong": 0,
+            "abstain": 0,
+            "points": 2
+          }
+        }
+      },
+      "questions": [
+        {
+          "id": "q_31e60bdd4d2f",
+          "business_id": "biz_109",
+          "question": "Cho hỏi tháng này, doanh thu các đơn bán qua điện thoại là bao nhiêu, doanh thu các đơn bán tại quầy là bao nhiêu?",
+          "as_of_date": "2026-08-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "list",
+            "answer": [
+              1634900,
+              33118400
+            ]
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  1634900,
+                  33118400
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  1634900,
+                  33118400
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  1634900,
+                  33118400
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_137db6c2259a",
+          "business_id": "biz_112",
+          "question": "Tỉ trọng của nhóm trà sữa trong dthu tháng 5/2025 là bao nhiêu %?",
+          "as_of_date": "2026-07-31",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 20.23
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 20.23
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 20.23
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_26328d66cbe6",
+          "business_id": "biz_121",
+          "question": "check gium ti trong cua nhom thuc pham chuc nang trong dthu thang 3/2025 la bao nhieu %",
+          "as_of_date": "2026-09-20",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 25.51
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 25.51
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 25.51
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_3400f2bffb00",
+          "business_id": "biz_112",
+          "question": "ti trong cua nhom ca phe trong dthu thang 8/2025 la bao nhiu %",
+          "as_of_date": "2026-07-31",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 35.17
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 35.17
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 35.17
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_41b3968eb526",
+          "business_id": "biz_111",
+          "question": "Tỉ trọng của nhóm trà sữa trong doanh thu tháng 2/2026 là bao nhiêu %?",
+          "as_of_date": "2026-08-19",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 19.36
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 19.36
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 19.36
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_56f805cae3a8",
+          "business_id": "biz_116",
+          "question": "tỉ trọng của nhóm cát đá trong dthu tháng 7/2025 là bao nhiêu %",
+          "as_of_date": "2026-09-03",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 13.83
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 13.83
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 13.83
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_64006dcec25e",
+          "business_id": "biz_109",
+          "question": "ti trong cua nhom sua trong dthu thang 1/2026 la bnhiu %",
+          "as_of_date": "2026-08-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 6.04
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 6.04
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 6.04
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_7366dcb457a5",
+          "business_id": "biz_111",
+          "question": "Xem giúp tỉ trọng doanh thu các đơn bán qua điện thoại trong tổng doanh thu tháng 2/2025 là bao nhiêu phần trăm?",
+          "as_of_date": "2026-08-19",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 4.43
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 4.43
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 4.43
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 4.43
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cpu_smoke": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 4.43
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_84ab3fa7ec41",
+          "business_id": "biz_116",
+          "question": "Cho hỏi tỉ trọng của nhóm xi măng trong doanh thu tháng 3/2026 là bao nhiêu %?",
+          "as_of_date": "2026-09-03",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 6.93
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 6.93
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 6.93
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_8a08a59c83a2",
+          "business_id": "biz_111",
+          "question": "Tỉ trọng doanh thu của khách nhóm thân thiết trong tổng doanh thu tháng 1/2026 là bao nhiêu phần trăm?",
+          "as_of_date": "2026-08-19",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 20.16
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 20.16
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 20.16
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_983e4fc2d9f7",
+          "business_id": "biz_119",
+          "question": "ti trong cua nhom di ung trong dthu thang 11/2025 la bnhiu %",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 5.18
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 5.18
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 5.18
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_9a3b9473390e",
+          "business_id": "biz_128",
+          "question": "tỉ trọng của nhóm cơm mì cháo trong dthu tháng 8/2025 là bnhiu %",
+          "as_of_date": "2026-09-07",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 12.07
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 12.07
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 12.07
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ae7a77137caf",
+          "business_id": "biz_111",
+          "question": "Cho hỏi tỉ trọng của nhóm đá xay trong doanh thu tháng 9/2025 là bao nhiêu %?",
+          "as_of_date": "2026-08-19",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 4.01
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 4.01
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 4.01
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_beb4b5d17be0",
+          "business_id": "biz_128",
+          "question": "Tỉ trọng doanh thu của khách nhóm thân thiết trong tổng doanh thu tháng 12/2025 là bao nhiêu phần trăm ạ?",
+          "as_of_date": "2026-09-07",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 20.34
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 20.34
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 20.34
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_db770627db21",
+          "business_id": "biz_119",
+          "question": "ê tỉ trọng cuar nhóm giảm đau hạ sốt trong revenue tháng 2/2026 là bao nhiu % ta",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 10.17
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 10.17
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 10.17
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ef173115902d",
+          "business_id": "biz_112",
+          "question": "ti trong cua nhom ca phe trong dthu thang 2/2025 la bao nhieu %",
+          "as_of_date": "2026-07-31",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "unanswerable",
+            "answer": null
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "unanswerable",
+                "reason": "outside_available_span"
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "unanswerable",
+                "reason": "outside_available_span"
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0283688e44df",
+          "business_id": "biz_128",
+          "question": "Cho hỏi tuần trước riêng ca chiều bán được tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2025-06-20",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 109181000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 109181000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 109181000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_04293d2ed907",
+          "business_id": "biz_128",
+          "question": "Ca chiều tuần trước doanh thu được bao nhiêu?",
+          "as_of_date": "2026-06-18",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 112133300
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 112133300
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 112133300
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_082e5f45ee37",
+          "business_id": "biz_109",
+          "question": "Đếm số đơn bán trong ca sáng tháng 9/2025.",
+          "as_of_date": "2026-08-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 638
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 638
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 638
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0bf48a939a7e",
+          "business_id": "biz_109",
+          "question": "Trong tháng 5/2025, doanh thu ca chiều hơn hay kém ca sáng bao nhiêu phần trăm vậy?",
+          "as_of_date": "2026-08-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 25.55
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 25.55
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 25.55
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_166ae673a2b0",
+          "business_id": "biz_106",
+          "question": "Tuần trước riêng ca chiều bán được tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2025-09-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 27437500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 27437500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 27437500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_194556651253",
+          "business_id": "biz_106",
+          "question": "ca chieu thang 8/2025 doanh thu duoc bnhiu",
+          "as_of_date": "2026-09-14",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 125457000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 125457000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 125457000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_226d90b72c7c",
+          "business_id": "biz_106",
+          "question": "Xem giúp tháng 2/2026 ca chiều so với ca sáng thì số đơn chênh bao nhiêu %?",
+          "as_of_date": "2026-09-14",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -22.51
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -22.51
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -22.51
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_259342644826",
+          "business_id": "biz_109",
+          "question": "Tuần trước số đơn ca chiều chênh ca sáng bao nhiêu phần trăm?",
+          "as_of_date": "2026-04-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 31.39
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 31.39
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 31.39
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_2674d035b36f",
+          "business_id": "biz_128",
+          "question": "đếm số đơn bán trong ca sáng tháng 8/2025",
+          "as_of_date": "2026-09-07",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 590
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 590
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 590
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_29eb2ce0741a",
+          "business_id": "biz_106",
+          "question": "ee tuần rồi dthu ca chiều chênh ca sangs nhiêu %",
+          "as_of_date": "2025-10-09",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -24.9
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -24.90
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -24.90
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_36e95d0049de",
+          "business_id": "biz_109",
+          "question": "Tuần trước riêng ca chiều bán được tổng cộng bao nhiêu tiền nhỉ?",
+          "as_of_date": "2025-12-09",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 32063600
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 32063600
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 32063600
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_5dcee0cbdb11",
+          "business_id": "biz_119",
+          "question": "Giúp mình đếm số đơn bán trong ca chiều tháng 8/2025.",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 1072
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 1072
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 1072
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_745a5b81c65b",
+          "business_id": "biz_109",
+          "question": "Ca chiều tháng 10/2025 có tổng cộng bao nhiêu đơn?",
+          "as_of_date": "2026-08-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 920
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 920
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 920
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_74aff62b9ef4",
+          "business_id": "biz_123",
+          "question": "Tổng tiền bán hàng của ca sáng tháng 5/2026 là bao nhiêu?",
+          "as_of_date": "2026-06-28",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 82768500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 82768500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 82768500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_770ce52e8313",
+          "business_id": "biz_128",
+          "question": "dthu ca chiều thangs 12/2025 laf nhiêu",
+          "as_of_date": "2026-09-07",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 497099000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 497099000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 497099000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_7acbbee1cad3",
+          "business_id": "biz_128",
+          "question": "dthu ca sáng tháng 5/2026 là bao nhiêu?",
+          "as_of_date": "2026-09-07",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 335837200
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 335837200
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 335837200
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_7c548fdb25ce",
+          "business_id": "biz_128",
+          "question": "tuần rồi số đơn ca chiều chênh ca sáng bao nhiêu % đó",
+          "as_of_date": "2026-06-09",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 52.78
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 52.78
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 52.78
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_8269e70e643e",
+          "business_id": "biz_128",
+          "question": "Cho mình hỏi tuần trước số đơn ca chiều chênh ca sáng bao nhiêu phần trăm?",
+          "as_of_date": "2025-12-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 42.86
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 42.86
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 42.86
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_89444ae7458f",
+          "business_id": "biz_109",
+          "question": "Tổng tiền bán hàng của ca sáng tuần trước là bao nhiêu?",
+          "as_of_date": "2025-01-28",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 53831500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 53831500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 53831500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_8c6d83185401",
+          "business_id": "biz_119",
+          "question": "dthu ca chieu thang 9/2025 la bn",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 88766800
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 88766800
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 88766800
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_8d076e8b04fa",
+          "business_id": "biz_119",
+          "question": "tháng 11/2025 ca chiều bán dc bnhiu tiền",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 72603400
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 72603400
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 72603400
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_9a5b6712d6b1",
+          "business_id": "biz_106",
+          "question": "tuần trc ca chiều có bnhiu bill",
+          "as_of_date": "2025-08-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 393
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 393
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 393
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_9fd096dfdb84",
+          "business_id": "biz_128",
+          "question": "Cho mình hỏi so với ca sáng, doanh thu ca chiều tuần trước chênh bao nhiêu %?",
+          "as_of_date": "2025-07-11",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 87.86
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 87.86
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 87.86
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 87.86
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cpu_smoke": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 87.86
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_b0b4a9ccf846",
+          "business_id": "biz_128",
+          "question": "Tuần trước ca chiều bán được mấy đơn?",
+          "as_of_date": "2025-11-21",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 215
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 215
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 215
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_bea7897a0242",
+          "business_id": "biz_109",
+          "question": "Tháng 5/2026 riêng ca sáng bán được tổng cộng bao nhiêu tiền vậy?",
+          "as_of_date": "2026-08-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 114807200
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 114807200
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 114807200
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_c12e68cb08e8",
+          "business_id": "biz_119",
+          "question": "ca chieu thang 1/2026 dthu duoc bao nhieu ta",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 75399500
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 75399500
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 75399500
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_c79ab64fce22",
+          "business_id": "biz_119",
+          "question": "ca chieu thang 5/2026 doanh thu duoc bnhiu",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 83569100
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 83569100
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 83569100
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ce9e622a3fff",
+          "business_id": "biz_119",
+          "question": "thang 1/2026 ca chieu so vs ca sang thi dthu chenh bao nhieu %",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 42.14
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 42.14
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 42.14
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_d0d679c2a0c4",
+          "business_id": "biz_106",
+          "question": "Tháng 9/2025 số đơn ca chiều chênh ca sáng bao nhiêu phần trăm?",
+          "as_of_date": "2026-09-14",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -18.52
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -18.52
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -18.52
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ddc426d6c32a",
+          "business_id": "biz_119",
+          "question": "so vs ca sangs, doanh thu ca chiều tháng 4/2026 chênh bao nhiu % nhỉ",
+          "as_of_date": "2026-07-13",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 41.41
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 41.41
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 41.41
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_df06bb859b32",
+          "business_id": "biz_106",
+          "question": "Tuần trước riêng ca sáng bán được tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2026-07-28",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 37902000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 37902000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 37902000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_e6a9f4af23f7",
+          "business_id": "biz_109",
+          "question": "dthu ca sáng tháng 12/2025 là bao nhiêu?",
+          "as_of_date": "2026-08-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 117243400
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 117243400
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 117243400
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_f4a89e1d7ba0",
+          "business_id": "biz_106",
+          "question": "Cho hỏi tháng 8/2026 ca chiều bán được bao nhiêu tiền?",
+          "as_of_date": "2026-09-14",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 139965000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 139965000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 139965000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_fc39150ef084",
+          "business_id": "biz_128",
+          "question": "dthu ca chiều tháng 7/2026 là bao nhiêu?",
+          "as_of_date": "2026-09-07",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 526389600
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 526389600
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 526389600
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_fe2ff88fa4ea",
+          "business_id": "biz_119",
+          "question": "Tuần trước riêng ca chiều bán đc tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2025-07-30",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 16144700
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 16144700
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 16144700
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ff15a54587af",
+          "business_id": "biz_128",
+          "question": "Tháng 9/2025 riêng ca sáng bán được tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2026-09-07",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 343749000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 343749000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 343749000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ffbb247c3151",
+          "business_id": "biz_123",
+          "question": "Tuần trước ca chiều bán được mấy đơn?",
+          "as_of_date": "2025-06-23",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 256
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 256
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 256
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0872d9f34f31",
+          "business_id": "biz_104",
+          "question": "Cho mình hỏi so với tháng trước đó, doanh thu tháng 2/2026 tăng hay giảm mấy phần trăm?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -31.57
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -31.57
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -31.57
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_35983db97b94",
+          "business_id": "biz_104",
+          "question": "Doanh thu tháng 4 năm 2026 tăng trưởng bao nhiêu % so với tháng 4 năm 2025?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -5.83
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -5.83
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -5.83
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_36d4c28e5079",
+          "business_id": "biz_104",
+          "question": "so vs th truoc do, dthu thang 1/2026 tang hay giam may phan tram",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 0.14
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 0.14
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 0.14
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_3b29ba188ca3",
+          "business_id": "biz_104",
+          "question": "Tháng 3/2026 doanh thu thay đổi bao nhiêu % so với tháng liền trước?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 42.46
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 42.46
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 42.46
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_6b684641ac51",
+          "business_id": "biz_104",
+          "question": "Tháng 10/2025 doanh thu thay đổi bao nhiêu % so với tháng liền trước?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 1.17
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 1.17
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 1.17
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_852a88cb4c90",
+          "business_id": "biz_104",
+          "question": "So với tháng liền trước, doanh thu tháng 9 năm 2025 thay đổi bao nhiêu %?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -5.84
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -5.84
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -5.84
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_908c0f903c5f",
+          "business_id": "biz_104",
+          "question": "so vs th trước đó, doanh thu tháng 12/2025 tăng hay giảm mấy %",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -0.35
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -0.35
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -0.35
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_a383091ec4c7",
+          "business_id": "biz_104",
+          "question": "so với th trước đó, doanh thu tháng 6/2025 tăng hay giảm mấy %",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -4.62
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -4.62
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -4.62
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_2145ced2c91e",
+          "business_id": "biz_104",
+          "question": "Tháng 5/2026 tỉ lệ đơn bị huỷ là bao nhiêu phần trăm?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 2.03
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 2.03
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 2.03
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_45d1788daa18",
+          "business_id": "biz_104",
+          "question": "trong tháng 3/2026, tỉ lệ đơn huỷ là nhiêu %",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 1.8
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 1.80
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 1.80
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_52cdffcb4362",
+          "business_id": "biz_104",
+          "question": "trung bình mỗi đơn tháng 4/2026 mang về bao nhiêu dthu",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 70720
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70720
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70720
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_5711c54355c2",
+          "business_id": "biz_104",
+          "question": "trung bình mỗi đơn tháng 4/2025 mang về bao nhiêu doanh thu z",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 71045
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 71045
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 71045
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_5e92228fd206",
+          "business_id": "biz_104",
+          "question": "Tháng 6/2025 dthu bình quân mỗi đơn là bao nhiêu?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 70712
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70712
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70712
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_6ca243e0583b",
+          "business_id": "biz_104",
+          "question": "Tháng 5/2026 dthu bình quân mỗi đơn là bao nhiêu?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 70392
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70392
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70392
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_71811505443b",
+          "business_id": "biz_104",
+          "question": "thangs 10/2025 tỉ lệ đơn bị huỷ là bao nhiu %",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 2.1
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 2.10
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 2.10
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_9a49fee2a9d3",
+          "business_id": "biz_104",
+          "question": "tháng 7/2025 tỉ lệ đơn bij huỷ là bao nhiêu %",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 1.97
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 1.97
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 1.97
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_9cf1b36e098b",
+          "business_id": "biz_104",
+          "question": "Tháng 2/2026 doanh thu bình quân mỗi đơn hàng là bao nhiêu?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 70874
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70874
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70874
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_b85681f4c12b",
+          "business_id": "biz_104",
+          "question": "cho hỏi trong tháng này, tỉ lệ đơn huỷ là bao nhiêu phần trăm",
+          "as_of_date": "2026-05-20",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 1.65
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 1.65
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 1.65
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_c706e30eab74",
+          "business_id": "biz_104",
+          "question": "giá trị trung bình một đơn tháng 8/2025 là bn nhỉ",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 70976
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70976
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70976
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_e1874330b217",
+          "business_id": "biz_104",
+          "question": "tháng 2/2026 tỉ lệ đơn bị huỷ là bao nhiêu phần trăm",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 2.09
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 2.09
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 2.09
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_eb8f92be22c3",
+          "business_id": "biz_104",
+          "question": "tháng 4/2025 tỉ lệ đơn bị huỷ là bao nhiu phần trăm",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 2.28
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 2.28
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 2.28
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_fccd343bf6f1",
+          "business_id": "biz_104",
+          "question": "Tháng 7/2025 dthu bình quân mỗi đơn hàng là bao nhiêu?",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 73191
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 73191
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 73191
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_06e8d7da339d",
+          "business_id": "biz_105",
+          "question": "Tuần trước doanh thu bình quân mỗi đơn là bao nhiêu",
+          "as_of_date": "2026-06-02",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 72137
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 391336
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 72137
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 72137
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_338ae382671b",
+          "business_id": "biz_105",
+          "question": "Tuần trước ca chiều so với ca sáng thì doanh thu chênh bao nhiêu %?",
+          "as_of_date": "2026-03-12",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -16.41
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -16.41
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -16.41
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -16.41
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_4d18e8298871",
+          "business_id": "biz_105",
+          "question": "Giá trị trung bình một đơn tháng 9/2025 là bao nhiêu?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 70853
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 143425
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70853
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70853
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_74716eae9c4f",
+          "business_id": "biz_105",
+          "question": "Cho mình hỏi trung bình mỗi đơn tuần trước mang về bao nhiêu doanh thu?",
+          "as_of_date": "2026-03-31",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 73038
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 73038
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 73038
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 73038
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_80928271d24c",
+          "business_id": "biz_105",
+          "question": "Trung bình mỗi đơn tuần trước mang về bao nhiêu doanh thu?",
+          "as_of_date": "2026-03-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 72888
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 72888
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 72888
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 72888
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_982f5bc2303c",
+          "business_id": "biz_105",
+          "question": "trung binh moi don thang 5/2025 mang ve bao nhiu dthu ha",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 70419
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 142200
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70419
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70419
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_e40f683db005",
+          "business_id": "biz_105",
+          "question": "Cho hỏi trung bình mỗi đơn tháng 3/2026 mang về bao nhiêu doanh thu?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 72709
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 147383
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 72709
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 72709
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_fe699a7dc387",
+          "business_id": "biz_105",
+          "question": "giá trị trung bình một đơn tháng 3/2025 là bao nhiêu ta",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 70888
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 143078
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70888
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 70888
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_0183529f9d61",
+          "business_id": "biz_124",
+          "question": "dthu 3 tháng liền nhau kết thúc ở tháng 6/2025 là bao nhiêu mỗi tháng, từ tháng cũ đến tháng mới",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "list",
+            "answer": [
+              287435200,
+              346554700,
+              309693800
+            ]
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  287435200,
+                  346554700,
+                  309693800
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  287435200,
+                  346554700,
+                  309693800
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_20ef7fe8e588",
+          "business_id": "biz_124",
+          "question": "Trung bình mỗi đơn tháng 2/2025 mang về bao nhiêu doanh thu?",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 114391
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 114391
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 114391
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_392694afa261",
+          "business_id": "biz_124",
+          "question": "cho hoir giá trị trung bình một đơn tháng 5/2025 laf bao nhiu",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 118399
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 118399
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 118399
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_4f2f6570ecfc",
+          "business_id": "biz_124",
+          "question": "thang 1/2026 ti le don bi huy la bao nhieu %",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 0.93
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 0.93
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 0.93
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_763e48cae1bb",
+          "business_id": "biz_124",
+          "question": "ti trong cua nhom giam dau ha sot trong dthu thang 10/2025 la bao nhieu %",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 5.87
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 5.87
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 5.87
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_7f6fd6d714ed",
+          "business_id": "biz_124",
+          "question": "Doanh thu tháng 2 năm 2026 tăng trưởng bao nhiêu % so với tháng 2 năm 2025?",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 30.97
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 30.97
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 30.97
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_843f0bd18b62",
+          "business_id": "biz_124",
+          "question": "dthu thang 7/2025 tang hay giam bao nhieu % so voi th truoc",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 6.22
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 6.22
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 6.22
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_9ac81ef15afa",
+          "business_id": "biz_124",
+          "question": "Tháng 4/2025 doanh thu bình quân mỗi đơn hàng là bao nhiêu?",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 110808
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 110808
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 110808
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_c4f58d6b9d7d",
+          "business_id": "biz_124",
+          "question": "thang 2/2025 dthu thay doi bao nhiu % so voi thang lien trc",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -8.64
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -8.64
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -8.64
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_e76fa95d61b6",
+          "business_id": "biz_124",
+          "question": "Doanh thu tháng 1/2026 tăng hay giảm bao nhiêu phần trăm so với tháng trước?",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 3.0
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 3.00
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 3.00
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_14d138cb0a76",
+          "business_id": "biz_105",
+          "question": "Tháng 4/2026 ca chiều bán được bao nhiêu tiền?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 176282700
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 569230600
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 176282700
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 176282700
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_1c4d072b63b0",
+          "business_id": "biz_105",
+          "question": "tuan roi ca chieu co bnhiu don hang",
+          "as_of_date": "2026-02-12",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 555
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 555
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 555
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 555
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_1fe312ba9eed",
+          "business_id": "biz_105",
+          "question": "e dem so don ban trong ca sang tuan roi",
+          "as_of_date": "2025-08-26",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 605
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 605
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 605
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 605
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_228efd786818",
+          "business_id": "biz_123",
+          "question": "check gium dthu cac don ban qua dien thoai va doanh thu cac don ban tai quay thang nay lan luot la bao nhieu",
+          "as_of_date": "2026-06-28",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "list",
+            "answer": [
+              6739400,
+              149738300
+            ]
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  6739400,
+                  149738300
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  6739400,
+                  149738300
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_281d6d8a83c6",
+          "business_id": "biz_105",
+          "question": "Doanh thu 3 tháng liền nhau kết thúc ở tháng 3/2026 là bao nhiêu mỗi tháng, từ tháng cũ đến tháng mới?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "list",
+            "answer": [
+              389514000,
+              269031700,
+              398881600
+            ]
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  788374400,
+                  544544800,
+                  808544600
+                ]
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  389514000,
+                  269031700,
+                  398881600
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  389514000,
+                  269031700,
+                  398881600
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_4239d9d46ec8",
+          "business_id": "biz_105",
+          "question": "Cho mình hỏi tháng 5/2026 riêng ca sáng bán được tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 227610900
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 227610900
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 227610900
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 227610900
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_576da3a138ac",
+          "business_id": "biz_105",
+          "question": "Tháng 10/2025 riêng ca chiều bán được tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 175175700
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 562463500
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 175175700
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 175175700
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_7292dd37232d",
+          "business_id": "biz_124",
+          "question": "xem giup tong tien ban hang cua ca sang thang 1/2025 la bao nhiu",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 131825900
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 131825900
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 131825900
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_74001e944444",
+          "business_id": "biz_123",
+          "question": "dthu 3 tháng liền nhau kết thúc ở tháng 4/2025 là bnhiu mỗi tháng, từ tháng cũ đến tháng mới",
+          "as_of_date": "2026-06-28",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "list",
+            "answer": [
+              197963000,
+              207089500,
+              208231500
+            ]
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  197963000,
+                  207089500,
+                  208231500
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  197963000,
+                  207089500,
+                  208231500
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_8d5736c69340",
+          "business_id": "biz_105",
+          "question": "Tháng 3/2025 riêng ca chiều bán được tổng cộng bao nhiêu tiền?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 156698000
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 509852500
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 156698000
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 156698000
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_8ee3f3222d9f",
+          "business_id": "biz_105",
+          "question": "tuan roi ca chieu co bao nhiu bill",
+          "as_of_date": "2026-04-14",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 541
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 541
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 541
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 541
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_9682c347c2e1",
+          "business_id": "biz_123",
+          "question": "Tháng này, dthu các đơn bán tại quầy là bao nhiêu, doanh thu các đơn bán qua điện thoại là bao nhiêu?",
+          "as_of_date": "2026-06-28",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "list",
+            "answer": [
+              149738300,
+              6739400
+            ]
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  149738300,
+                  6739400
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  149738300,
+                  6739400
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_9d7475f71a94",
+          "business_id": "biz_112",
+          "question": "dthu 3 thang lien nhau ket thuc o thang 12/2025 la bnhiu moi thang, tu thang cu den thang moi",
+          "as_of_date": "2026-07-31",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "list",
+            "answer": [
+              306937000,
+              311009000,
+              314808500
+            ]
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  306937000,
+                  311009000,
+                  314808500
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  306937000,
+                  311009000,
+                  314808500
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_9ebd7e03c206",
+          "business_id": "biz_105",
+          "question": "tuan truoc, dthu ca chieu tang hay giam bao nhiu % so vs ca sang",
+          "as_of_date": "2025-09-06",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -16.12
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 828.82
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -16.12
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -16.12
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_b6e73ed9e8e4",
+          "business_id": "biz_105",
+          "question": "Xem giúp tháng 12/2025, doanh thu ca chiều tăng hay giảm bao nhiêu % so với ca sáng?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -20.88
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 162.25
+              },
+              "verdict": "wrong",
+              "points": -1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -20.88
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -20.88
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_c8a0338cf101",
+          "business_id": "biz_105",
+          "question": "Ca sáng tháng 12/2025 doanh thu được bao nhiêu?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 210845600
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 210845600
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 210845600
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 210845600
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_c94926eebb4c",
+          "business_id": "biz_111",
+          "question": "So doanh thu các đơn bán qua điện thoại với doanh thu các đơn bán tại quầy tháng này: mỗi bên bao nhiêu nhỉ?",
+          "as_of_date": "2026-08-19",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "list",
+            "answer": [
+              6950600,
+              146347600
+            ]
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  6950600,
+                  146347600
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "list",
+                "answer": [
+                  6950600,
+                  146347600
+                ]
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ca9498a0ddb3",
+          "business_id": "biz_105",
+          "question": "ca chieu tuan roi dthu duoc bao nhieu",
+          "as_of_date": "2026-04-05",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 39265200
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 39265200
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 39265200
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 39265200
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_cd79235ce4e8",
+          "business_id": "biz_105",
+          "question": "Cho hỏi tháng 12/2025, số đơn ca chiều tăng hay giảm bao nhiêu % so với ca sáng?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "percent",
+            "answer": -20.72
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -20.72
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -20.72
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": -20.72
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_e736042784fe",
+          "business_id": "biz_105",
+          "question": "Tháng 10/2025 ca sáng bán được bao nhiêu tiền vậy?",
+          "as_of_date": "2026-06-24",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 204125100
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 204125100
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 204125100
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 204125100
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_ff00298626b6",
+          "business_id": "biz_124",
+          "question": "Tuần trước ca chiều có bao nhiêu đơn hàng?",
+          "as_of_date": "2025-06-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 363
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 363
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 363
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "q_38472348f446",
+          "business_id": "biz_124",
+          "question": "Tháng 3/2025 nhóm mắt mũi họng bán được bao nhiêu tiền?",
+          "as_of_date": "2026-05-25",
+          "case_type": "native",
+          "expected_answer": {
+            "type": "number",
+            "answer": 23444700
+          },
+          "results": {
+            "before_fix_cuda": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 23444700
+              },
+              "verdict": "correct",
+              "points": 1
+            },
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 23444700
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_week",
+          "business_id": "synthetic_shop",
+          "question": "Doanh thu tuần này?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "number",
+            "answer": 300
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 300
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_last_n",
+          "business_id": "synthetic_shop",
+          "question": "Số đơn 7 ngày gần nhất?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "number",
+            "answer": 2
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 2
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_difference",
+          "business_id": "synthetic_shop",
+          "question": "Doanh thu hôm nay so với hôm qua chênh lệch bao nhiêu?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "number",
+            "answer": -100
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": -100
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_growth_mtd",
+          "business_id": "synthetic_shop",
+          "question": "Doanh thu tháng này so với tháng trước tăng bao nhiêu %?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 0
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 0.00
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_count_growth",
+          "business_id": "synthetic_shop",
+          "question": "Số đơn tháng này so với tháng trước tăng bao nhiêu %?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 50
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 50.00
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_cancel",
+          "business_id": "synthetic_shop",
+          "question": "Tỉ lệ đơn bị huỷ tháng 1/2026 bao nhiêu phần trăm?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 16.67
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 16.67
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_cancel_mtd",
+          "business_id": "synthetic_shop",
+          "question": "Tỉ lệ đơn huỷ tháng này bao nhiêu %?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 20
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 20.00
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_aov",
+          "business_id": "synthetic_shop",
+          "question": "Giá trị trung bình một đơn tháng 1/2026?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "number",
+            "answer": 150
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 150
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_weekday",
+          "business_id": "synthetic_shop",
+          "question": "Doanh thu trung bình các ngày thứ Hai trong tháng 1/2026?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "number",
+            "answer": 125
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 125
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_daily",
+          "business_id": "synthetic_shop",
+          "question": "Doanh thu trung bình mỗi ngày tháng 1/2026?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "number",
+            "answer": 19
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 19
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_daily_count",
+          "business_id": "synthetic_shop",
+          "question": "Số đơn trung bình mỗi ngày tháng 1/2026?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "number",
+            "answer": 0.13
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "number",
+                "answer": 0.13
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_customer_share",
+          "business_id": "synthetic_shop",
+          "question": "Tỉ trọng doanh thu của khách nhóm VIP trong tổng doanh thu tháng 1/2026 bao nhiêu %?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 50
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 50.00
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_item_share",
+          "business_id": "synthetic_shop",
+          "question": "Tỉ trọng của nhóm trà sữa trong doanh thu tháng 1/2026 bao nhiêu %?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 50
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 50.00
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_empty_group",
+          "business_id": "synthetic_shop",
+          "question": "Tỉ trọng của nhóm chưa bán trong doanh thu tháng 1/2026 bao nhiêu %?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 0
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 0.00
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "s2_completion_zero_aov",
+          "business_id": "synthetic_shop",
+          "question": "Giá trị trung bình một đơn ngày 14/01/2026?",
+          "as_of_date": "2026-01-14",
+          "case_type": "diagnostic",
+          "expected_answer": {
+            "type": "abstain"
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "behavior_pass",
+              "points": null
+            }
+          }
+        },
+        {
+          "id": "s2_completion_zero_cancel",
+          "business_id": "synthetic_shop",
+          "question": "Tỉ lệ đơn huỷ ngày 14/01/2026 bao nhiêu %?",
+          "as_of_date": "2026-01-14",
+          "case_type": "diagnostic",
+          "expected_answer": {
+            "type": "abstain"
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "abstain"
+              },
+              "verdict": "behavior_pass",
+              "points": null
+            }
+          }
+        },
+        {
+          "id": "s2_completion_outside",
+          "business_id": "synthetic_shop",
+          "question": "Doanh thu trung bình mỗi ngày tháng 11/2025?",
+          "as_of_date": "2026-01-14",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "unanswerable"
+          },
+          "results": {
+            "final_replay": {
+              "actual_answer": {
+                "type": "unanswerable",
+                "reason": "outside_available_span"
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        },
+        {
+          "id": "header_channel_share",
+          "business_id": "synthetic_header",
+          "question": "Tỉ trọng các đơn bán qua điện thoại trong doanh thu tháng này bao nhiêu %?",
+          "as_of_date": "2026-01-03",
+          "case_type": "synthetic",
+          "expected_answer": {
+            "type": "percent",
+            "answer": 25
+          },
+          "results": {
+            "final_cuda": {
+              "actual_answer": {
+                "type": "percent",
+                "answer": 25.00
+              },
+              "verdict": "correct",
+              "points": 1
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -5,9 +5,10 @@ Contract version: `data-contracts-v1`. Taxonomy: `question-taxonomy-v1`.
 [roadmap](../roadmap.md), không suy ra từ việc có tài liệu hoặc fixture.
 Các hợp đồng C–F trong roadmap và rulebook/README/calendar đúng split là nguồn đối chiếu.
 Readers, profile và business catalog đã có implementation theo Phase 2;
-Prepared facts S1 cho một CSV order-line đã có trong `src/data/normalization/`;
-rule profile, contracts revenue/count, temporal resolver và preflight đã có API.
-Entity mapping rộng, QueryPlan và metric execution vẫn chờ các slice/phase tương ứng.
+Prepared facts cho CSV/XLSX/SQLite đã có trong `src/data/normalization/`, gồm checked
+header/detail/master joins, continuation và sổ bán không mã đơn. QueryPlan, metric
+contracts, temporal resolver, preflight và Decimal execution dùng chung S1/S2.
+Entity mapping rộng/ranking vẫn chưa bật; bảng capability ghi đúng giới hạn thực tế.
 
 ## Kiểu chung và phạm vi S1
 
@@ -90,6 +91,16 @@ phải giữ partial/not_checked. Runtime không coi `read_complete=true` là me
 Nhận diện summary trước grouping/forward-fill. Dòng unknown có thể ảnh hưởng số liệu phải chặn metric.
 Âm ở voucher không tự là return; sổ không mã đơn giữ các bản ghi giống nhau.
 
+S1/S2 baseline hiện tại đã kiểm chứng trong scope hữu hạn; kết quả tại
+[JSON chung](../reports/stage_results.json); evidence kỹ thuật local tại
+`.artifacts/s1-s2-full/verification-evidence.json`, section `s1_s2_final_baseline`. Summary phải bị nhận diện trước
+header inheritance; bare “Cộng/Tổng” chỉ bị loại khi thoả điều kiện cấu trúc dòng,
+không loại giao dịch thật chỉ vì trùng tên. Header revenue có filter kênh phải lọc
+`order_scopes` trước reduction; missing channel của bản ghi liên quan giữ abstain.
+Cache phải khớp toàn bộ normalizer/parser dependencies và checksum facts, không gắn
+metadata revision mới lên facts cũ để chứng nhận. Report phân biệt unchanged-draft
+replay có context proof với fresh LLM inference; gold chỉ thuộc evaluator sau workers.
+
 ## Hợp đồng truy vấn, metric và output
 
 | Contract | Trường bắt buộc | Invariant / extension |
@@ -151,7 +162,7 @@ tái tạo output bằng `--reviews`; metadata này không thuộc runtime infer
 `connect()` mở database read-only/query-only; `iter_records()` chỉ đọc bảng facts/audit đã cho phép.
 
 SQLite STRICT dùng một file `facts.sqlite`, không thêm dependency. Schema version là
-`prepared-facts-v2`; dependencies/quality summary nằm trong bảng `metadata`. Money là TEXT
+`prepared-facts-v5`; dependencies/quality summary nằm trong bảng `metadata`. Money là TEXT
 Decimal chính xác, qua API trả Decimal; không dùng SUM/AVG/CAST REAL cho tiền trong SQL.
 `orders` giữ raw ID/namespace key, ordered_at, canonical status, mapping_status.
 `order_lines` giữ key riêng, order FK, net_amount nullable khi lỗi có issue, row_role,
@@ -160,7 +171,15 @@ Return item nằm riêng role với sale item; event_at chưa biết giữ null,
 `lineage` map mỗi raw row tới line key hoặc disposition header/title/blank/summary/quarantined;
 bản trùng trỏ về line giữ lại. `issues.detail` có code, raw value, source ref, affected metrics và severity.
 
-Mapping mở trên một CSV resolved khi README xác nhận order-line hoặc một dòng/một đơn không có chi tiết hàng và nghĩa các cột. Header-only chỉ tạo orders/lineage, không tạo order_lines giả; chỉ bật order_count, revenue thiếu canonical line facts vẫn unsupported.
+Mapping mở trên các role/schema có authority README hoặc finite POS column labels.
+Header-only giữ orders và order_revenues khi nguồn khai báo tiền hàng thuần; không
+tạo order_lines giả hoặc suy revenue từ tổng payable. Header/detail join kiểm tra
+cardinality, key conflicts và orphan trước khi tính. Nhóm hàng/khách join bằng mã;
+tên không dấu chỉ được nối khi khớp duy nhất một mã danh mục theo quyết định người dùng
+04/11, có basis/warning/count trong metadata. Đa ứng viên vẫn chặn.
+Ledger giữ sales_events theo grain bản ghi, giữ hai dòng giống nhau là hai events;
+không tạo mã đơn để count. Thiếu order identity có bằng chứng trả unanswerable.
+Các sheet/phần tiếp nối cần authority; bảng phụ tồn/giá/thu/nhập không tự nhập sales.
 Header inheritance/negative-return conventions cần README; dedup/whole-order return cần
 operator rulebook đã nhận diện. Mapping/locale/coverage có căn cứ và hashes; luật chưa hiểu
 hoặc shape khác trả unsupported. Day/timestamp giữ precision thời gian nguồn, không cắt theo as-of.
@@ -168,6 +187,13 @@ Available span ưu tiên khai báo đầy đủ hợp lệ trong README, nếu t
 đã parse đầy đủ theo chính sách export được người dùng chấp nhận ngày 03/11. Metadata giữ
 observed_order_dates và cảnh báo missing interior records; không mở khi parse/đọc thiếu, rỗng
 chưa có authority hoặc nguồn mâu thuẫn README. Không dùng min/max calendar làm coverage.
+Ledger dùng observed_sales_record_dates riêng. Dấu nhóm tiền nghìn được chấp nhận khi
+toàn cột nhất quán theo cụm ba chữ số, ghi user basis/warning; explicit README ưu tiên.
+Ngày Excel/native clock giữ date system và precision nguồn. Return ghi âm cùng mã
+đơn được liên kết với đơn gốc, không đổi ordered_at/clock sang ngày trả hàng.
+Dòng tổng “Cộng”/“Tổng” không identity/quantity trong sales/ledger được loại trước
+kế thừa header, giữ raw lineage; không đưa tổng sheet vào đơn cuối. Revenue header
+có filter kênh phải lọc order_scopes trước reduction; missing channel không thành 0.
 
 ## Semantic metadata S1 — implementation boundary
 
@@ -192,8 +218,10 @@ ngày local của timestamp nguồn, giữ offset và bao trọn phần giây l�
 chuyển timezone theo máy hoặc hỗ trợ ca khi chỉ có date. Tết và trước Tết kiểm tra calendar
 liên tục cho cả kỳ gốc và kỳ so, không suy từ cột holiday hoặc nguồn bên ngoài.
 
-`preflight` chỉ nhận aggregate revenue/count toàn business và biểu thức temporal có
-cấu trúc. Nonempty filters/metric/operator chưa hỗ trợ dẫn tới abstain. Kết quả gồm:
+`preflight` nhận metric contract và biểu thức temporal có cấu trúc; các filter đã đăng ký
+gồm weekday, product/customer group, channel và shift. Filter/metric/operator khác
+dẫn tới abstain. QueryPlan tối đa ba windows/aggregations, một derived measure hoặc
+list tối đa ba scalar; mỗi operand preflight độc lập. Kết quả gồm:
 `decision`, `reason`, `contract`, `window`, `effective_window`, `evidence_refs`, `issue_refs`.
 `eligible_to_execute` không có answer value và chưa chứng nhận answerability cuối.
 Schema thiếu field canonical là engine chưa hỗ trợ, không là proof dữ liệu gốc thiếu.

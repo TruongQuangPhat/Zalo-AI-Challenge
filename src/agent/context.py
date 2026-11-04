@@ -6,7 +6,7 @@ from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.answerability import prepare_semantics
 
-VERSION = "planner-context-v4"
+VERSION = "planner-context-v9"
 
 
 def build_context(question: Question, context: BusinessContext) -> dict:
@@ -27,6 +27,17 @@ def build_context(question: Question, context: BusinessContext) -> dict:
         if entry["status"] == "resolved":
             for table, columns in entry["contract"]["required_fields"].items():
                 fields.setdefault(table, set()).update(columns)
+    mapping = (
+        context.prepared.summary.get("mapping", {}).get("fields", {}) if context.prepared else {}
+    )
+    for field, table, columns in [
+        ("clock", "order_times", ["order_key", "seconds_of_day"]),
+        ("channel", "order_scopes", ["order_key", "channel"]),
+        ("customer_group", "order_groups", ["order_key", "customer_group"]),
+        ("item_group", "line_groups", ["line_key", "item_group"]),
+    ]:
+        if field in mapping and table in semantics["facts_schema"]:
+            fields.setdefault(table, set()).update(columns)
     # Stable metadata comes before per-question values so llama.cpp can reuse its
     # native token-prefix cache. Full quotes/hashes remain in BusinessContext/logs.
     return {
@@ -48,14 +59,11 @@ def build_context(question: Question, context: BusinessContext) -> dict:
             key: {
                 field: entry["contract"][field]
                 for field in (
-                    "required_fields",
                     "input_grain",
                     "count_unit",
                     "status_policy",
                     "time_axis",
                     "unit",
-                    "formula",
-                    "rule_refs",
                 )
             }
             if entry["status"] == "resolved"
@@ -78,7 +86,6 @@ def build_context(question: Question, context: BusinessContext) -> dict:
             {
                 "id": key,
                 "status": rule.status,
-                "operator": rule.operator,
                 "parameters": rule.parameters,
                 "source_lines": sorted({ref["line"] for ref in rule.source_refs}),
             }
@@ -87,6 +94,7 @@ def build_context(question: Question, context: BusinessContext) -> dict:
             in {
                 "as_of",
                 "week",
+                "shift",
                 "current_month",
                 "missing_year",
                 "tet",
@@ -94,6 +102,13 @@ def build_context(question: Question, context: BusinessContext) -> dict:
                 "explicit_month",
                 "year_to_date",
                 "inclusive_range",
+                "difference",
+                "percent_change",
+                "cancellation_rate",
+                "average_order_value",
+                "customer_share",
+                "item_group",
+                "ordered_results",
             }
         ],
         "warnings": [
@@ -102,7 +117,7 @@ def build_context(question: Question, context: BusinessContext) -> dict:
             (
                 "One inventory_on_hand product at snapshot/base unit; no history/conversion."
                 if semantics.get("snapshot")
-                else "S1: one whole-business revenue/order_count number; other scopes unsupported."
+                else "S2 needs verified operands and a positive denominator for division."
             ),
         ],
         "preparation_status": context.prepared.summary["status"] if context.prepared else None,
@@ -110,6 +125,9 @@ def build_context(question: Question, context: BusinessContext) -> dict:
         if context.prepared
         else [],
         "snapshot": semantics.get("snapshot"),
+        "missing_information": context.prepared.summary.get("missing_information", [])
+        if context.prepared
+        else [],
         "inventory_entities": stock_candidates(context, question.question),
         "as_of_date": question.as_of_date,
         "question": question.question,

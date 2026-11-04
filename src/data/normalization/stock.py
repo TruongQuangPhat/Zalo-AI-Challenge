@@ -196,7 +196,7 @@ def _mentioned_records(context: BusinessContext, question: str) -> list[dict]:
 
 def stock_candidates(context: BusinessContext, question: str) -> list[dict]:
     """Bounded source identities for planning; never expose inventory quantities."""
-    if not context.prepared or context.prepared.summary.get("shape") != "inventory_snapshot":
+    if not context.prepared or not context.prepared.summary.get("snapshot"):
         return []
     return [
         {k: row[k] for k in ["product_code", "product_name", "base_unit"]}

@@ -62,8 +62,25 @@ def rulebook_text() -> str:
         "shop), không cộng thuế VAT, không gồm phí giao hàng. Tiền hàng, tiền bán của đơn"
         " bán cùng nghĩa với doanh thu |\n"
         "## 2. Thời gian\n"
+        "| Chênh lệch, hơn / kém, tăng / giảm bao nhiêu (số, không phải %) | "
+        "kỳ hỏi − kỳ so: ít hơn ra số âm, giữ đơn vị của số đo |\n"
+        "| Phần trăm thay đổi, tăng trưởng | so với kỳ trước; giảm thì ra số âm |\n"
+        "| Tỉ lệ đơn huỷ trong kỳ | phần trăm đơn huỷ trong mọi đơn đặt trong kỳ "
+        "(theo ngày đặt, mọi trạng thái: cả đơn huỷ, đơn trả, đơn đang giao). "
+        "Làm tròn 2 chữ số thập phân. |\n"
+        "| Giá trị trung bình một đơn | làm tròn về đồng, nửa đồng làm tròn lên |\n"
+        "| Doanh thu theo nhóm khách | nhóm theo cột nhóm khách. Đơn không ghi khách "
+        "(khách vãng lai) không thuộc nhóm nào, kể cả nhóm lẻ. Tỉ trọng của nhóm chia "
+        "cho doanh thu cả shop cùng kỳ, tính cả đơn vãng lai |\n"
+        "| Mặt hàng | Món, hàng, sản phẩm cùng nghĩa với mặt hàng. "
+        "Dòng Phí phục vụ không phải mặt hàng: "
+        "không xếp hạng, không đếm. Vẫn tính vào doanh thu, kể cả mẫu số tỉ trọng nhóm hàng |\n"
+        "| Nhóm hàng | theo cột nhóm hàng, đúng tên nhóm câu hỏi nêu; không gộp nhóm "
+        "khác tên dù tên gần nhau |\n"
         "| Từ X đến Y, nhóm X–Y | gồm cả X và Y |\n"
         "| N ngày gần nhất | N ngày liền nhau kể cả hôm nay, ngày cuối là hôm nay |\n"
+        "| Ca sáng, ca chiều | theo giờ tạo đơn: ca sáng 06:00–13:59, ca chiều 14:00–21:59. "
+        "So ca chiều với ca sáng: mốc là ca sáng |\n"
         "| Tuần | bắt đầu thứ Hai. Tuần này: từ thứ Hai của tuần chứa hôm nay đến hết hôm"
         " nay. Tuần trước, tuần rồi: cả tuần liền trước, thứ Hai đến Chủ nhật |\n"
         "| Tháng M/Y | cả tháng, từ ngày 1 đến hết ngày cuối tháng |\n"
@@ -90,6 +107,7 @@ def rulebook_text() -> str:
         " khách, ghi chú, trạng thái của đơn áp cho mọi dòng của đơn. Không phải thiếu dữ"
         " liệu, không có nghĩa là khách lẻ hay đơn hoàn thành |\n"
         "## 9. Output\n"
+        "Câu hỏi nhiều số thì ghi list theo đúng thứ tự câu hỏi nêu.\n"
         "- Làm tròn: tiền ra số lẻ làm tròn về đồng; trung bình của một khoản tiền cũng "
         "là tiền, làm tròn về đồng. Phần trăm và số trung bình khác làm tròn 2 chữ số "
         "thập phân, trừ khi một luật khác trong rulebook ghi khác.\n"
@@ -113,6 +131,7 @@ def semantic_source(synthetic_split, tmp_path, rulebook_text):
         readme_extra="",
         cache_dir=None,
         coverage_end="03/01/2026",
+        extra_columns=(),
     ):
         nonlocal revision
         revision += 1
@@ -132,7 +151,7 @@ Dữ liệu có đến hết {coverage_end}.
         (synthetic_split / "rulebook.md").write_text(rulebook_text if rules is None else rules)
         with (business / "sales.csv").open("w", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["order_id", "date", "status", "amount", "item"])
+            writer.writerow(["order_id", "date", "status", "amount", "item", *extra_columns])
             writer.writerows(
                 rows
                 if rows is not None

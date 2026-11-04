@@ -19,14 +19,23 @@ from src.temporal.resolver import iso_day, resolve_window
 if TYPE_CHECKING:
     from src.data.catalog import BusinessContext
 
-VERSION = "business-semantics-v3"
+VERSION = "business-semantics-v5"
 
 
 def _coverage(context: BusinessContext) -> dict:
     prepared = context.prepared
     source = (
         prepared.summary.get("coverage", {})
-        if prepared and prepared.summary.get("shape") in {"csv_order_lines", "csv_order_headers"}
+        if prepared
+        and prepared.summary.get("shape")
+        in {
+            "csv_order_lines",
+            "csv_order_headers",
+            "xlsx_order_lines",
+            "order_headers",
+            "relational_orders",
+            "sales_ledger",
+        }
         else {}
     )
     readme_ref = {
@@ -36,8 +45,12 @@ def _coverage(context: BusinessContext) -> dict:
     }
     result = {
         **source,
-        "fact_type": "orders",
-        "time_axis": "ordered_at",
+        "fact_type": "sales_events"
+        if prepared and prepared.summary.get("shape") == "sales_ledger"
+        else "orders",
+        "time_axis": "occurred_at"
+        if prepared and prepared.summary.get("shape") == "sales_ledger"
+        else "ordered_at",
         "available_span": None,
         "confirmed_end": None,
         "snapshot_at": None,
@@ -66,8 +79,18 @@ def _coverage(context: BusinessContext) -> dict:
     if source.get("parse_status") != "complete":
         return result
     if prepared:
-        table = context.source_table(prepared.summary["source_id"])
-        result["source_refs"].append(table.source_ref)
+        source_ids = [
+            prepared.summary["source_id"],
+            *prepared.summary.get("source_ids", []),
+            *(s["source_id"] for s in prepared.summary.get("sources", [])),
+        ]
+        for source_id in dict.fromkeys(source_ids):
+            profile = next(
+                (p for p in context.catalog["tables"] if p["source_id"] == source_id), None
+            )
+            if profile is None:
+                raise SemanticError("stale_context", "unknown prepared source")
+            result["source_refs"].append(profile["source_ref"])
     if end_days:
         end = next(iter(end_days))
         if observed and observed["end"] > end:
@@ -89,7 +112,11 @@ def _coverage(context: BusinessContext) -> dict:
         # Project policy: answer from the released export, using its fully parsed
         # order-date extent. This is not an external completeness certification.
         result["available_span"] = dict(observed)
-        result["availability_basis"].append("observed_order_dates")
+        result["availability_basis"].append(
+            "observed_sales_record_dates"
+            if prepared.summary.get("shape") == "sales_ledger"
+            else "observed_order_dates"
+        )
         result["uncertainties"] = [
             "Export extent accepted as coverage; missing interior records cannot be detected."
         ]
@@ -128,15 +155,34 @@ def prepare_semantics(context: BusinessContext) -> dict:
                     if summary.get("shape") == "inventory_snapshot"
                     else ["orders"]
                     if summary.get("shape") == "csv_order_headers"
-                    else ["orders", "order_lines"]
+                    else ["sales_events", "event_groups"]
+                    if summary.get("shape") == "sales_ledger"
+                    else ["orders", "order_revenues", "order_groups", "order_times", "order_scopes"]
+                    if summary.get("shape") == "order_headers"
+                    else [
+                        "orders",
+                        "order_lines",
+                        "order_groups",
+                        "line_groups",
+                        "order_scopes",
+                        "order_times",
+                    ]
                 )
             }
+            if summary.get("snapshot"):
+                facts_schema["inventory_snapshot"] = [
+                    row[1] for row in connection.execute("PRAGMA table_info(inventory_snapshot)")
+                ]
     contracts = {}
     for metric_id in METRICS:
         try:
             contracts[metric_id] = {
                 "status": "resolved",
-                "contract": metric_contract(rules, metric_id).summary(),
+                "contract": metric_contract(
+                    rules,
+                    metric_id,
+                    shape=summary.get("shape") if prepared and prepared.path else None,
+                ).summary(),
             }
         except SemanticError as exc:
             contracts[metric_id] = {"status": "unsupported", "reason": str(exc), "code": exc.code}
@@ -177,7 +223,7 @@ def preflight(
 ) -> dict:
     """Check a single aggregate/window. Nonempty entity/filter scopes are unsupported.
 
-    A future multi-window plan calls this for each dependency independently.
+    Multi-window plans call this for each dependency independently.
     This API never reads labels, executes numeric aggregates or emits predictions.
     """
     result = {
@@ -202,19 +248,38 @@ def preflight(
             fingerprint(prepared.summary) if prepared else None
         ):
             raise SemanticError("stale_context", "prepared revision changed after semantics")
-        if (
-            filters is not None
-            and (not isinstance(filters, dict) or filters)
-            and metric_id != "inventory_on_hand"
-        ):
-            return stop("abstain", "filter_unsupported")
+        if filters and metric_id != "inventory_on_hand":
+            if not isinstance(filters, dict) or len(filters) != 1:
+                return stop("abstain", "filter_unsupported")
+            key, value = next(iter(filters.items()))
+            if key == "shift":
+                if value not in {"morning", "afternoon"}:
+                    return stop("abstain", "filter_unsupported")
+                context.rules.require("shift")
+            elif key == "weekday":
+                if type(value) is not int or not 0 <= value <= 6:
+                    return stop("abstain", "filter_unsupported")
+            elif (key in {"customer_group", "item_group"} and metric_id == "revenue") or (
+                key == "channel"
+                and metric_id
+                in {"revenue", "order_count", "cancelled_order_count", "placed_order_count"}
+            ):
+                if not isinstance(value, str) or not value.strip():
+                    return stop("abstain", "filter_unsupported")
+            else:
+                return stop("abstain", "filter_unsupported")
+            result["filters"] = filters
         if context.rules is None:
             return stop("abstain", "rule_unresolved")
         if any(context.semantics[key] != context.catalog[key] for key in ["split", "business_id"]):
             return stop("abstain", "stale_context")
         if context.rules.summary() != context.semantics["rules"]:
             return stop("abstain", "stale_context")
-        contract = metric_contract(context.rules, metric_id)
+        contract = metric_contract(
+            context.rules,
+            metric_id,
+            shape=context.prepared.summary.get("shape") if context.prepared else None,
+        )
         result["contract"] = contract.summary()
         window = resolve_window(expression, as_of_date, context.rules, context.calendar)
         result["window"] = {
@@ -230,6 +295,13 @@ def preflight(
         ]
         if prepared is None or prepared.path is None or prepared.summary["status"] == "unsupported":
             return stop("abstain", "preparation_unsupported")
+        if metric_id in {
+            "order_count",
+            "placed_order_count",
+            "cancelled_order_count",
+        } and "order_identity" in prepared.summary.get("missing_information", []):
+            context.rules.require("outside_coverage")
+            return stop("unanswerable", "order_identity_not_recorded")
         schema = context.semantics["facts_schema"]
         if any(
             not set(fields) <= set(schema.get(table, []))
@@ -238,17 +310,49 @@ def preflight(
             return stop("abstain", "required_facts_unsupported")
         if not context.catalog["read_complete"] or coverage["conflicts"]:
             return stop("abstain", "coverage_conflict_or_incomplete_read")
-        if metric_id in prepared.summary.get("blocking_metrics", []):
+        quality_metric = (
+            "order_count"
+            if metric_id in {"cancelled_order_count", "placed_order_count", "calendar_day_count"}
+            else metric_id
+        )
+        dependent_metrics = {quality_metric}
+        if filters and "shift" in filters:
+            if (
+                "clock" not in prepared.summary.get("mapping", {}).get("fields", {})
+                or "order_times" not in schema
+            ):
+                return stop("abstain", "order_clock_not_recorded")
+            dependent_metrics.add("shift_" + quality_metric)
+        if filters and any(key.endswith("_group") or key == "channel" for key in filters):
+            key = next(iter(filters))
+            if key not in prepared.summary.get("mapping", {}).get("fields", {}):
+                return stop("abstain", "group_mapping_unsupported")
+            if key == "customer_group" and "customer" not in prepared.summary["mapping"]["fields"]:
+                return stop("abstain", "customer_mapping_unsupported")
+            if key == "channel" and "order_scopes" not in schema:
+                return stop("abstain", "scope_facts_unsupported")
+            if key in {"customer_group", "item_group"}:
+                group_table = (
+                    "order_groups"
+                    if key == "customer_group"
+                    else "event_groups"
+                    if prepared.summary.get("shape") == "sales_ledger"
+                    else "line_groups"
+                )
+                if group_table not in schema:
+                    return stop("abstain", "scope_facts_unsupported")
+            dependent_metrics.add(key + "_share")
+        if dependent_metrics.intersection(prepared.summary.get("blocking_metrics", [])):
             result["issue_refs"] = [
                 row["issue_id"]
                 for row in prepared.iter_records("issues")
-                if metric_id in row["detail"]["affected_metrics"]
+                if dependent_metrics.intersection(row["detail"]["affected_metrics"])
                 and row["detail"]["severity"] == "blocking"
             ]
             return stop("abstain", "dependent_quality_issue")
         if metric_id == "inventory_on_hand":
             snapshot = context.semantics.get("snapshot")
-            if not snapshot or prepared.summary.get("shape") != "inventory_snapshot":
+            if not snapshot:
                 return stop("abstain", "snapshot_authority_missing")
             result["evidence_refs"] += snapshot["source_refs"]
             if window.start != window.end or window.start.isoformat() != snapshot["snapshot_at"]:
