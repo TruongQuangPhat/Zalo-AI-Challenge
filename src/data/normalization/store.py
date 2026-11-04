@@ -15,11 +15,12 @@ from pathlib import Path
 
 from src.data.cache import fingerprint
 from src.data.catalog import BusinessContext, digest, discover_sources, require_output
+from src.data.normalization.relational import build_relational, relational_mapping
 from src.data.normalization.sales import build_sales, sales_mapping
 from src.data.normalization.stock import build_stock, stock_mapping
 from src.jsonio import ContractError, dumps, loads
 
-VERSION = "prepared-facts-v3"
+VERSION = "prepared-facts-v5"
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
@@ -43,6 +44,24 @@ CREATE TABLE issues (issue_id TEXT PRIMARY KEY, detail TEXT NOT NULL) STRICT;
 CREATE TABLE inventory_snapshot (
     product_code TEXT PRIMARY KEY, product_name TEXT NOT NULL, base_unit TEXT NOT NULL,
     quantity TEXT NOT NULL, snapshot_at TEXT NOT NULL, source_ref TEXT NOT NULL
+) STRICT;
+CREATE TABLE order_revenues (
+    order_key TEXT PRIMARY KEY REFERENCES orders(order_key),
+    net_amount TEXT NOT NULL, source_ref TEXT NOT NULL
+) STRICT;
+CREATE TABLE sales_events (
+    event_key TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, status TEXT NOT NULL,
+    net_amount TEXT, row_role TEXT NOT NULL, source_ref TEXT NOT NULL
+) STRICT;
+CREATE TABLE order_times (
+    order_key TEXT PRIMARY KEY REFERENCES orders(order_key),
+    seconds_of_day TEXT NOT NULL, source_ref TEXT NOT NULL
+) STRICT;
+CREATE TABLE order_scopes (
+    order_key TEXT PRIMARY KEY REFERENCES orders(order_key), channel TEXT NOT NULL
+) STRICT;
+CREATE TABLE event_groups (
+    event_key TEXT PRIMARY KEY REFERENCES sales_events(event_key), item_group TEXT NOT NULL
 ) STRICT;
 CREATE TABLE order_groups (
     order_key TEXT PRIMARY KEY REFERENCES orders(order_key), customer_group TEXT NOT NULL
@@ -68,13 +87,29 @@ class PreparedBusiness:
         return connection
 
     def iter_records(self, table: str) -> Iterator[dict]:
-        if table not in {"orders", "order_lines", "lineage", "issues", "inventory_snapshot"}:
+        if table not in {
+            "orders",
+            "order_lines",
+            "lineage",
+            "issues",
+            "inventory_snapshot",
+            "order_revenues",
+            "sales_events",
+            "order_times",
+            "order_scopes",
+            "order_groups",
+            "line_groups",
+            "event_groups",
+        }:
             raise ContractError("unknown prepared table")
         with closing(self.connect()) as connection:
             connection.row_factory = sqlite3.Row
             for row in connection.execute(f"SELECT * FROM {table} ORDER BY 1"):
                 record = dict(row)
-                if table == "order_lines" and record["net_amount"] is not None:
+                if (
+                    table in {"order_lines", "order_revenues", "sales_events"}
+                    and record["net_amount"] is not None
+                ):
                     record["net_amount"] = Decimal(record["net_amount"])
                 if table == "inventory_snapshot":
                     record["quantity"] = Decimal(record["quantity"])
@@ -152,11 +187,15 @@ def prepare_facts(
         builder = build_sales
     except ContractError as sales_error:
         try:
-            mapping = stock_mapping(context)
-            builder = build_stock
-        except ContractError as stock_error:
-            mapping = None
-            reason = f"{sales_error}; {stock_error}"
+            mapping = relational_mapping(context)
+            builder = build_relational
+        except ContractError as relational_error:
+            try:
+                mapping = stock_mapping(context)
+                builder = build_stock
+            except ContractError as stock_error:
+                mapping = None
+                reason = f"{sales_error}; {relational_error}; {stock_error}"
     if mapping is None:
         result = PreparedBusiness(
             None,
@@ -175,6 +214,7 @@ def prepare_facts(
     dependencies = {
         "version": VERSION,
         "source": context.catalog["dependencies"],
+        "rule_parser_sha256": context.rules.parser_sha256 if context.rules else None,
         "normalizer_sha256": fingerprint(
             {p.name: digest(p) for p in sorted(Path(__file__).parent.glob("*.py"))}
         ),
@@ -207,6 +247,19 @@ def prepare_facts(
                 "money_storage": "exact_decimal_text",
                 **builder(context, connection, mapping),
             }
+            if builder is not build_stock:
+                try:
+                    snapshot_mapping = stock_mapping(context)
+                except ContractError:
+                    snapshot_mapping = None
+                if snapshot_mapping is not None:
+                    stock_summary = build_stock(context, connection, snapshot_mapping)
+                    summary["snapshot"] = stock_summary["snapshot"]
+                    summary["snapshot_preparation"] = stock_summary
+                    summary["blocking_metrics"] = sorted(
+                        set(summary.get("blocking_metrics", []))
+                        | set(stock_summary["blocking_metrics"])
+                    )
             for key, value in [("dependencies", dependencies), ("summary", summary)]:
                 connection.execute("INSERT INTO metadata VALUES (?,?)", (key, dumps(value)))
             connection.commit()

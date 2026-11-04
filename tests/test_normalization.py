@@ -260,7 +260,12 @@ def test_source_evidence_can_resolve_money_but_mixed_conventions_block(synthetic
     prepared = prepare_facts(context, tmp_path / "mixed")
     assert prepared.summary["blocking_metrics"] == ["revenue"]
     context = source(synthetic_split, [line(amount="1,234")], readme)
-    assert prepare_facts(context, tmp_path / "ambiguous").summary["status"] == "blocked"
+    grouped = prepare_facts(context, tmp_path / "approved-grouping")
+    assert grouped.summary["status"] == "ready"
+    assert (
+        grouped.summary["mapping"]["money_basis"] == "user_2026_11_04_consistent_three_digit_groups"
+    )
+    assert grouped.summary["mapping"]["money_warning"]
 
 
 def test_decimal_storage_roundtrip_and_reload_are_exact(synthetic_split, tmp_path):

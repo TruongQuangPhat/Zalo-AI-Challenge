@@ -48,6 +48,111 @@ def draft(metric="revenue", expression=None):
     }
 
 
+def multiple_draft(expressions, metrics, *, indices=None, filters=None):
+    indices = indices or list(range(len(metrics)))
+    return {
+        "entities": [],
+        "time_windows": [{"id": f"period_{i}", "expression": e} for i, e in enumerate(expressions)],
+        "aggregations": [
+            {
+                "id": f"total_{i}",
+                "metric_id": metric,
+                "window_ref": f"period_{indices[i]}",
+                "scope": "whole_business",
+                "filters": filters[i] if filters else [],
+                "group_by": [],
+            }
+            for i, metric in enumerate(metrics)
+        ],
+        "derived_measures": [],
+        "output": {
+            "expected_type": "list",
+            "result_refs": [f"total_{i}" for i in range(len(metrics))],
+        },
+        "uncertainties": [],
+    }
+
+
+def test_ordered_three_month_results_keep_question_order_and_each_window(semantic_source):
+    c = semantic_source(
+        rows=[
+            ["a", "01/11/2025", "Xong", "300", "A"],
+            ["b", "01/12/2025", "Xong", "100", "A"],
+            ["c", "03/01/2026", "Xong", "200", "A"],
+        ],
+        complete=False,
+    )
+    expr = [
+        {"kind": "month", "year": y, "month": m} for y, m in [(2025, 11), (2025, 12), (2026, 1)]
+    ]
+    p = multiple_draft(expr, ["revenue"] * 3)
+    q = question(
+        question="Doanh thu 3 tháng liền nhau kết thúc ở tháng 1/2026 là bao nhiêu mỗi tháng, "
+        "từ tháng cũ đến tháng mới?"
+    )
+    _schema(p, generation_schema(q))
+    p["time_windows"].reverse()
+    p["aggregations"].reverse()
+    result = execute_plan(p, q, c)
+    assert result["answer"] == {"id": q.id, "type": "list", "answer": [300, 100, 200]}
+    assert len(result["plan"]["preflight"]) == 3
+    assert result["execution"]["checks"][-1] == "no_missing_operand_substitution"
+    p["output"]["result_refs"].reverse()
+    with pytest.raises(ContractError):
+        execute_plan(p, q, c)
+
+
+def test_ordered_channels_keep_requested_direction_and_status_policy(semantic_source):
+    c = semantic_source(
+        rows=[
+            ["a", "01/01/2026", "Xong", "90", "A", "store"],
+            ["b", "02/01/2026", "Xong", "30", "A", "phone"],
+            ["c", "03/01/2026", "Huỷ", "900", "A", "phone"],
+        ],
+        extra_columns=["channel"],
+        readme_extra="- **channel**: sales channel\n",
+    )
+    p = multiple_draft(
+        [{"kind": "current_month"}],
+        ["revenue"] * 2,
+        indices=[0, 0],
+        filters=[["channel=counter"], ["channel=phone"]],
+    )
+    q = question(
+        question="Doanh thu các đơn bán tại quầy và doanh thu các đơn bán qua điện thoại "
+        "tháng này lần lượt là bao nhiêu?"
+    )
+    _schema(p, generation_schema(q))
+    assert execute_plan(p, q, c)["answer"]["answer"] == [90, 30]
+    p["aggregations"][0]["filters"] = ["channel=phone"]
+    with pytest.raises(ContractError):
+        execute_plan(p, q, c)
+
+
+def test_multiple_metrics_do_not_sum_or_sort_heterogeneous_units(semantic_source):
+    c = semantic_source(
+        rows=[["a", "01/01/2026", "Xong", "100", "A"], ["b", "02/01/2026", "Xong", "50", "B"]]
+    )
+    p = multiple_draft([{"kind": "current_month"}], ["order_count", "revenue"], indices=[0, 0])
+    q = question(question="Số đơn và doanh thu tháng này lần lượt bao nhiêu?")
+    assert execute_plan(p, q, c)["answer"]["answer"] == [2, 150]
+
+
+@pytest.mark.parametrize(
+    "text,expression",
+    [
+        ("Số đơn tuần trc?", {"kind": "previous_week"}),
+        ("Số đơn từ đầu nawm tới hết bữa nay?", {"kind": "year_to_date"}),
+        ("Doanh thu Tết năm 2026?", {"kind": "tet", "year": 2026}),
+        ("Doanh thu 30 ngày gần nhất tính đến hôm nay?", {"kind": "last_n_days", "days": 30}),
+    ],
+)
+def test_time_guard_keeps_relative_alias_and_range_endpoints(text, expression):
+    from src.agent.plan import _literal_windows
+
+    assert _literal_windows(question(question=text)) == [expression]
+
+
 class ScriptedModel:
     metadata = {"test_double": True}
 
@@ -319,7 +424,7 @@ def test_generation_schema_bounds_match_validator_and_preserve_unsupported_inten
     context = semantic_source()
     for name in ["time_windows", "aggregations"]:
         schema = PLAN_SCHEMA["properties"][name]
-        assert (schema["minItems"], schema["maxItems"]) == (1, 2)
+        assert (schema["minItems"], schema["maxItems"]) == (1, 3)
         narrowed = generation_schema(question())["properties"][name]
         assert narrowed["minItems"] == narrowed["maxItems"] == 1
     for change in [

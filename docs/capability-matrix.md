@@ -5,26 +5,36 @@ Authority phải lấy từ rulebook/README/calendar runtime, có hash.
 `planned` là đặc tả; runtime chưa hỗ trợ thì **abstain**, không tự kết luận unanswerable.
 Chỉ khi có bằng chứng dữ liệu gốc thiếu mới trả unanswerable.
 
+Baseline S1/S2 hữu hạn đã chốt ngày 04/11/2026: 411 tests; 17 business/10 families
+ready, 0 issues. Native cuối **166 correct / 0 wrong / 8 abstain** /174 là unchanged-draft
+replay có byte-context proof; hai fresh CUDA batches 44 native + 3 fixtures cho
+predictions giống nhau và khớp replay. CPU smoke **3 correct / 0 wrong / 0 abstain** /3; chưa full CPU.
+Kết quả: [stage_results.json](../reports/stage_results.json); evidence chi tiết local:
+`.artifacts/s1-s2-full/verification-evidence.json`, section `s1_s2_final_baseline`.
+Các số M1/checkpoint trong bảng dưới giữ scope/revision lịch sử, không thay cho bằng
+chứng source cuối. Supported chỉ áp dụng mapping và câu hỏi nằm trong capability.
+
 | ID / ưu tiên | Input shape và metric | Required facts/fields/rules/operators | Trạng thái / evidence | Acceptance / gate bật | Fallback và giới hạn |
 |---|---|---|---|---|---|
 | OUT / P0 | Typed answer mọi input shape | Existing output validator + exact JSON/Decimal serializer; evaluator riêng | supported ở output/evaluation; Phase 0 report và tests/test_contracts.py, test_evaluator.py | C28–C29; tests hiện có; không chứng minh metric | Dòng lỗi theo hợp đồng hiện có; chưa xác minh evaluator BTC tương đương hoàn toàn |
 | SAFE / P0 | Operator/schema chưa hỗ trợ | MockPlanner mặc định; local S1 validator/preflight khi bật model; per-question error boundary | supported ở safe abstention; tests/test_split_runtime.py | C30; label isolation và failure continuation | abstain cho unsupported intent/schema/timeout; finite scope/time guards, không chứng minh hiểu mọi câu |
 | INPUT / P0 | CSV/XLSX/SQLite raw ingestion và catalog | Strict readers, raw types/locators, structural profiles, source hashes, context/business và cache có checksum | supported ở raw ingestion/profile có giới hạn; tests/test_ingestion.py, test_catalog.py; reports/ingestion_verification.json | Gate A–E Phase 2; đọc nguồn không bật metric | Semantic roles/coverage chưa xác lập giữ unknown; distinct/relations vượt budget giữ not_checked; views chưa đọc |
-| PREP / P0 | Một CSV order-line hoặc header-only count có README/grain/fields và rulebook được nhận diện | orders/lines, scalar parsers, status/group/dedup/return evidence, lineage/issues, SQLite exact Decimal và cache | supported ở preparation S1; tests/test_normalization.py và reports/normalization_verification.json; query-time executor tách riêng | Partial preparation coverage của C01–C06/C12/C27/C30 và summary/error; không chứng nhận toàn bộ metric cases | unsupported shape/authority không tạo facts; lỗi có affected metrics; coverage theo observed export khi parse đủ, README complete span ưu tiên; Excel/SQLite/JOIN/units/domain chưa bật |
-| SEM / P0 | Rules/contracts/preflight cho CSV order-line S1 | Runtime rule profile có source refs; canonical schema, metric-specific quality và coverage; structured windows | supported ở API semantic/temporal/preflight; tests/test_semantics.py, tests/test_temporal.py và reports/semantics_verification.json; không phải numeric execution | Gate A–E Phase 4 trong phạm vi S1; eligibility/outside/unknown/partial/error và source/rule invalidation | Default mock; local S1 nối validator/resolve/preflight/executor; entity filters/operator lạ abstain; unknown chỉ khi chưa đủ nguồn/parse; observed_order_dates là basis được chấp nhận |
+| PREP / P0 | CSV/XLSX/SQLite sales: lines, headers, checked joins, continuations, ledger | README/finite POS mapping, grain/status/date/money, lineage/issues, source/parser hashes | Implementation và 411 behavioral/regression tests đạt; preparation 17 common-dev businesses/10 families ready, 0 issues; native LLM evidence xem JSON chung, evidence local theo source hashes | tests/test_sales_sources.py, test_normalization.py; orphan/conflict/date/money/unknown role chặn metric phụ thuộc | Không tự gộp nguồn tài chính chồng lấn; không fill tiền/SL; observed coverage không chứng minh export không thiếu bản ghi |
+| SEM / P0 | Rules/contracts/preflight cho các sales grains đã bật | Runtime finite rule profile, source refs, schema/metric requirements, per-window coverage | supported API và nối execution S1/S2; tests/test_semantics.py, test_temporal.py | Quality theo dependencies, unknown/outside/partial riêng, source/rule invalidation | Clause/hash chỉ chứng minh provenance; không chứng nhận hiểu toàn văn hay mọi paraphrase |
 | S1-CSV-REV / P0 | CSV phẳng có order key, line amount/status/date, revenue | orders+sales; role gate; source-specific date/money/status; grouping; exact dedup; SUM Decimal; per-metric coverage | supported hẹp; 3 câu revenue train-dev đúng qua LLM thật ở cả hai lượt; preflight theo export/README, giữ quality/scope gates | tests/test_planner_execution.py: Decimal/status/dedup/coverage/scope/isolation/future facts; model evidence tại reports/planner_verification.json; chưa nghiệm thu toàn bộ C01–C06; kết quả train numeric theo revision trong report | abstain khi đọc/parse thiếu, mâu thuẫn hoặc unknown role; kỳ ngoài export unanswerable, partial lấy giao |
 | S1-CSV-COUNT / P0 | Cùng shape, order_count | Order key/date/status có consistency; distinct/group restoration; không dùng source row count | supported hẹp; 3 câu count order-line train-dev đúng qua LLM thật ở cả hai lượt; preflight theo export/README | tests/test_planner_execution.py: distinct order/status/metric-specific quality; model evidence có repeated count/zero/future facts tại reports/planner_verification.json; numeric train và latency được ghi riêng trong report theo revision | abstain; không mở count cho ledger không mã |
 | SNAPSHOT-POINT / P0 M1 | Một bảng POS XLSX bốn cột, một product tại declared snapshot | README snapshot/date/base unit; unique accent-preserving identity; exact Decimal quantity; read-only SELECT; explicit requested base unit | supported hẹp tại today=declared snapshot; model train-dev M1 hai lượt đúng giữ phạm vi lịch sử, snapshot regression trong 271 tests; reports/planner_verification.json; không là S4 đầy đủ | C12/C17/C18/C30 trong scope lookup; không chứng nhận stock history, cost, conversions hoặc lots | abstain sai date/unit, conflict/ambiguity/invalid source; historical coverage vẫn unknown; không fuzzy/deaccent, không JOIN |
-| S1-HEADER / P0 mở rộng | Một CSV header-only, order_count | README xác nhận một dòng/một đơn không detail; order key/date/status nhất quán; count distinct canonical order; observed coverage | supported hẹp cho count: 6 câu train-dev đúng ở cả hai lượt LLM thật; tests/test_planner_execution.py và planner report | Không tạo line facts giả; Cộng/Tổng ngày với ID/date/status trống là summary, không thành order; conflict/date/status lỗi chặn count; revenue vẫn unsupported trên shape này | Không suy tiền hàng từ payable; JOIN/header revenue và source summaries chưa nhận diện vẫn abstain |
-| S1-RELATIONAL / P0 mở rộng | Header/detail CSV/XLSX/SQLite, revenue/count | Reader tương ứng; orders N:1 detail; keys/orphan/cardinality checks; preaggregation, no fan-out | planned, runtime unsupported; key mappings hiện là candidates ngoại trừ phạm vi EDA POS cũ | S1 cases + C09; multi-source reconciliation | abstain; đọc được bảng chưa đủ bật JOIN |
-| S1-EXCEL / P0 mở rộng | Nhiều sheet/tháng/phần, header nhiều dòng/kế thừa | Header/group/continuation recognition; all sheets; year hints; native cell types; summary/role gate | planned, runtime unsupported | C01–C06, C09 khi JOIN, C18, C27 khi cache; P1-SUMMARY/P1-ERROR | abstain nếu thiếu sheet/unknown boundary; không fill tiền/SL |
-| LEDGER / P1 | Sổ no-order, revenue/quantity | Ledger-record grain, giữ raw copies, bỏ summary; amount/date/status rõ; unit conversion cho quantity | planned, runtime unsupported | C02, C05, C13, C18, P1-SUMMARY | Revenue abstain tới khi kiểm chứng; count order/customer chỉ unanswerable sau xác nhận thiếu thông tin gốc |
-| S2-DIFF / P0 | Cùng hai shape CSV S1; chênh lệch hai kỳ revenue hoặc order_count toàn business | Cùng QueryPlan, hai independent windows/aggregates, difference current_ref/baseline_ref; runtime difference rule, same metric/unit/scope; exact Decimal và round-once | supported hẹp ở deterministic executor và local LLM CUDA; 318 tests; reports/s2_verification.json: 12/12 expected behaviors synthetic (evaluator 7 correct/0 wrong/5 abstain), S1 regression 12 correct/0 wrong/1 abstain; numeric CPU/native train S2 chưa nghiệm thu | Signed/zero/large precision/MTD/future facts, refs/reversal/scope/unit, per-window partial/outside/unknown, unresolved rule và S1/snapshot regression | Growth hẹp xem S2-GROWTH; ratio/average xem S2-RATIO-AVG/S2-SHARE; entity/JOIN ngoài group filters chưa bật; guard directional/literal periods hữu hạn; explicit month anchor kỳ hỏi; không missing→0 |
-| S1-XLSX-LINE / P0 hẹp | Một sheet XLSX order-line header đơn lặp, README mappings theo file; whole-business revenue/count | Existing reader, exact native numeric/text parsing, all rows/statuses, summary exclusion, dedup, lineage; optional conversion lookup unused, no raw JOIN | supported hẹp; 343 tests; source native 39.006 orders/62.451 lines/443 summary/0 issues, native growth evidence ở reports/s2_verification.json.native_growth_continuation | Filename/section authority, grain/required fields, role/mapping/status/coverage gates; numeric tiền từ summary chỉ là format evidence; Topping có line amount riêng theo product-row README | Multi-sheet/unclassified sources/unknown roles không bỏ qua; không header revenue/quantity conversion/ranking/physical-shipment inference |
-| S2-GROWTH / P0 hẹp | Hai kỳ revenue toàn business, baseline dương; prior-month hoặc hai tháng/năm tường minh | Cùng QueryPlan percent_change + current/baseline refs; runtime growth/rounding rules, preflight mỗi kỳ; Decimal sums + exact rational division; output percent | supported native CUDA hẹp: **8 correct/0 wrong/0 abstain mỗi lượt, hai fresh workers**; 6 giá trị không dùng triển khai trước selection/inference + 2 exposed; predictions bằng nhau; S1 regression 12/0/1 | 343 tests; raw XML reference/wiring trước gold; native operands/windows và gold/actual tại reports/s1_s2_results.md; synthetic 15/15 behaviors, 9/0/2 trên 11 fixture có gold | Baseline 0/âm/undefined/half-tie hoặc authority thiếu abstain; unknown/outside riêng; không ratio/share/average/JOIN/CPU/Blackwell certification hoặc PA toàn dataset |
-| S2-RATIO-AVG / P0 | Nguồn orders S1; revenue khi cần AOV/daily revenue | Cùng QueryPlan: cancelled/all placed, revenue/eligible orders, metric/calendar days; cùng effective window, weekday mask hai operands, exact rational/round once | Implementation và behavioral tests đạt; kết quả LLM/evaluator mới nhất xem JSON S1/S2 và section s2_operator_completion trong verification | C16/C18–C20/C26; distinct statuses, zero denominator, half-up AOV, zero-sales days, partial calendar denominator, ID/ref/metric/scope guards | Header-only chỉ count/cancellation/day-count; revenue cần lines; 0/âm/unknown hoặc half-tie chưa có luật abstain |
-| S2-SHARE / P0 | CSV/XLSX order-line có README mapping nhóm tường minh | revenue nhóm/revenue toàn shop cùng kỳ; customer_group + customer hoặc item_group, group identity không mơ hồ, grain/quality checks | Behavioral tests/wiring đạt; LLM synthetic và giới hạn native ở JSON S2 | C22; denominator không giữ filter nhóm, giữ walk-ins, missing mapping/error/collision abstain | Không bật raw JOIN/entity ranking; không chứng nhận numeric native ở source family chưa hỗ trợ |
-| TEMPORAL / P0 mở rộng | Nhiều kỳ, MTD, ratios, weekday/lunar | Per-window coverage, runtime calendar/as-of, independent scopes, DAG + denominator/undefined policy | Structured resolver day/week/month/MTD/N days/quarter/year/Tết đã kiểm chứng; signed difference hai kỳ xem S2-DIFF; growth hẹp xem S2-GROWTH; ratios/weekday average xem S2-RATIO-AVG và S2-SHARE | C17, C19–C20, C22, C26–C27; tests/test_temporal.py chỉ chứng nhận phần resolver | abstain cho ambiguity/divide-by-zero chưa có rule; không missing→0; chưa có ca hoặc D…D+N |
+| S1-HEADER / P0 | Native headers, revenue/order_count | Distinct order/date/status; revenue cần explicit net merchandise field | supported; không tạo line facts giả; native và synthetic evidence trong JSON chung, stage S1 | Header payable khác revenue; conflict/missing date/status chặn; header amount lỗi không tự chặn count độc lập | Không suy tiền hàng từ payable/thu khách; thiếu mapping revenue giữ abstain |
+| S1-RELATIONAL / P0 | Header/detail/master CSV/XLSX/SQLite, revenue/count | N:1 keys/cardinality/orphan checks; line/customer group mappings; no payments fan-out | supported cho schema nhận diện; tests/test_sales_sources.py; native JOIN sources trong JSON chung | Mã ưu tiên; name-only join unique catalog code, approved unaccented fallback ghi metadata; group collision chặn share | Không generic SQL/JOIN do LLM sinh; không gộp financial sources chồng lấn chưa có authority |
+| S1-EXCEL / P0 | Nhiều sheet/tháng/phần, header kế thừa | README continuation/year hints; native date system/clock; repeated header/summary/note boundaries | supported finite schemas; full 17-business preparation và focused tests | Không fill amount/quantity; exact dedup giữ lineage; return âm link đơn gốc, giữ ordered_at | Unknown sheet/role/overlap chặn; không chứng nhận mọi workbook |
+| LEDGER / P0 S1 | Sổ không mã đơn, revenue | Native sales_events, occurred_at, amount/status, all-record coverage; identical events retained | supported revenue; native sổ tay và ledger preparation; focused tests và JSON chung, stage S1 | observed_sales_record_dates riêng; count unanswerable khi README xác nhận không order identity | Không fake order IDs hoặc đếm dòng thành số đơn; quantity/unit conversion chưa bật |
+| S2-DIFF / P0 | Các sales grains đã bật, difference revenue/count | Hai windows/aggregates; current-baseline; same metric/unit; independent preflight | supported Decimal execution/LLM; latest JSON chung, stage S2, tests/test_planner_execution.py | Signed/zero/precision/MTD/future facts, refs/reversal, partial/outside/unknown; round once | Không missing operand → 0; finite directional/time guards |
+| S1-XLSX-LINE / P0 hẹp | Một sheet XLSX order-line header đơn lặp, README mappings theo file; whole-business revenue/count | Existing reader, exact native numeric/text parsing, all rows/statuses, summary exclusion, dedup, lineage; optional conversion lookup unused, no raw JOIN | supported hẹp; 343 tests; source native 39.006 orders/62.451 lines/443 summary/0 issues, native growth evidence ở evidence local, section native_growth_continuation | Filename/section authority, grain/required fields, role/mapping/status/coverage gates; numeric tiền từ summary chỉ là format evidence; Topping có line amount riêng theo product-row README | Multi-sheet/unclassified sources/unknown roles không bỏ qua; không header revenue/quantity conversion/ranking/physical-shipment inference |
+| S2-GROWTH / P0 | Revenue/order_count qua hai kỳ hoặc hai ca | percent_change; runtime rule; positive baseline; exact Decimal/rational; percent output | supported; latest native/synthetic evidence tại JSON chung, stage S2 | Baseline 0/âm/undefined/half-tie chưa có rule → abstain; không tự tính trong LLM | Không suy PA/CPU/Blackwell từ CUDA dev; source hashes mỗi revision riêng |
+| S2-RATIO-AVG / P0 | Cancellation, AOV, daily/weekday averages | cancelled/all placed; revenue/eligible orders; metric/calendar days, weekday mask cả hai; same effective window | supported behavioral tests và LLM evidence trong JSON chung, stage S2 | Positive denominator; AOV half-up authority; count/status/zero-sales days/round once | Ledger không AOV/cancellation nếu thiếu order identity; half-tie chưa có luật vẫn abstain |
+| S2-SHARE / P0 | Item/customer group và phone-channel revenue share | Numerator filter, denominator whole shop giữ walk-ins/nhóm khác; checked master mapping | supported tests và native LLM evidence trong JSON chung, stage S2 | Missing/ambiguous group/channel chặn đúng metric; không fuzzy group merge | Không entity ranking; unaccented source-name join cần unique code và approved metadata basis |
+| S2-LIST / P0 | Hai/ba scalar theo thứ tự câu hỏi | Cùng QueryPlan tối đa 3 windows/aggregations; ordered_results rule; output list/result_refs | supported behavioral tests: three-month series, dual channels, revenue+count; native LLM evidence JSON chung, stage S2 | Validate refs/metrics/scopes/units và preflight từng phần; verifier kiểm tra question order | Không generic listing/ranking, derived chain hoặc sort mọi list theo giá trị |
+| TEMPORAL / P0 | Structured windows và ca nguồn | day/week/month/MTD/N days/quarter/year/Tết; clock/rulebook shifts half-open | supported finite resolver và S2 scopes; tests/test_temporal.py, test_sales_sources.py | requested/effective windows độc lập; as-of runtime; shift boundary precision | Không clock từ date; không mọi paraphrase hoặc D…D+N tùy ý |
 | RANK / P1 | Product/customer/staff ranking/list | Identity resolution, metric-specific scope, base units, stable code tie-break, output ordering | planned, runtime unsupported | C13, C21–C22, C25, P1-IDENTITY | abstain khi aliases collision hoặc không đủ metric; không lấy mọi số trong tên làm attribute |
 | DEBT / P1 | Payment history, receivable/collection | Orders/payments separate; cutoff by payment date; COD/status policy riêng; per-order positive balance; earlier orders retained | planned, runtime unsupported | C09, C12, C15, C18, C26 | Source missing proof → unanswerable; engine/parser thiếu → abstain |
 | STOCK-COST / P1 | Stock event/snapshot, COGS/inventory value | Snapshot timestamp or ordered stock events; catalog vs line cost bases; unit conversions | SNAPSHOT-POINT đã có lookup hẹp; event/history/cost/valuation/conversion vẫn planned | C10–C14, C17–C18, C27 | Không dùng snapshot khác mốc, không SUM balances, không FIFO tự suy |
@@ -37,73 +47,22 @@ required fields đủ, coverage/units/grain đúng, kết quả thực thi đạ
 Một metric cấp shop có thể dùng header độc lập khi kiểm chứng đúng nghĩa, dù item parser chưa có;
 phải ghi chính xác giới hạn, không nâng cả ngành thành supported.
 
-Ngày 03/11: theo quyết định mới của người dùng, min/max order dates đã parse đầy đủ được dùng làm available_span của export; README complete span ưu tiên, mâu thuẫn/đọc thiếu vẫn chặn. Metadata ghi observed_order_dates và giới hạn completeness. Decoder S1
-chỉ cho một aggregate/window, có hint hữu hạn cho metric và relative-time literals; validator bác
-requested bounds sai (gồm quý/tháng/ngày/range tường minh) trước khi coverage clipping che lỗi, cùng scope cues bị model bỏ. Một số aliases label/paragraph exceptions được kiểm tra hữu hạn; không phải full-document policy interpretation.
-Không phải chứng nhận mọi paraphrase/alias/negation hoặc latency toàn dataset.
+Kết quả mới nhất đọc tại [JSON chung](../reports/stage_results.json): mỗi stage cùng
+cấu trúc, nguyên văn câu hỏi, đáp án kỳ vọng/thực tế, verdict và điểm theo lượt đánh giá.
+Summaries tách native/synthetic và behavior checks; repetitions không thành mẫu mới.
+Drafts, windows, operands, verifier và source/model/image hashes giữ trong evidence local.
 
-Nghiệm thu S1 hẹp trên host: mỗi lượt subset dev 12 correct/0 wrong/1 abstain (13 câu), hai lượt giống nhau; 42 model calls gồm synthetic, 0 timeout, generation median 25,47 s/p95 48,81 s. Bằng chứng lịch sử theo revision tại planner report.
+Coverage dùng mọi ngày đơn đã parse đầy đủ, gồm huỷ/trả/active; README full span ưu tiên.
+Ledger dùng ngày bản ghi riêng. Không suy coverage từ calendar; dữ liệu rỗng chưa có authority,
+parse thiếu hoặc authority conflict giữ unknown/block. Metadata cảnh báo không phát hiện
+được bản ghi thiếu bên trong export. Money grouping và name matching theo hai quyết định
+người dùng 04/11, có basis/warning; không áp dụng deaccent rộng cho inventory snapshot.
 
-Đóng gói ngày 03/11/2026: Docker LLM CPU và CUDA/GTX 1650 đã đạt hai lượt/backend
-trên cùng 13 câu đã khóa, mỗi lượt 12 correct/0 wrong/1 abstain, không missing/malformed;
-predictions khớp cả bốn lượt, source/model/input hashes giống nhau, GPU offload 29 layer.
-Labels không có trong container; evaluator host chỉ đọc sau inference. 285 tests và
-lint/format/lockfile đạt. [Docker LLM report](../reports/docker_llm_verification.json)
-ghi latency/RSS/VRAM và giới hạn so sánh sau laptop reset. Đây là bằng chứng vận hành
-các capability S1 đã bật, không mở thêm metric/shape hoặc chứng nhận PA đại diện,
-SLA toàn dataset hay Blackwell.
+Split v2 mở biz_105/biz_124 thành dev theo yêu cầu người dùng. biz_117 và các business
+holdouts khác được giữ; structure protocol không còn unseen-family holdout để chứng nhận.
+Không sử dụng validation/final/public/private để triển khai hay tạo ngoại lệ.
 
-S2 lát cắt đầu (checkpoint difference trước growth trong S2 report): hai windows/aggregates cùng metric và một
-signed difference; authority/requirements/time bounds/refs/scope/unit phải đạt, preflight
-từng window trước numeric query. Model CUDA offload 29 layers; full subset dev 15 gồm
-13 S1 regression và 2 S2 percent unsupported, không phải numeric train S2 acceptance.
-Hai CPU synthetic attempts timeout câu đầu; worker-unavailable abstentions không chứng minh
-scope handling. Chỉ nghiệm thu S2 LLM trên CUDA + Decimal executor, không CPU/GPU parity,
-SLA hoặc Blackwell. Source/model/input hashes và isolation đã kiểm tra; labels chỉ evaluator
-host đọc sau inference. Reports S1 ở trên giữ phạm vi revision lịch sử.
-
-Đối chiếu câu hỏi/gold/runtime mong đợi/actual và ý nghĩa các tỷ lệ tại
-[reports/s1_s2_results.md](../reports/s1_s2_results.md). Behavior pass không bằng correct:
-S1 đúng 12/13 (92,31%) toàn subset, native S2 0/2 được trả lời. Bộ synthetic 12 case có
-2 nhãn diagnostic unknown/share chưa phải gold nghiệp vụ; không dùng tỷ lệ này chứng nhận
-accuracy S2 train. Các giá trị gold được bổ sung sau inference, chỉ trong luồng đánh giá/báo cáo.
-
-Cập nhật ưu tiên mới nhất: S2 revenue growth đã có numeric trên **8 câu native common-dev**,
-hai lượt CUDA đều 8/0/0; S1 giữ 12/0/1. Các đoạn S2 0/2 abstain hoặc chỉ synthetic ở trên
-là checkpoint trước growth. Đọc continuation/source hashes và bảng mới nhất ở đầu
-[reports/s1_s2_results.md](../reports/s1_s2_results.md); không dùng 100% của 8 dev đã chọn
-để suy PA đại diện, model CPU growth hoặc toàn S2 đã hoàn tất.
-
-Report JSON đọc trực tiếp: [S1](../reports/s1_results.json),
-[S2](../reports/s2_results.json). `readiness` của S2 là verified narrow native revenue growth
-CUDA; không đồng nghĩa full S2 đã hoàn tất. `questions[]` và synthetic giữ gold/expected/actual
-cả hai lượt; không tính abstain đúng fallback thành correct.
-
-Checkpoint b46b263 đã commit/push lên origin/feature/phase5-s2 theo yêu cầu người dùng.
-Phần bổ sung sau checkpoint giữ giới hạn S1; S2 operator không tự mở mọi source shape.
-Hai JSON theo giai đoạn là đầu mối kết quả hiện tại; các con số 318/343 tests và 0/2 native
-ở các đoạn lịch sử phía trên thuộc revision trước, không dùng để mô tả source mới.
-
-**S2 operator — nghiệm thu trên nguồn đã bật (03/11/2026):** 366 tests, lint/format,
-lockfile offline và fixed-plan wiring 17/17 đạt. Hai fresh CUDA workers trên cùng source/image
-chạy 52 câu/lượt: **S1 12 correct / 0 wrong / 1 abstain** (13 câu), **S2 native
-22 correct / 0 wrong / 0 abstain** (8 growth + 7 AOV + 7 cancellation), **17/17 synthetic
-đúng behavior**; 15 fixture có gold xác định đạt 15 correct/0 wrong/0 abstain, hai zero-denominator
-diagnostics không tạo gold. Predictions 52/52 khớp giữa hai lượt. Gold chỉ evaluator host đọc
-sau khi cả hai containers thoát; source/model/raw/staged hashes và isolation đạt.
-
-S2 đủ bộ operator trong scope nguồn S1 đã bật: signed difference, revenue/order_count growth,
-cancellation ratio, AOV, daily/weekday average và group share có mapping rõ. Tỉ trọng và trung
-bình ngày/thứ mới có nghiệm thu synthetic; native dev phù hợp trên source hiện tại chỉ kiểm
-chứng growth/AOV/cancellation. **Không phải hoàn tất S2 mọi source family**: native share đang
-cần master/group mappings và thường raw JOIN trên các family chưa bật. Header-only revenue,
-multi-sheet, raw JOIN và toàn S1 mọi shape vẫn mở. Không chứng nhận CPU LLM source mới,
-Blackwell, official scorer equivalence hoặc PA đại diện.
-
-Schema tuple bind metric/filter/ID/ref theo vai trò operand **trước generation**, dựa vào finite
-question cues; validator tổng quát vẫn kiểm tra plan độc lập, không sửa semantic plan sau sinh.
-Một lượt diagnostic trước binding đã bị chặn vì duplicate IDs/sai operand; giữ trong
-`pre_binding_diagnostic`, không dùng làm acceptance. Half-up có authority riêng cho AOV;
-zero/âm và half-tie khác chưa có luật vẫn abstain. Requested/effective windows và denominator
-được giữ trong JSON từng câu. Tiếp tục dùng một QueryPlan/entrypoint/model worker, không
-thêm dependency/framework/script thực thi vào repo.
+Checkpoint cũ: 0421d68 đã push, 366 tests, S1 12/0/1 và S2 22/0/0 mỗi lượt CUDA.
+Checkpoint mở 8 families: S1 46/0/6, S2 70/1/3; giữ lỗi/abstain trong verification JSON,
+không chuyển thành nghiệm thu source mới. Docker S1 CPU/CUDA và M1 snapshot reports giữ
+revision/phạm vi lịch sử; không tự chứng nhận các thay đổi hiện tại.

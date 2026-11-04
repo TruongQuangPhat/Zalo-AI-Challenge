@@ -19,6 +19,21 @@ from src.semantics.answerability import preflight
 from src.semantics.rulebook import plain
 
 
+def _channel_label(value: str) -> str:
+    label = plain(value)
+    if not label or label == "none":
+        raise ContractError("order_channel_missing")
+    return {
+        "dien thoai": "phone",
+        "qua dien thoai": "phone",
+        "telephone": "phone",
+        "store": "counter",
+        "tai quay": "counter",
+        "quay": "counter",
+        "tai cua hang": "counter",
+    }.get(label, label)
+
+
 def _rounded(value: Decimal, policy: dict) -> Decimal:
     places = policy["decimal_places"]
     with localcontext() as arithmetic:
@@ -62,8 +77,22 @@ def _percent_change(change: Decimal, baseline: Decimal, policy: dict) -> dict:
     }
 
 
-def _compute(context: BusinessContext, check: dict, *, round_result: bool = True) -> dict:
+def _compute(
+    context: BusinessContext,
+    check: dict,
+    *,
+    round_result: bool = True,
+    deadline: float | None = None,
+) -> dict:
     contract, window = check["contract"], check["effective_window"]
+    if contract["formula"] in {
+        "sum_exact_order_net_merchandise",
+        "sum_exact_sale_events_no_order_inference",
+    } or (
+        contract["metric_id"] == "calendar_day_count"
+        and context.prepared.summary.get("shape") == "sales_ledger"
+    ):
+        return _compute_non_line(context, check, round_result=round_result, deadline=deadline)
     statuses = contract["status_policy"]
     filters = check.get("filters", {})
     sql = (
@@ -73,7 +102,9 @@ def _compute(context: BusinessContext, check: dict, *, round_result: bool = True
     started = time.monotonic()
 
     def budget() -> None:
-        if time.monotonic() - started > 15:
+        if time.monotonic() - started > 15 or (
+            deadline is not None and time.monotonic() >= deadline
+        ):
             raise ContractError("execution_timeout")
 
     selected = set()
@@ -84,6 +115,16 @@ def _compute(context: BusinessContext, check: dict, *, round_result: bool = True
         customer_groups = (
             dict(conn.execute("SELECT order_key,customer_group FROM order_groups"))
             if "customer_group" in filters
+            else {}
+        )
+        clocks = (
+            dict(conn.execute("SELECT order_key,seconds_of_day FROM order_times"))
+            if "shift" in filters
+            else {}
+        )
+        channels = (
+            dict(conn.execute("SELECT order_key,channel FROM order_scopes"))
+            if "channel" in filters
             else {}
         )
         item_groups = (
@@ -113,6 +154,17 @@ def _compute(context: BusinessContext, check: dict, *, round_result: bool = True
                     raise ContractError("order_group_missing")
                 if plain(customer_groups[key]) != filters["customer_group"]:
                     continue
+            if "channel" in filters:
+                if key not in channels:
+                    raise ContractError("order_channel_missing")
+                if _channel_label(channels[key]) != filters["channel"]:
+                    continue
+            if "shift" in filters:
+                if key not in clocks:
+                    raise ContractError("order_clock_missing")
+                first, last = context.rules.require("shift").parameters[filters["shift"]]
+                if not Decimal(first) <= Decimal(clocks[key]) < Decimal(last):
+                    continue
             selected.add(key)
         line_sql = (
             "SELECT line_key, order_key, net_amount, row_role FROM order_lines ORDER BY line_key"
@@ -122,6 +174,9 @@ def _compute(context: BusinessContext, check: dict, *, round_result: bool = True
             for line, order, amount, role in conn.execute(line_sql):
                 budget()
                 if order not in selected:
+                    continue
+                if role == "order_adjustment":
+                    orders_with_lines.add(order)
                     continue
                 if role not in contract["row_roles"] or amount is None or line in lines_seen:
                     raise ContractError("line_grain_role_or_amount_failed")
@@ -221,9 +276,15 @@ def _snapshot_value(context: BusinessContext, check: dict) -> dict:
     }
 
 
-def execute_plan(draft: dict, question: Question, context: BusinessContext) -> dict:
+def execute_plan(
+    draft: dict, question: Question, context: BusinessContext, *, deadline: float | None = None
+) -> dict:
     """Validate and preflight every question; no model-provided numeric values or SQL."""
     plan = validate_query_plan(draft, question, context)
+    for requirement in plan["requirements"]:
+        requirement["source_joins"] = (
+            context.prepared.summary.get("joins", []) if context.prepared else []
+        )
     agg = plan["aggregations"][0]
     stock = agg["metric_id"] == "inventory_on_hand"
     filters = (
@@ -280,9 +341,14 @@ def execute_plan(draft: dict, question: Question, context: BusinessContext) -> d
         answer = {"id": question.id, "type": "unanswerable", "reason": outside["reason"]}
     elif not stop:
         try:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ContractError("question_timeout_before_execution")
             if plan["derived_measures"]:
                 operands = {
-                    c["aggregation_ref"]: _compute(context, c, round_result=False) for c in checks
+                    c["aggregation_ref"]: _compute(
+                        context, c, round_result=False, deadline=deadline
+                    )
+                    for c in checks
                 }
                 measure = plan["derived_measures"][0]
                 current = operands[measure["current_ref"]]["exact_value"]
@@ -336,10 +402,34 @@ def execute_plan(draft: dict, question: Question, context: BusinessContext) -> d
                         "exact_rational",
                         "denominator_scope",
                     ]
+            elif plan["output"]["expected_type"] == "list":
+                by_ref = {c["aggregation_ref"]: c for c in checks}
+                operands = {
+                    ref: _compute(context, by_ref[ref], deadline=deadline)
+                    for ref in plan["output"]["result_refs"]
+                }
+                execution = {
+                    "status": "verified",
+                    "operator": "ordered_results",
+                    "aggregations": operands,
+                    "rounded_value": [
+                        operands[ref]["rounded_value"] for ref in plan["output"]["result_refs"]
+                    ],
+                    "checks": [
+                        "each_window",
+                        "each_scalar_contract",
+                        "question_order",
+                        "no_missing_operand_substitution",
+                    ],
+                }
             else:
                 execution = (
-                    _snapshot_value(context, checks[0]) if stock else _compute(context, checks[0])
+                    _snapshot_value(context, checks[0])
+                    if stock
+                    else _compute(context, checks[0], deadline=deadline)
                 )
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ContractError("question_timeout_after_execution")
             answer = {
                 "id": question.id,
                 "type": plan["output"]["expected_type"],
@@ -349,3 +439,105 @@ def execute_plan(draft: dict, question: Question, context: BusinessContext) -> d
             execution = {"status": "failed", "reason": str(exc)}
     validate_answer(answer)
     return {"answer": answer, "plan": plan, "execution": execution}
+
+
+def _compute_non_line(
+    context: BusinessContext, check: dict, *, round_result: bool, deadline: float | None = None
+) -> dict:
+    """Reduce native header amounts or ledger records without inventing order lines."""
+    c, w = check["contract"], check["effective_window"]
+    value = Decimal(0)
+    count = 0
+    started = time.monotonic()
+    if c["metric_id"] == "calendar_day_count":
+        start, end = (date.fromisoformat(w[k]) for k in ["start", "end"])
+        value = Decimal(
+            sum(
+                1
+                for n in range((end - start).days + 1)
+                if "weekday" not in check.get("filters", {})
+                or (start + timedelta(days=n)).weekday() == check["filters"]["weekday"]
+            )
+        )
+    else:
+        sql = (
+            "SELECT o.order_key,o.ordered_at,o.status,r.net_amount,'sale_item' FROM orders o "
+            "JOIN order_revenues r USING(order_key)"
+            if c["formula"] == "sum_exact_order_net_merchandise"
+            else "SELECT event_key,occurred_at,status,net_amount,row_role FROM sales_events"
+        )
+        with closing(context.prepared.connect()) as conn:
+            filters = check.get("filters", {})
+            if set(filters) - {"weekday", "customer_group", "item_group", "channel"}:
+                raise ContractError("non_line_scope_unsupported")
+            channels = (
+                dict(conn.execute("SELECT order_key,channel FROM order_scopes"))
+                if "channel" in filters
+                else {}
+            )
+            group_field = next((k for k in filters if k.endswith("_group")), None)
+            groups = {}
+            if group_field:
+                group_sql = (
+                    "SELECT order_key,customer_group FROM order_groups"
+                    if group_field == "customer_group"
+                    else "SELECT event_key,item_group FROM event_groups"
+                )
+                groups = dict(conn.execute(group_sql))
+                matches = {
+                    v.casefold().strip()
+                    for v in groups.values()
+                    if plain(v) == filters[group_field]
+                }
+                if len(matches) > 1:
+                    raise ContractError("group_name_ambiguous")
+            for key, when, status, money, role in conn.execute(sql):
+                if time.monotonic() - started > 15 or (
+                    deadline is not None and time.monotonic() >= deadline
+                ):
+                    raise ContractError("execution_timeout")
+                if group_field:
+                    if key not in groups:
+                        raise ContractError("group_reference_missing")
+                    if plain(groups[key]) != filters[group_field]:
+                        continue
+                day = parse_datetime(when).date()
+                if (
+                    status not in c["status_policy"]
+                    or not w["start"] <= day.isoformat() <= w["end"]
+                ):
+                    continue
+                if "channel" in filters:
+                    if key not in channels:
+                        raise ContractError("order_channel_missing")
+                    if _channel_label(channels[key]) != filters["channel"]:
+                        continue
+                if (
+                    "weekday" in check.get("filters", {})
+                    and day.weekday() != check["filters"]["weekday"]
+                ):
+                    continue
+                if role == "order_adjustment":
+                    continue
+                if role not in c["row_roles"] or money is None:
+                    raise ContractError("non_line_amount_or_role_missing")
+                amount = Decimal(money)
+                if not amount.is_finite():
+                    raise ContractError("nonfinite_fact")
+                value = exact_add(value, amount)
+                count += 1
+    return {
+        "status": "verified",
+        "metric_id": c["metric_id"],
+        "exact_value": value,
+        "rounded_value": _rounded(value, c["rounding"]) if round_result else None,
+        "records_selected": count,
+        "checks": [
+            "coverage",
+            "native_grain",
+            "no_invented_order_lines",
+            "exact_decimal",
+            "status",
+            "finite",
+        ],
+    }

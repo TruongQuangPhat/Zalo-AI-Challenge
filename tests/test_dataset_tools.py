@@ -88,6 +88,31 @@ def test_frozen_manifest_cannot_be_silently_refrozen():
         freeze_manifest(manifest, split, current)
 
 
+def test_explicit_split_revision_preserves_business_holdout_and_marks_structure_limits():
+    split, current, manifest = evaluation_fixture()
+    manifest["version"] = "validation-split-v2"
+    manifest["revision"] = {"prior_manifest_sha256": "a" * 64, "authority": "User request"}
+    manifest["business_groups"]["shop_1"] = "group_0"
+    protocol = manifest["protocols"]["structure"]
+    protocol.update(unseen_family_holdout=False, allow_empty_final_holdout=True)
+    protocol["partitions"]["dev"]["businesses"].append("shop_2")
+    protocol["partitions"]["dev"]["question_ids"].append("q_2")
+    protocol["partitions"]["final_holdout"] = {"businesses": [], "question_ids": []}
+    result = validate_manifest(manifest, split, current)
+    assert result["structure"]["final_holdout"]["questions"] == 0
+    assert result["business"]["final_holdout"]["questions"] == 1
+    protocol["partitions"]["validation"]["businesses"].append("shop_0")
+    with pytest.raises(ContractError):
+        validate_manifest(manifest, split, current)
+
+
+def test_v1_cannot_silently_relax_structure_holdout():
+    split, current, manifest = evaluation_fixture()
+    manifest["protocols"]["structure"]["unseen_family_holdout"] = False
+    with pytest.raises(ContractError, match="explicit v2"):
+        validate_manifest(manifest, split, current)
+
+
 def test_inventory_reads_structures_and_hashes_labels_as_opaque_bytes(tmp_path):
     root = tmp_path / "train"
     root.mkdir()

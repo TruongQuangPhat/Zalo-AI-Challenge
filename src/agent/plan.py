@@ -15,7 +15,7 @@ from src.semantics.metric_registry import metric_contract
 from src.semantics.rulebook import plain
 from src.temporal.resolver import TimeWindow, resolve_window
 
-VERSION = "query-plan-v9"
+VERSION = "query-plan-v12"
 
 
 def _object(properties: dict, *, optional: tuple[str, ...] = ()) -> dict:
@@ -64,7 +64,7 @@ PLAN_SCHEMA = _object(
     {
         "entities": _array(TEXT),
         "time_windows": _array(
-            _object({"id": TEXT, "expression": EXPRESSION}), minimum=1, maximum=2
+            _object({"id": TEXT, "expression": EXPRESSION}), minimum=1, maximum=3
         ),
         "aggregations": _array(
             _object(
@@ -90,7 +90,7 @@ PLAN_SCHEMA = _object(
                 optional=("unit",),
             ),
             minimum=1,
-            maximum=2,
+            maximum=3,
         ),
         "derived_measures": _array(
             _object(
@@ -114,8 +114,8 @@ PLAN_SCHEMA = _object(
         ),
         "output": _object(
             {
-                "expected_type": {"enum": ["number", "percent", "unsupported"]},
-                "result_refs": _array(TEXT, minimum=1, maximum=1),
+                "expected_type": {"enum": ["number", "percent", "list", "unsupported"]},
+                "result_refs": _array(TEXT, minimum=1, maximum=3),
             }
         ),
         "uncertainties": _array(TEXT),
@@ -169,33 +169,40 @@ def _schema(value, schema: dict, path: str = "plan") -> None:
         raise ContractError(f"{path}: expected integer")
 
 
-def _relative_kinds(question: Question) -> set[str]:
-    text = plain(question.question)
-    cues = {
-        r"\b(thang nay|thang hien tai)\b": "current_month",
-        r"\b(thang (truoc|roi|vua roi))\b": "previous_month",
-        r"\b(tuan nay|tuan hien tai)\b": "current_week",
-        r"\b(tuan (truoc|roi|vua roi))\b": "previous_week",
-        r"\b(hom qua|hqua|ngay hom qua)\b": "yesterday",
-        r"\b(hom nay|bua nay|hnay)\b": "today",
-    }
-    return {kind for pattern, kind in cues.items() if re.search(pattern, text)}
+RELATIVE_CUES = {
+    r"\b(thang nay|thang hien tai)\b": "current_month",
+    r"\b(thang (truoc|trc|roi|vua roi))\b": "previous_month",
+    r"\b(tuan nay|tuan hien tai)\b": "current_week",
+    r"\b(tuan (truoc|trc|roi|vua roi))\b": "previous_week",
+    r"\b(hom qua|hqua|ngay hom qua)\b": "yesterday",
+    r"\b(hom nay|bua nay|hnay)\b": "today",
+}
 
 
 def _metric_cues(question: Question) -> set[str]:
     """Literal intent cross-check, independent of model output; no numeric answers."""
     text = plain(question.question)
     cues = {
-        r"\b(doanh thu|doanh so|dthu|tien ban|tien hang|ban duoc bao nhieu tien|"
+        r"\b(doanh thu|doanh so|dthu|revenue|tien ban|tien hang|"
+        r"ban duoc (?:tong cong )?bao nhieu tien|"
         r"thu ve bao nhieu tien)\b": "revenue",
-        r"\b((so|may|bao nhieu|bn|dem|tong) (don|bill)|don hang duoc bao nhieu)\b": "order_count",
+        r"\b((so|may|bao nhieu|bao nhiu|bn|bnhiu|dem|tong) (don|bill)|"
+        r"don hang duoc bao nhieu)\b": "order_count",
     }
-    return {metric for pattern, metric in cues.items() if re.search(pattern, text)}
+    metrics = {metric for pattern, metric in cues.items() if re.search(pattern, text)}
+    if (
+        metrics == {"order_count"}
+        and re.search(r"\b(?:don (?:da |bi )?huy|trang thai huy)\b", text)
+        and not re.search(r"\b(khong|tra)\b", text)
+    ):
+        return {"cancelled_order_count"}
+    return metrics
 
 
 def _literal_windows(question: Question) -> list[dict]:
-    """Finite relative or fully specified date/period cues, never business IDs."""
+    """Finite time cues in question order; endpoints do not become extra windows."""
     text = re.sub(r"\bthangs\b", "thang", plain(question.question))
+    text = re.sub(r"\bnawm\b", "nam", text)
     dates = r"(\d{1,2})/(\d{1,2})/(\d{4})"
 
     def iso(parts) -> str:
@@ -205,26 +212,241 @@ def _literal_windows(question: Question) -> list[dict]:
     span = re.search(r"\btu (?:ngay )?" + dates + r" (?:den|toi)(?: het)? (?:ngay )?" + dates, text)
     if span:
         return [{"kind": "range", "start": iso(span.groups()[:3]), "end": iso(span.groups()[3:])}]
-    expressions = [{"kind": kind} for kind in sorted(_relative_kinds(question))]
+    events = []
+    ytd = re.search(r"\btu dau nam\b", text)
+    if not ytd and not re.search(r"\b(thang|quy) \d+ nam nay\b|\btet\b", text):
+        ytd = re.search(r"\bnam nay\b", text)
+    if ytd:
+        events.append((ytd.start(), {"kind": "year_to_date"}))
+    if ytd or re.search(r"\b\d+ ngay gan nhat\b|\b(thang|tuan) nay\b", text):
+        # A relative endpoint belongs to its range, not a second today query.
+        text = re.sub(r"\b(?:toi|den)(?: het)?(?: ngay)? (hom nay|bua nay|hnay)\b", "", text)
+    for pattern, kind in RELATIVE_CUES.items():
+        events.extend((m.start(), {"kind": kind}) for m in re.finditer(pattern, text))
     for label, kind, field in [("thang", "month", "month"), ("quy", "quarter", "quarter")]:
-        for value, year in re.findall(r"\b" + label + r" (\d{1,2})(?:/| nam )(\d{4})\b", text):
-            expressions.append({"kind": kind, "year": int(year), field: int(value)})
-    for match in re.finditer(r"\bngay " + dates + r"\b", text):
-        expressions.append({"kind": "day", "date": iso(match.groups())})
-    for days in re.findall(r"\b(\d+) ngay gan nhat\b", text):
-        expressions.append({"kind": "last_n_days", "days": int(days)})
-    if re.search(r"\btu dau nam(?: toi nay)?\b", text):
-        expressions.append({"kind": "year_to_date"})
-    for year in re.findall(r"\bnam (\d{4})\b", text):
-        if not expressions:
-            expressions.append({"kind": "year", "year": int(year)})
-    return expressions
+        for m in re.finditer(r"\b" + label + r" (\d{1,2})(?:/| nam )(\d{4})\b", text):
+            events.append((m.start(), {"kind": kind, "year": int(m[2]), field: int(m[1])}))
+    for m in re.finditer(r"\bngay " + dates + r"\b", text):
+        events.append((m.start(), {"kind": "day", "date": iso(m.groups())}))
+    for m in re.finditer(r"\b(\d+) ngay gan nhat\b", text):
+        events.append((m.start(), {"kind": "last_n_days", "days": int(m[1])}))
+    for m in re.finditer(r"\b(truoc tet|tet)(?: nam)? (\d{4})\b", text):
+        events.append(
+            (m.start(), {"kind": "before_tet" if m[1] == "truoc tet" else "tet", "year": int(m[2])})
+        )
+    if not events:
+        events.extend(
+            (m.start(), {"kind": "year", "year": int(m[1])})
+            for m in re.finditer(r"\bnam (\d{4})\b", text)
+        )
+    return [expression for _, expression in sorted(events, key=lambda event: event[0])]
+
+
+def _multiple_results(question: Question) -> dict | None:
+    """Bounded ordered scalar results in the existing QueryPlan, without a DAG."""
+    text = plain(question.question)
+    metrics = _metric_cues(question)
+    expressions = _literal_windows(question)
+    series = re.search(
+        r"\b([23]) thang lien nhau ket thuc o thang (\d{1,2})(?:/| nam )(\d{4})\b", text
+    )
+    if series and len(metrics) == 1 and "moi thang" in text and "tu thang cu den thang moi" in text:
+        size, month, year = map(int, series.groups())
+        if not 1 <= month <= 12:
+            return None
+        final = year * 12 + month - 1
+        windows = [
+            {"kind": "month", "year": i // 12, "month": i % 12 + 1}
+            for i in range(final - size + 1, final + 1)
+        ]
+        guard = text[: series.start()] + text[series.end() :]
+        guard = re.sub(r"\bmoi thang\b|\btu thang cu den thang moi\b", "", guard)
+        return {
+            "metrics": [next(iter(metrics))] * size,
+            "expressions": windows,
+            "window_indices": list(range(size)),
+            "filters": [[] for _ in windows],
+            "guard_question": replace(question, question=guard),
+        }
+    phone = re.search(r"\b(?:ban )?qua dien thoai\b", text)
+    counter = re.search(r"\b(?:ban )?tai quay\b", text)
+    explicit_pair = (
+        bool(re.search(r"\b(lan luot|moi ben)\b", text))
+        or len(re.findall(r"\b(?:bao nhieu|bao nhiu|bnhiu)\b", text)) >= 2
+    )
+    if phone and counter and explicit_pair and len(metrics) == 1 and len(expressions) == 1:
+        scopes = ["phone", "counter"] if phone.start() < counter.start() else ["counter", "phone"]
+        guard = re.sub(r"\b(?:ban )?(?:qua dien thoai|tai quay)\b|\b(lan luot|moi ben)\b", "", text)
+        return {
+            "metrics": [next(iter(metrics))] * 2,
+            "expressions": expressions,
+            "window_indices": [0, 0],
+            "filters": [["channel=" + x] for x in scopes],
+            "guard_question": replace(question, question=guard),
+        }
+    if re.search(r"\bva\b", text) and not re.search(
+        r"%|phan tram|so voi|chenh|trung binh|binh quan", text
+    ):
+        if len(metrics) == 1 and 2 <= len(expressions) <= 3:
+            return {
+                "metrics": [next(iter(metrics))] * len(expressions),
+                "expressions": expressions,
+                "window_indices": list(range(len(expressions))),
+                "filters": [[] for _ in expressions],
+                "guard_question": question,
+            }
+        if metrics == {"revenue", "order_count"} and len(expressions) == 1:
+            revenue = re.search(r"\b(doanh thu|dthu|revenue|tien ban|tien hang)\b", text)
+            count = re.search(r"\b(so|may|bao nhieu|bn|bnhiu|dem|tong) (don|bill)\b", text)
+            if revenue and count:
+                ordered = (
+                    ["revenue", "order_count"]
+                    if revenue.start() < count.start()
+                    else ["order_count", "revenue"]
+                )
+                return {
+                    "metrics": ordered,
+                    "expressions": expressions,
+                    "window_indices": [0, 0],
+                    "filters": [[], []],
+                    "guard_question": question,
+                }
+    return None
+
+
+def _multiple_schema(schema: dict, spec: dict) -> dict:
+    props = schema["properties"]
+    window_template = props["time_windows"]["items"]
+    agg_template = props["aggregations"]["items"]
+    windows, aggs = [], []
+    for index, expression in enumerate(spec["expressions"]):
+        item = deepcopy(window_template)
+        item["properties"] = {
+            "id": {"const": f"period_{index}"},
+            "expression": _object({k: {"const": v} for k, v in expression.items()}),
+        }
+        windows.append(item)
+    for index, metric in enumerate(spec["metrics"]):
+        item = deepcopy(agg_template)
+        filters = spec["filters"][index]
+        item["properties"].update(
+            id={"const": f"total_{index}"},
+            metric_id={"const": metric},
+            window_ref={"const": f"period_{spec['window_indices'][index]}"},
+            scope={"const": "whole_business"},
+            group_by=_array(TEXT, maximum=0),
+            filters=_array(
+                {"const": filters[0]} if filters else TEXT,
+                minimum=len(filters),
+                maximum=len(filters),
+            ),
+        )
+        aggs.append(item)
+    props["time_windows"] = _array(windows, minimum=len(windows), maximum=len(windows))
+    props["aggregations"] = _array(aggs, minimum=len(aggs), maximum=len(aggs))
+    props["derived_measures"]["maxItems"] = 0
+    props["output"]["properties"] = {
+        "expected_type": {"const": "list"},
+        "result_refs": _array(
+            [{"const": f"total_{i}"} for i in range(len(aggs))],
+            minimum=len(aggs),
+            maximum=len(aggs),
+        ),
+    }
+    return schema
+
+
+def _shift_text(question: Question) -> str:
+    text = re.sub(r"\bca sangs\b", "ca sang", plain(question.question))
+    return re.sub(r"\bso vs\b", "so voi", text)
+
+
+def _shift_operand_order(text: str) -> list[str]:
+    found = re.findall(r"\bca (sang|chieu)\b", text)
+    prefix = re.search(r"\bso voi ca (sang|chieu)\b", text)
+    first = re.search(r"\bca (sang|chieu)\b", text)
+    if prefix and prefix.start() < first.start():
+        baseline = "morning" if prefix[1] == "sang" else "afternoon"
+        return ["afternoon" if baseline == "morning" else "morning", baseline]
+    current = "morning" if found[0] == "sang" else "afternoon"
+    return [current, "afternoon" if current == "morning" else "morning"]
+
+
+def _single_shift(question: Question) -> dict | None:
+    text = _shift_text(question)
+    found = re.findall(r"\bca (sang|chieu)\b", text)
+    if len(found) != 1:
+        return None
+    guard = re.sub(r"\b(?:cua )?(?:rieng )?ca (sang|chieu)\b", "", text)
+    return {
+        "filters": ["shift=" + ("morning" if found[0] == "sang" else "afternoon")],
+        "guard_question": replace(question, question=guard),
+    }
+
+
+def _single_scope(question: Question) -> dict | None:
+    shift = _single_shift(question)
+    if shift:
+        return {**shift, "rule_refs": ["shift"]}
+    text = plain(question.question)
+    if re.search(r"%|phan tram|ti trong|ty trong|trung binh|binh quan|chenh|so voi", text):
+        return None
+    metrics = _metric_cues(question)
+    if len(metrics) != 1:
+        return None
+    phone = re.search(r"\b(?:ban )?qua dien thoai\b", text)
+    counter = re.search(r"\b(?:ban )?tai quay\b", text)
+    if bool(phone) != bool(counter):
+        match = phone or counter
+        return {
+            "filters": ["channel=" + ("phone" if phone else "counter")],
+            "guard_question": replace(
+                question, question=text[: match.start()] + text[match.end() :]
+            ),
+            "rule_refs": [],
+        }
+    if metrics != {"revenue"}:
+        return None
+    match = re.search(
+        r"\b(khach (?:hang )?nhom|nhom) (.+?) (?=ban\b|trong\b|thang\b|quy\b|nam\b)", text
+    )
+    if match and not re.search(r"\b(va|nhom|ngoai tru|so voi)\b", match[2]):
+        customer = match[1].startswith("khach")
+        field = "customer_group" if customer else "item_group"
+        guard = text[: match.start()] + text[match.end() :]
+        return {
+            "filters": [field + "=" + match[2].strip()],
+            "guard_question": replace(question, question=guard),
+            "rule_refs": ["customer_share" if customer else "item_group"],
+        }
+    return None
 
 
 def _period_measure(question: Question) -> dict | None:
     """Recognize bounded S2 same-period intents without looking at source values."""
-    text = plain(question.question)
+    text = _shift_text(question)
     op, metrics, filters, refs = None, [], [], []
+    if "ca chieu" in text and "ca sang" in text and re.search(r"\b(hon|kem|chenh|so voi)\b", text):
+        metrics = _metric_cues(question)
+        if len(metrics) != 1:
+            return None
+        metric = next(iter(metrics))
+        percent = bool(re.search(r"%|phan tram", text))
+        guard = re.sub(
+            r"\b(?:cua )?(?:rieng )?ca (sang|chieu)\b|%|"
+            r"\b(phan tram|so voi|hon(?: hay kem)?|kem|chenh(?: lech)?|"
+            r"tang(?: hay giam)?|giam)\b",
+            "",
+            text,
+        )
+        return {
+            "operator": "percent_change" if percent else "difference",
+            "metrics": [metric, metric],
+            "filters": [],
+            "operand_filters": [["shift=" + x] for x in _shift_operand_order(text)],
+            "rule_refs": ["shift", "percent_change" if percent else "difference"],
+            "guard_question": replace(question, question=guard),
+        }
     weekday = re.search(r"\b(thu (?:hai|ba|tu|nam|sau|bay)|chu nhat)\b", text)
     weekdays = {
         "thu hai": 0,
@@ -261,21 +483,25 @@ def _period_measure(question: Question) -> dict | None:
             text = text.replace(weekday[0], "")
     elif re.search(r"\b(ti trong|ty trong)\b", text):
         customer = re.search(
-            r"\bkhach (?:hang )?nhom (.+?) trong (?:tong )?(?:doanh thu|dthu)\b", text
+            r"\bkhach (?:hang )?nhom (.+?) trong (?:tong )?(?:doanh thu|dthu|revenue)\b", text
         )
-        item = re.search(r"\bnhom (.+?) trong (?:tong )?(?:doanh thu|dthu)\b", text)
+        item = re.search(r"\bnhom (.+?) trong (?:tong )?(?:doanh thu|dthu|revenue)\b", text)
         match = customer or item
-        if not match:
+        channel = re.search(
+            r"\bcac don ban qua dien thoai trong (?:tong )?(?:doanh thu|dthu|revenue)\b", text
+        )
+        if not match and not channel:
             return None
-        field = "customer_group" if customer else "item_group"
+        field = "customer_group" if customer else "channel" if channel else "item_group"
         op, metrics, refs = (
             "share",
             ["revenue", "revenue"],
-            ["customer_share"] if customer else ["item_group"],
+            ["customer_share"] if customer else [] if channel else ["item_group"],
         )
-        filters = [field + "=" + match[1].strip()]
-        text = text[: match.start()] + text[match.end() :]
-        text = re.sub(r"\b(ti trong|ty trong|cua)\b|%|\bphan tram\b", "", text)
+        filters = [field + "=" + ("phone" if channel else match[1].strip())]
+        chosen = channel or match
+        text = text[: chosen.start()] + text[chosen.end() :]
+        text = re.sub(r"\b(ti trong|ty trong|cua|cuar)\b|%|\bphan tram\b", "", text)
     if op is None:
         return None
     # Strip only the newly authorized intent; all existing filter/negation guards
@@ -341,7 +567,13 @@ def _difference_windows(question: Question, *, percent_change: bool = False) -> 
 
 
 def _bind_dependencies(
-    schema: dict, metrics: list[str], *, filters: list[str], operator: str, comparison: bool
+    schema: dict,
+    metrics: list[str],
+    *,
+    filters: list[str],
+    operator: str,
+    comparison: bool,
+    operand_filters: list[list[str]] | None = None,
 ) -> None:
     """Constrain symbolic operand roles before generation, never repair a draft.
 
@@ -371,7 +603,13 @@ def _bind_dependencies(
             scope={"const": "whole_business"},
             group_by=_array(TEXT, maximum=0),
         )
-        values = filters if index == 0 or operator == "average_daily" else []
+        values = (
+            operand_filters[index]
+            if operand_filters is not None
+            else filters
+            if index == 0 or operator == "average_daily"
+            else []
+        )
         item["properties"]["filters"] = _array(
             {"const": values[0]} if values else TEXT, minimum=len(values), maximum=len(values)
         )
@@ -396,6 +634,11 @@ def generation_schema(
     expression grammar; the resolver/validator still applies runtime rules/as-of.
     """
     schema = deepcopy(PLAN_SCHEMA)
+    multiple = None if stock else _multiple_results(question)
+    if multiple:
+        return _multiple_schema(schema, multiple)
+    schema["properties"]["output"]["properties"]["result_refs"].update(maxItems=1)
+    schema["properties"]["output"]["properties"]["expected_type"] = {"const": "number"}
     agg = schema["properties"]["aggregations"]["items"]
     if stock:
         agg["properties"]["metric_id"] = {"const": "inventory_on_hand"}
@@ -421,7 +664,7 @@ def generation_schema(
         }
         schema["properties"]["output"]["properties"]["expected_type"] = {
             "const": "percent"
-            if measure["operator"] in {"share", "cancellation_rate"}
+            if measure["operator"] in {"share", "cancellation_rate", "percent_change"}
             else "number"
         }
         expressions = _literal_windows(question)
@@ -435,8 +678,12 @@ def generation_schema(
             filters=measure["filters"],
             operator=measure["operator"],
             comparison=False,
+            operand_filters=measure.get("operand_filters"),
         )
         return schema
+    shift = None if stock else _single_scope(question)
+    if shift:
+        agg["properties"]["filters"] = _array({"const": shift["filters"][0]}, minimum=1, maximum=1)
     growth_windows = [] if stock else _difference_windows(question, percent_change=True)
     comparison = growth_windows or ([] if stock else _difference_windows(question))
     difference = bool(comparison)
@@ -485,6 +732,10 @@ def _check_question_scope(
     It does not infer a replacement intent or authorize execution.
     """
     text = plain(question.question)
+    if _metric_cues(question) == {"cancelled_order_count"}:
+        text = re.sub(r"\b(?:da huy|bi huy|trang thai huy|don huy)\b", "", text)
+    if re.search(r"\b\d{1,2}(?::\d{2}|h)\b", text):
+        raise ContractError("explicit_clock_range_unsupported")
     # A polite trailing question is not a negated business condition.
     text = re.sub(r"\b(duoc\s+)?khong(?:\s+(a|nhi|nhe))?\s*[?!.]*$", "", text)
     # "Tính riêng ngày hôm nay" narrows time, not the business/entity scope.
@@ -508,12 +759,20 @@ def _check_question_scope(
         r"\b(rieng|san pham|mat hang|khach|nhan vien|ty le|trung binh|so voi|"
         r"nhieu nhat|cao nhat|thap nhat|top|kg|don huy|don tra|khong|chi tinh|"
         r"ngoai tru|loai tru|tru don|tien mat|chuyen khoan|cod|theo kenh|tung nhom|"
-        r"ca sang|ca chieu)\b",
+        r"ca sang|ca chieu|da huy|bi huy|trang thai huy|da tra|bi tra|"
+        r"co doanh thu tu|co dthu tu|hoat chat|qua dien thoai|tai quay|"
+        r"may ngay|bao nhieu ngay|doanh thu dat|dthu dat|tro len|tro xuong)\b",
         text,
     ):
         raise ContractError("question_scope_or_operator_unsupported")
+    scope_text = re.sub(r"\b(cua hang|ban hang|don hang|tien hang)\b", "", text)
+    scope_text = re.sub(r"\b\d+ ngay gan nhat\b", "", scope_text)
+    if re.search(
+        r"\b(hang|mon)\s+\w|\b(nhat|nhap|nhom|ngay nao|lien nhau|moi thang)\b", scope_text
+    ):
+        raise ContractError("question_scope_or_operator_unsupported")
     owners_removed = re.sub(r"\b(cua\s+)?(cua hang|shop|tiem|doanh nghiep)\b", "", text)
-    if re.search(r"\bcua\s+\w", owners_removed):
+    if re.search(r"\b(cua|cuar)\s+\w", owners_removed):
         raise ContractError("question_owner_filter_unsupported")
 
 
@@ -554,6 +813,9 @@ def validate_query_plan(draft: dict, question: Question, context: BusinessContex
         draft["aggregations"],
         draft["derived_measures"],
     )
+    multiple = _multiple_results(question)
+    if multiple:
+        return _validate_multiple_results(draft, question, context, multiple)
     period_measure = _period_measure(question)
     if period_measure:
         return _validate_period_measure(draft, question, context, period_measure)
@@ -561,9 +823,10 @@ def validate_query_plan(draft: dict, question: Question, context: BusinessContex
     stock = len(aggregations) == 1 and aggregations[0]["metric_id"] == "inventory_on_hand"
     growth = difference and derived[0]["operator"] == "percent_change"
     expected_expressions = _difference_windows(question, percent_change=growth)
+    shift = None if stock else _single_scope(question)
     if not stock:
         _check_question_scope(
-            question,
+            shift["guard_question"] if shift else question,
             difference=difference and bool(expected_expressions),
             percent_change=growth and bool(expected_expressions),
         )
@@ -590,13 +853,21 @@ def validate_query_plan(draft: dict, question: Question, context: BusinessContex
     for agg in aggregations:
         if (
             agg["scope"] != ("product" if stock else "whole_business")
-            or agg["filters"]
+            or agg["filters"] != (shift["filters"] if shift else [])
             or agg["group_by"]
         ):
             raise ContractError("only whole-business totals are supported")
     window, agg = windows[0], aggregations[0]
-    contract = metric_contract(context.rules, agg["metric_id"])
+    contract = metric_contract(
+        context.rules,
+        agg["metric_id"],
+        shape=context.prepared.summary.get("shape") if context.prepared else None,
+    )
     rule_refs = list(contract.rule_refs)
+    if shift:
+        for ref in shift["rule_refs"]:
+            context.rules.require(ref)
+            rule_refs.append(ref)
     if difference:
         if not expected_expressions or len(metrics) != 1 or stock:
             raise ContractError("question_difference_direction_or_windows_unsupported")
@@ -748,7 +1019,11 @@ def _validate_period_measure(
     contracts = []
     for index, (a, metric) in enumerate(zip(operands, measure["metrics"], strict=True)):
         expected_filters = (
-            measure["filters"] if index == 0 or measure["operator"] == "average_daily" else []
+            measure["operand_filters"][index]
+            if "operand_filters" in measure
+            else measure["filters"]
+            if index == 0 or measure["operator"] == "average_daily"
+            else []
         )
         if (
             a["metric_id"] != metric
@@ -758,7 +1033,11 @@ def _validate_period_measure(
             or a["filters"] != expected_filters
         ):
             raise ContractError("period_measure_metric_window_scope_or_filters")
-        c = metric_contract(context.rules, metric)
+        c = metric_contract(
+            context.rules,
+            metric,
+            shape=context.prepared.summary.get("shape") if context.prepared else None,
+        )
         if a.get("unit", c.unit) != c.unit:
             raise ContractError("unit_mismatch")
         contracts.append(c)
@@ -774,7 +1053,7 @@ def _validate_period_measure(
     ]
     for c in contracts:
         refs.extend(c.rule_refs)
-    percent = measure["operator"] in {"cancellation_rate", "share"}
+    percent = measure["operator"] in {"cancellation_rate", "share", "percent_change"}
     output_type = "percent" if percent else "number"
     if draft["output"] != {"expected_type": output_type, "result_refs": [d["id"]]}:
         raise ContractError("output must reference its scalar result")
@@ -786,12 +1065,18 @@ def _validate_period_measure(
         "mode": "nearest",
         "unspecified_tie": "abstain",
     }
+    if measure["operator"] == "difference":
+        rounding = contracts[0].rounding
     if measure["operator"] == "average_order_value":
         rounding = context.rules.require("average_order_value").parameters
     plan = deepcopy(draft)
     plan["time_windows"][0].update({**resolved.summary(), "id": windows[0]["id"]})
     for a in plan["aggregations"]:
-        c = metric_contract(context.rules, a["metric_id"])
+        c = metric_contract(
+            context.rules,
+            a["metric_id"],
+            shape=context.prepared.summary.get("shape") if context.prepared else None,
+        )
         a.update(
             unit=c.unit,
             count_unit=c.count_unit,
@@ -828,6 +1113,115 @@ def _validate_period_measure(
                 "capability_check": True,
             }
             for c in contracts
+        ],
+    )
+    return plan
+
+
+def _validate_multiple_results(
+    draft: dict, question: Question, context: BusinessContext, spec: dict
+) -> dict:
+    """Validate every result against question order and registered scalar contracts."""
+    _check_question_scope(spec["guard_question"])
+    context.rules.require("ordered_results")
+    if (
+        question.business_id != context.catalog["business_id"]
+        or draft["entities"]
+        or draft["uncertainties"]
+        or draft["derived_measures"]
+    ):
+        raise ContractError("multiple_results_namespace_or_scope")
+    windows, aggs = draft["time_windows"], draft["aggregations"]
+    nodes = [*windows, *aggs]
+    ids = [n["id"] for n in nodes]
+    if any(not i.strip() for i in ids) or len(set(ids)) != len(ids):
+        raise ContractError("dependency IDs must be nonempty and distinct")
+    if len(windows) != len(spec["expressions"]) or len(aggs) != len(spec["metrics"]):
+        raise ContractError("question_multiple_windows_or_results_dependency_count")
+    amap = {a["id"]: a for a in aggs}
+    wmap = {w["id"]: w for w in windows}
+    refs = draft["output"]["result_refs"]
+    if (
+        draft["output"]["expected_type"] != "list"
+        or len(refs) != len(aggs)
+        or len(set(refs)) != len(refs)
+        or set(refs) != set(amap)
+    ):
+        raise ContractError("multiple_results_output_references")
+    if {a["window_ref"] for a in aggs} != set(wmap):
+        raise ContractError("unknown or unused window dependency")
+    resolved = {
+        key: resolve_window(w["expression"], question.as_of_date, context.rules, context.calendar)
+        for key, w in wmap.items()
+    }
+    contracts = []
+    rule_refs = ["ordered_results"]
+    for i, ref in enumerate(refs):
+        a = amap[ref]
+        c = metric_contract(
+            context.rules,
+            spec["metrics"][i],
+            shape=context.prepared.summary.get("shape") if context.prepared else None,
+        )
+        if (
+            a["metric_id"] != c.metric_id
+            or a["scope"] != "whole_business"
+            or a["filters"] != spec["filters"][i]
+            or a["group_by"]
+            or a.get("unit", c.unit) != c.unit
+        ):
+            raise ContractError("multiple_results_metric_scope_filters_or_order")
+        expected = resolve_window(
+            spec["expressions"][spec["window_indices"][i]],
+            question.as_of_date,
+            context.rules,
+            context.calendar,
+        )
+        actual = resolved[a["window_ref"]]
+        if (actual.start, min(actual.end, actual.cutoff or actual.end)) != (
+            expected.start,
+            min(expected.end, expected.cutoff or expected.end),
+        ):
+            raise ContractError("question_time_mismatch_before_coverage")
+        contracts.append(c)
+        rule_refs.extend(c.rule_refs)
+        rule_refs.extend(expected.rule_refs)
+    plan = deepcopy(draft)
+    for w in plan["time_windows"]:
+        w.update(
+            {**resolved[w["id"]].summary(), "id": w["id"], "time_axis": contracts[0].time_axis}
+        )
+    by_ref = dict(zip(refs, contracts, strict=True))
+    for a in plan["aggregations"]:
+        c = by_ref[a["id"]]
+        a.update(
+            unit=c.unit,
+            count_unit=c.count_unit,
+            status_policy=c.status_policy,
+            time_axis=c.time_axis,
+        )
+    plan["output"].update(
+        ordering="question_order",
+        rounding=[c.rounding for c in contracts],
+        undefined_policy="abstain_if_any_operand_unverified",
+    )
+    plan.update(
+        version=VERSION,
+        question_id=question.id,
+        business_id=question.business_id,
+        as_of_date=question.as_of_date,
+        rulebook_version=context.rules.sha256,
+        rule_refs=list(dict.fromkeys(rule_refs)),
+        requirements=[
+            {
+                "metric_id": by_ref[ref].metric_id,
+                "window_refs": [amap[ref]["window_ref"]],
+                "required_fields": by_ref[ref].required_fields,
+                "history_requirement": by_ref[ref].history_requirement,
+                "coverage_check": "each_window",
+                "capability_check": True,
+            }
+            for ref in refs
         ],
     )
     return plan

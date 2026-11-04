@@ -19,7 +19,7 @@ from src.semantics.rulebook import RuleProfile, parse_rulebook
 if TYPE_CHECKING:
     from src.data.normalization import PreparedBusiness
 
-VERSION = "source-catalog-v1"
+VERSION = "source-catalog-v2"
 OFFLINE_NAMES = {
     "answers",
     "labels",
@@ -55,7 +55,11 @@ def require_output(path: Path, root: Path) -> None:
 def _software_hash() -> str:
     directory = Path(__file__).parent
     return fingerprint(
-        {p.relative_to(directory).as_posix(): digest(p) for p in sorted(directory.rglob("*.py"))}
+        {
+            p.relative_to(directory).as_posix(): digest(p)
+            for p in sorted(directory.rglob("*.py"))
+            if "normalization" not in p.relative_to(directory).parts
+        }
     )
 
 
@@ -169,7 +173,6 @@ def prepare_business(
         "business_id": business,
         "sources": sources,
         "authority": authority,
-        "rule_parser_sha256": rules.parser_sha256 if rules else None,
         "excluded": excluded,
         "reader_options": asdict(reader_options),
         "profile_options": asdict(profile_options),

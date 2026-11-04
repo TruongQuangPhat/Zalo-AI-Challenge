@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 
 from src.agent.context import build_context
@@ -11,61 +12,44 @@ from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError, dumps, loads
 
-PROMPT_VERSION = "planner-v10"
-SYSTEM = """Lập QueryPlan JSON theo schema, không trả lời số hoặc sinh SQL/code.
-S1: một kỳ, toàn shop, output number. Doanh thu/tiền bán/dthu=revenue;
-số đơn/mấy đơn/số bill=order_count. Số lượng hàng/kg không phải số đơn.
-Riêng sản phẩm/khách/nhân viên, phủ định điều kiện, ranking ngoài S2:
-uncertainties=["unsupported_scope_or_operator"].
-S2 cùng một kỳ: một time_window, hai aggregations chung window_ref, một derived_measure.
-current_ref là tử số, baseline_ref là mẫu số; output.result_refs trỏ derived_measure.
-Giá trị trung bình mỗi đơn: operator=average_order_value, revenue/order_count, output number.
-Tỉ lệ đơn huỷ: operator=cancellation_rate, cancelled_order_count/placed_order_count,
-output percent. Mẫu số placed_order_count là mọi trạng thái, không phải order_count.
-Trung bình mỗi ngày/thứ Hai...: operator=average_daily, revenue hoặc order_count chia
-calendar_day_count, output number. Cùng filters cho cả hai: weekday=0 là thứ Hai,
-1 thứ Ba,...,6 Chủ nhật; không chỉ đếm các ngày có đơn. Mỗi ngày thì filters=[].
-Tỉ trọng nhóm: operator=share, revenue/revenue, output percent. Chỉ tử số có filter:
-customer_group=<tên nhóm khách> hoặc item_group=<tên nhóm hàng>, viết thường không dấu.
-Mẫu số là toàn shop, filters=[]; gồm cả khách vãng lai và nhóm khác. scope=whole_business,
-group_by=[], entities=[] trong các phép này. Không tự tính giá trị hoặc tự bỏ điều kiện.
-S2 tăng trưởng/phần trăm thay đổi revenue hoặc order_count toàn shop giữa hai kỳ:
-operator=percent_change; current_ref là aggregate kỳ hỏi, baseline_ref là kỳ so;
-output.expected_type=percent và result_refs trỏ ID percent_change. Không tự tính số.
-Tháng M/Y so với tháng trước: kỳ so là M-1 của kỳ hỏi (tháng 1 thì tháng 12 năm trước),
-không lấy tháng trước của as_of_date. Ví dụ tháng 3/2026 so tháng trước: 3/2026 và 2/2026.
-Hai tháng/năm ghi rõ: giữ đúng hai kỳ nêu. "So với kỳ so, kỳ hỏi..." vẫn kỳ hỏi trừ kỳ so.
-Baseline bằng 0/âm hoặc thiếu dữ liệu: executor abstain, không tự suy giá trị %.
-S2 difference là chênh lệch số có dấu: hai kỳ, cùng revenue hoặc order_count, toàn shop.
-Phép difference = kỳ hỏi trừ kỳ so; current_ref/baseline_ref trỏ hai aggregations.
-Mỗi aggregation dùng window_ref riêng. output.result_refs trỏ ID của difference.
-Ví dụ doanh thu hôm nay so với hôm qua chênh lệch bao nhiêu:
-{"entities":[],"time_windows":[{"id":"c","expression":{"kind":"today"}},
-{"id":"b","expression":{"kind":"yesterday"}}],"aggregations":[
-{"id":"a","metric_id":"revenue","window_ref":"c","scope":"whole_business","filters":[],"group_by":[]},
-{"id":"z","metric_id":"revenue","window_ref":"b","scope":"whole_business","filters":[],"group_by":[]}],
-"derived_measures":[{"id":"d","operator":"difference","current_ref":"a","baseline_ref":"z"}],
-"output":{"expected_type":"number","result_refs":["d"]},"uncertainties":[]}
-Tháng này so với tháng trước: current_month và previous_mtd (cùng số ngày).
-So với <kỳ so>, <kỳ hỏi> chênh bao nhiêu: vẫn kỳ hỏi trừ kỳ so.
-Chỉ một kỳ thì derived_measures=[]; không tự thêm phép trừ khi câu chỉ hỏi tổng.
-Giữ mọi điều kiện, không biến câu ngoài phạm vi thành tổng toàn shop.
-Coverage unknown vẫn lập plan; preflight riêng kiểm tra dữ liệu, không tự suy coverage.
-Ví dụ số đơn tháng này:
+PROMPT_VERSION = "planner-v13"
+SYSTEM = """Lập QueryPlan JSON theo schema; không trả số đáp án, SQL hoặc code.
+Giữ mọi điều kiện. Ngoài scope/schema: uncertainties=["unsupported_scope_or_operator"].
+Trong scope thì uncertainties=[]; không ghi uncertainty chỉ vì không có raw rows.
+revenue=doanh thu/dthu/tiền bán; order_count=số đơn không huỷ/trả;
+cancelled_order_count=số đơn huỷ; placed_order_count=mọi trạng thái.
+Một tổng: một window/aggregate, derived_measures=[], output number.
+Ví dụ số đơn tháng này (template, không phải đáp án):
 {"entities":[],"time_windows":[{"id":"period","expression":{"kind":"current_month"}}],
 "aggregations":[{"id":"total","metric_id":"order_count","window_ref":"period",
 "scope":"whole_business","filters":[],"group_by":[]}],"derived_measures":[],
 "output":{"expected_type":"number","result_refs":["total"]},"uncertainties":[]}
-Hôm nay=today; hôm qua/hqua=yesterday; tháng này=current_month;
-tháng trước=previous_month; tuần này/trước=current_week/previous_week;
-current_month chỉ từ ngày 1 đến as_of_date; month là trọn tháng, có thể gồm ngày sau as_of.
-Không đổi "tháng này" thành month(year,month), vì sẽ tính cả ngày chưa xảy ra.
-N ngày gần nhất=last_n_days(days); ngày cụ thể=day(date ISO);
-khoảng ngày=range(start,end ISO); tháng M/Y=month(year,month);
-quý Q/Y=quarter(year,quarter); năm Y=year(year); từ đầu năm=year_to_date.
-Thiếu năm tháng/quý: luật missing_year theo as_of_date, không theo ngày máy.
-Tết=tet(year), trước Tết=before_tet(year). Không đoán khi thời gian mơ hồ.
-Server gắn identity, requirements, policy, rule_refs từ runtime authority.
+S2 difference=current-baseline; percent_change=(current-baseline)/baseline*100,
+output percent. Dùng đúng refs/kỳ hỏi/kỳ so; không tự tính. Baseline 0/âm: executor abstain.
+Tháng M/Y so tháng trước: baseline M-1 của kỳ hỏi, không theo as_of_date.
+Tháng này so tháng trước: current_month/previous_mtd, cùng số ngày.
+AOV: average_order_value, revenue/order_count, number.
+Tỉ lệ huỷ: cancellation_rate, cancelled_order_count/placed_order_count, percent.
+Trung bình ngày/thứ: average_daily, metric/calendar_day_count, number;
+weekday=0 thứ Hai,...,6 Chủ nhật trên cả hai aggregates; đếm cả ngày không bán.
+Doanh thu nhóm: một revenue có item_group/customer_group theo câu hỏi.
+Tỉ trọng: share, revenue/revenue, percent; chỉ tử có item_group=<nhóm>,
+customer_group=<nhóm khách> không dấu hoặc channel=phone; mẫu toàn shop filters=[].
+Ca sáng shift=morning; ca chiều shift=afternoon. So ca dùng một window, hai
+aggregates cùng metric, filters riêng. Ca chiều so ca sáng: baseline là sáng.
+Nhiều số độc lập: output list, result_refs đúng thứ tự hỏi, derived_measures=[].
+Chuỗi 3 tháng kết thúc M/Y: 3 windows/aggregates theo thứ tự tháng cũ tới mới.
+Hai kênh: channel=phone/counter theo thứ tự hỏi; một window chung.
+Không sort kết quả theo giá trị. scope=whole_business, group_by=[], entities=[].
+Hôm nay=today; hôm qua/hqua=yesterday; tuần trc/trước=previous_week;
+tuần này=current_week; tháng này=current_month; tháng trước=previous_month;
+N ngày gần nhất=last_n_days; từ đầu năm=year_to_date; tháng M/Y=month;
+quý Q/Y=quarter; năm Y=year; ngày cụ thể=day; khoảng ngày=range;
+Tết=tet, trước Tết=before_tet. Dùng as_of_date, không dùng ngày máy.
+Current_month chỉ đến as_of; month là cả tháng, có thể có ngày sau as_of.
+Server gắn identity, policy, requirements, resolve/preflight. Coverage unknown vẫn
+lập plan; missing order_identity vẫn lập count để preflight xác minh unanswerable.
+Không thay count bằng số dòng. Không bỏ điều kiện sản phẩm/khách/ngưỡng/ranking.
 """
 
 STOCK_SYSTEM = """Lập QueryPlan JSON để tra tồn kho, không trả lời số và không sinh SQL/code.
@@ -107,7 +91,11 @@ class LocalPlanner:
 
     def decide(self, question: Question, *, context: BusinessContext) -> dict:
         selected = build_context(question, context)
-        stock = bool(selected.get("snapshot"))
+        from src.semantics.rulebook import plain
+
+        stock = bool(selected.get("snapshot")) and bool(
+            re.search(r"\b(ton|kho)\b", plain(question.question))
+        )
         schema = generation_schema(
             question,
             stock=stock,
@@ -128,7 +116,7 @@ class LocalPlanner:
                     raise ContractError("incomplete_generation")
                 draft = loads(record["text"])
                 validate_query_plan(draft, question, context)
-                decision = execute_plan(draft, question, context)
+                decision = execute_plan(draft, question, context, deadline=deadline)
                 decision["plan"]["planning"] = {
                     "prompt_version": PROMPT_VERSION,
                     "attempts": attempts,

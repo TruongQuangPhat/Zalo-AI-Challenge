@@ -88,7 +88,7 @@ def _worker(pipe, model_path: str, n_ctx: int, threads: int, gpu_layers: int = 0
             started = time.monotonic()
             # Two aggregates plus refs need more JSON than the S1 scalar draft.
             token_budget = (
-                384 if request["schema"]["properties"]["aggregations"]["maxItems"] == 2 else 256
+                384 if request["schema"]["properties"]["aggregations"]["maxItems"] > 1 else 256
             )
             llama_perf_context_reset(model.ctx)
             result = model.create_chat_completion(

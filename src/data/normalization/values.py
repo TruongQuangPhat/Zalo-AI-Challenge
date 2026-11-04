@@ -157,9 +157,38 @@ def parse_date(value, *, year: int | None = None, date_system: str | None = None
 
 def normalize_status(value) -> str:
     statuses = {
-        "completed": {"completed", "hoan thanh", "da hoan thanh", "xong"},
-        "cancelled": {"cancelled", "huy", "da huy", "khach huy"},
-        "returned": {"returned", "tra hang", "doi tra", "hoan tra", "hoan hang", "da hoan hang"},
+        "completed": {
+            "completed",
+            "hoan thanh",
+            "da hoan thanh",
+            "xong",
+            "thanh cong",
+            "da lay",
+            "da xong",
+            "da giao",
+            "ok",
+        },
+        "cancelled": {
+            "cancelled",
+            "huy",
+            "da huy",
+            "khach huy",
+            "cancel",
+            "khong giao duoc",
+            "huy don",
+            "da huy don",
+        },
+        "returned": {
+            "returned",
+            "tra hang",
+            "doi tra",
+            "hoan tra",
+            "hoan hang",
+            "da hoan hang",
+            "da tra hang",
+            "tra lai",
+            "hang tra ve",
+        },
         # Active recorded order: revenue/count exclude cancellation and returns.
         # This alias does not certify a physical shipment for future shipping metrics.
         "shipping": {
@@ -169,6 +198,9 @@ def normalize_status(value) -> str:
             "dang giao hang",
             "cho giao",
             "dang giao dich",
+            "dang gui",
+            "dang xu ly",
+            "dang van chuyen",
         },
     }
     token = normalized(str(value)).strip()
@@ -176,3 +208,53 @@ def normalize_status(value) -> str:
         if token in labels:
             return status
     raise ParseError("status_ambiguous", "unknown order status; no default was applied")
+
+
+def serial_system(tokens: list[str], declared_end: str | None) -> str | None:
+    """Resolve CSV serial epochs only when a declared source bound rejects the other.
+
+    The column must already be mapped as a date. No calendar/question bounds or
+    numeric-ID guesses enter this evidence check. Ambiguity remains blocking.
+    """
+    if not tokens:
+        return None
+    if declared_end is None:
+        raise ParseError("date_system", "CSV date serial has no epoch evidence")
+    end = parse_date(declared_end)
+    valid = []
+    for system in ["1900", "1904"]:
+        try:
+            if all(parse_date(token, date_system=system) <= end for token in tokens):
+                valid.append(system)
+        except ParseError:
+            pass
+    if len(valid) != 1:
+        raise ParseError("date_system", "source bounds do not identify one CSV serial epoch")
+    return valid[0]
+
+
+def consistent_grouping(tokens: list[str]) -> str | None:
+    """User-approved 2026-11-04 policy: consistent groups of three mean thousands.
+
+    This is an explicit export convention, not an answer/price heuristic. Retain
+    the basis and ambiguity warning in prepared metadata. Mixed formats abstain.
+    """
+    cleaned = [
+        re.sub(r"\s*(?:vnd|vnđ|đ|₫)$", "", str(t).strip(), flags=re.I).strip()
+        for t in tokens
+        if str(t).strip()
+    ]
+    candidates = []
+    for style, pattern in [
+        ("comma_grouped", r"[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?"),
+        ("dot_grouped", r"[+-]?\d{1,3}(?:\.\d{3})+(?:,\d+)?"),
+    ]:
+        if not any(re.fullmatch(pattern, t) for t in cleaned):
+            continue
+        try:
+            for t in cleaned:
+                parse_money(t, style)
+        except ParseError:
+            continue
+        candidates.append(style)
+    return candidates[0] if len(candidates) == 1 else None

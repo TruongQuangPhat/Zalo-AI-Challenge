@@ -16,7 +16,7 @@ from typing import Any
 from src.data.profiling import normalized
 from src.jsonio import ContractError
 
-VERSION = "runtime-rules-v5"
+VERSION = "runtime-rules-v7"
 
 
 class SemanticError(ContractError):
@@ -75,6 +75,7 @@ LABELS = {
     "time_axis": "don thuoc ky nao",
     "revenue_basis": "doanh thu mot don",
     "week": "tuan",
+    "shift": "ca sang, ca chieu",
     "explicit_month": "thang m/y",
     "current_month": "thang nay",
     "last_n_days": "n ngay gan nhat",
@@ -88,6 +89,7 @@ LABELS = {
     "cancellation_rate": "ti le don huy trong ky",
     "customer_share": "doanh thu theo nhom khach",
     "item_group": "nhom hang",
+    "item_role": "mat hang",
     "average_order_value": "gia tri trung binh mot don",
 }
 
@@ -119,8 +121,11 @@ def _unhandled_qualifications(text: str, section: str) -> set[str]:
         "revenue_basis": r"\b(doanh thu|tien ban|tien hang)\b",
         "time_axis": r"\b(ngay dat|ngay giao|ngay thu tien)\b",
         "week": r"\btuan\b",
+        "shift": r"\bca (sang|chieu)\b",
+        "item_role": r"\bphi phuc vu\b",
         "current_month": r"\bthang nay\b",
         "rounding": r"\blam tron\b",
+        "ordered_results": r"\b(thu tu|nhieu so)\b",
         "coverage": r"\b(khoang ngay|pham vi du lieu)\b",
         "difference": r"\b(chenh lech|ky hoi|ky so)\b",
         "percent_change": r"\b(tang truong|phan tram thay doi)\b",
@@ -131,6 +136,18 @@ def _unhandled_qualifications(text: str, section: str) -> set[str]:
 def _decode(rule_id: str, value: str) -> tuple[str, dict] | None:
     """Finite supported meanings. Full matches reject unhandled qualifications."""
     patterns = {
+        "shift": (
+            r"theo gio tao don: ca sang 06:00[–-]13:59, ca chieu 14:00[–-]21:59\. "
+            r"so ca chieu voi ca sang: moc la ca sang",
+            "order_clock_intervals",
+            {"morning": [21600, 50400], "afternoon": [50400, 79200]},
+        ),
+        "item_role": (
+            r"mon, hang, san pham cung nghia voi mat hang\. dong phi phuc vu khong phai mat hang: "
+            r"khong xep hang, khong dem\. van tinh vao doanh thu, ke ca mau so ti trong nhom hang",
+            "service_fee_in_revenue_not_product_group",
+            {},
+        ),
         "cancellation_rate": (
             r"phan tram don huy trong moi don dat trong ky \(theo ngay dat, moi trang thai: "
             r"ca don huy, don tra, don dang giao\)\. lam tron 2 chu so thap phan",
@@ -247,6 +264,11 @@ def _decode(rule_id: str, value: str) -> tuple[str, dict] | None:
             "unanswerable_outside",
             {},
         ),
+        "ordered_results": (
+            r"thi ghi list theo dung thu tu cau hoi neu",
+            "ordered_scalar_results",
+            {"ordering": "question_order"},
+        ),
         "rounding": (
             r"lam tron: tien ra so le lam tron ve dong; trung binh cua mot khoan tien "
             r"cung la tien, lam tron ve dong\. phan tram va so trung binh khac lam tron "
@@ -349,6 +371,8 @@ def parse_rulebook(
                 add("outside_coverage", cleaned[2:], number, raw)
             if cleaned.startswith("- lam tron:"):
                 add("rounding", cleaned[2:], number, raw)
+            if "cau hoi nhieu so " in cleaned:
+                add("ordered_results", cleaned.split("cau hoi nhieu so ", 1)[1], number, raw)
         if not heading.startswith(("#", "|")) and before == sum(
             len(entries) for entries in candidates.values()
         ):
@@ -362,6 +386,7 @@ def parse_rulebook(
         "outside_coverage",
         "as_of",
         "rounding",
+        "ordered_results",
     ]:
         entries = candidates.get(rule_id, [])
         specific = [entry for entry in entries if entry[0] == plain(industry or "")]
