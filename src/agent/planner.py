@@ -11,13 +11,25 @@ from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError, dumps, loads
 
-PROMPT_VERSION = "planner-v9"
+PROMPT_VERSION = "planner-v10"
 SYSTEM = """Lập QueryPlan JSON theo schema, không trả lời số hoặc sinh SQL/code.
 S1: một kỳ, toàn shop, output number. Doanh thu/tiền bán/dthu=revenue;
 số đơn/mấy đơn/số bill=order_count. Số lượng hàng/kg không phải số đơn.
-Riêng sản phẩm/khách/nhân viên, trạng thái riêng, phủ định điều kiện, ranking,
-tỷ trọng/trung bình/ratio: uncertainties=["unsupported_scope_or_operator"].
-S2 mở thêm tăng trưởng/phần trăm thay đổi doanh thu toàn shop giữa hai kỳ:
+Riêng sản phẩm/khách/nhân viên, phủ định điều kiện, ranking ngoài S2:
+uncertainties=["unsupported_scope_or_operator"].
+S2 cùng một kỳ: một time_window, hai aggregations chung window_ref, một derived_measure.
+current_ref là tử số, baseline_ref là mẫu số; output.result_refs trỏ derived_measure.
+Giá trị trung bình mỗi đơn: operator=average_order_value, revenue/order_count, output number.
+Tỉ lệ đơn huỷ: operator=cancellation_rate, cancelled_order_count/placed_order_count,
+output percent. Mẫu số placed_order_count là mọi trạng thái, không phải order_count.
+Trung bình mỗi ngày/thứ Hai...: operator=average_daily, revenue hoặc order_count chia
+calendar_day_count, output number. Cùng filters cho cả hai: weekday=0 là thứ Hai,
+1 thứ Ba,...,6 Chủ nhật; không chỉ đếm các ngày có đơn. Mỗi ngày thì filters=[].
+Tỉ trọng nhóm: operator=share, revenue/revenue, output percent. Chỉ tử số có filter:
+customer_group=<tên nhóm khách> hoặc item_group=<tên nhóm hàng>, viết thường không dấu.
+Mẫu số là toàn shop, filters=[]; gồm cả khách vãng lai và nhóm khác. scope=whole_business,
+group_by=[], entities=[] trong các phép này. Không tự tính giá trị hoặc tự bỏ điều kiện.
+S2 tăng trưởng/phần trăm thay đổi revenue hoặc order_count toàn shop giữa hai kỳ:
 operator=percent_change; current_ref là aggregate kỳ hỏi, baseline_ref là kỳ so;
 output.expected_type=percent và result_refs trỏ ID percent_change. Không tự tính số.
 Tháng M/Y so với tháng trước: kỳ so là M-1 của kỳ hỏi (tháng 1 thì tháng 12 năm trước),

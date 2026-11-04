@@ -1,3 +1,43 @@
+# Kết quả S1/S2 hiện tại
+
+Hai report JSON chính: [S1](s1_results.json), [S2](s2_results.json).
+Evidence mới nhất: `s2_verification.json.s2_operator_completion`; các bảng phía dưới là
+checkpoint trước completion. Trên source mới, hai fresh CUDA workers đều đạt:
+
+| Subset | Correct | Wrong | Abstain | Ý nghĩa |
+|---|---:|---:|---:|---|
+| S1 native 13 | 12 | 0 | 1 | Đúng 92,31% toàn subset, 100% phần đã trả lời; product filter unsupported bỏ |
+| S2 native 22 | 22 | 0 | 0 | 8 growth + 7 AOV + 7 cancellation; dev engineering, không là PA đại diện |
+| Synthetic có gold 15 | 15 | 0 | 0 | Cùng 2 diagnostics zero-denominator → 17/17 expected behaviors |
+
+S1 vẫn scope hẹp. S2 đủ operator trên nguồn đã bật; share/daily/weekday average mới có
+synthetic acceptance, không chứng nhận mọi source family/JOIN/CPU/Blackwell.
+JSON ghi đủ nguyên văn câu hỏi, expected/gold, actual cả hai lượt, windows, exact operands,
+verifier và provenance. Một diagnostic pre-binding giữ riêng; không tính vào acceptance.
+
+14 câu native bổ sung (cả hai lượt actual giống nhau):
+
+| ID | Câu hỏi | Expected/gold | Actual 0 | Actual 1 |
+|---|---|---:|---:|---:|
+| q_2145ced2c91e | Tháng 5/2026 tỉ lệ đơn bị huỷ là bao nhiêu phần trăm? | 2.03 | 2.03 | 2.03 |
+| q_45d1788daa18 | trong tháng 3/2026, tỉ lệ đơn huỷ là nhiêu % | 1.8 | 1.80 | 1.80 |
+| q_52cdffcb4362 | trung bình mỗi đơn tháng 4/2026 mang về bao nhiêu dthu | 70720 | 70720 | 70720 |
+| q_5711c54355c2 | trung bình mỗi đơn tháng 4/2025 mang về bao nhiêu doanh thu z | 71045 | 71045 | 71045 |
+| q_5e92228fd206 | Tháng 6/2025 dthu bình quân mỗi đơn là bao nhiêu? | 70712 | 70712 | 70712 |
+| q_6ca243e0583b | Tháng 5/2026 dthu bình quân mỗi đơn là bao nhiêu? | 70392 | 70392 | 70392 |
+| q_71811505443b | thangs 10/2025 tỉ lệ đơn bị huỷ là bao nhiu % | 2.1 | 2.10 | 2.10 |
+| q_9a49fee2a9d3 | tháng 7/2025 tỉ lệ đơn bij huỷ là bao nhiêu % | 1.97 | 1.97 | 1.97 |
+| q_9cf1b36e098b | Tháng 2/2026 doanh thu bình quân mỗi đơn hàng là bao nhiêu? | 70874 | 70874 | 70874 |
+| q_b85681f4c12b | cho hỏi trong tháng này, tỉ lệ đơn huỷ là bao nhiêu phần trăm | 1.65 | 1.65 | 1.65 |
+| q_c706e30eab74 | giá trị trung bình một đơn tháng 8/2025 là bn nhỉ | 70976 | 70976 | 70976 |
+| q_e1874330b217 | tháng 2/2026 tỉ lệ đơn bị huỷ là bao nhiêu phần trăm | 2.09 | 2.09 | 2.09 |
+| q_eb8f92be22c3 | tháng 4/2025 tỉ lệ đơn bị huỷ là bao nhiu phần trăm | 2.28 | 2.28 | 2.28 |
+| q_fccd343bf6f1 | Tháng 7/2025 dthu bình quân mỗi đơn hàng là bao nhiêu? | 73191 | 73191 | 73191 |
+
+---
+
+Các checkpoint trước completion (đọc revision tương ứng):
+
 # Báo cáo S1/S2 — đã có kết quả số S2 trên câu train thật
 
 JSON riêng theo yêu cầu: [S1 results](s1_results.json) và [S2 results](s2_results.json).

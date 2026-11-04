@@ -3,10 +3,10 @@
 
 > **Dự án:** Zalo AI Challenge 2026 — *DataMate: Talking To Your Data Through Agentic AI*  
 > **Ngày lập:** 01/11/2026  
-> **Lần rà soát:** 03/11/2026 — 343 tests; S1 regression 12 correct/0 wrong/1 abstain và S2 native revenue growth 8 correct/0 wrong/0 abstain, hai lượt CUDA trên source mới. S1 CPU/CUDA lịch sử vẫn giữ revision riêng.\
+> **Lần rà soát:** 03/11/2026 — 366 tests; S2 operator trên nguồn đã bật qua hai lượt CUDA: native 22/0/0, S1 regression 12/0/1; tỉ trọng/weekday average có synthetic acceptance.\
 > **Mục tiêu:** Xây dựng **một baseline chạy được từ đầu đến cuối**, tự động trả lời câu hỏi tiếng Việt trên CSV/XLSX/SQLite, hoạt động hoàn toàn offline, có thể đánh giá bằng đáp án train và đóng gói Docker để nộp thi.  
 > **Phạm vi:** Tập trung vào một giải pháp **đúng quy định, tổng quát hóa được, có thể tái lập và đo lường được**. Các kỹ thuật tối ưu PA nâng cao, fine-tuning, ensemble hay multi-agent **để sau khi baseline hoàn chỉnh**.  
-> **Trạng thái:** `S2_NATIVE_GROWTH_NARROW_VERIFIED` — local LLM → QueryPlan/validator → per-window preflight → SQLite read-only/Decimal → verifier/typed output → evaluator. S1 vẫn hẹp: CSV order-line revenue/count, CSV header-only count; source mới mở một sheet XLSX order-line có authority rõ. S2 đã có signed difference và revenue percent growth hai kỳ; hai lượt CUDA trên 8 câu native đều **8 correct/0 wrong/0 abstain**, S1 regression **12/0/1**. **Chưa hoàn tất toàn S1 hoặc S2**: ratios/share/average, nhiều shape/JOIN, CPU growth và PA đại diện còn mở. Câu hỏi/gold/actual: [S1 JSON](reports/s1_results.json), [S2 JSON](reports/s2_results.json); source/gates/isolation: [S2 verification](reports/s2_verification.json), section `native_growth_continuation`. Bằng chứng S1 CPU/CUDA lịch sử: [Docker LLM report](reports/docker_llm_verification.json).
+> **Trạng thái:** `S2_OPERATOR_SCOPE_VERIFIED` — đủ operator S2 trên các shape S1 đã bật, chưa mọi source family/S1 mọi shape hoặc baseline hoàn chỉnh. Hai JSON [S1](reports/s1_results.json), [S2](reports/s2_results.json) giữ câu hỏi/gold/actual của source mới; [verification](reports/s2_verification.json) section `s2_operator_completion` là evidence hiện tại. Các section/checkpoint khác giữ revision lịch sử, không tự chứng nhận source mới.
 > **Thiết lập hiện có (theo xác nhận của người thực hiện):** dự án đang có thư mục `dataset/` và đã đưa `dataset/` vào `.gitignore`; **không tạo lại bước gitignore dataset**. Mã nguồn dùng trực tiếp `src/`, **không có lớp thư mục `src/datamate/`**. Cần kiểm tra trạng thái Git thực tế trước khi kết luận dữ liệu chưa từng được track.
 
 **Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu lại sau cleanup; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
@@ -595,6 +595,41 @@ Theo quyết định của người thực hiện, giữ implementation hiện t
 - [JSON evidence](reports/s2_verification.json) dùng `native_growth_continuation` cho source/results hiện tại; root checkpoint và `question_review` trước growth giữ lịch sử. [Bảng đầy đủ](reports/s1_s2_results.md) cập nhật 8 câu gold/actual cả hai lượt, kỳ hỏi/kỳ so, hai revenue operands và 15 synthetic. Chưa nghiệm thu model CPU growth/Blackwell/toàn S2 hoặc toàn Phase 5–7; 100% của 8 dev đã chọn không đại diện toàn dataset.
 
 **Report JSON theo giai đoạn:** theo yêu cầu người dùng, [reports/s1_results.json](reports/s1_results.json) và [reports/s2_results.json](reports/s2_results.json) là hai bản đọc trực tiếp, trích từ saved evidence mới nhất, không chạy lại inference hoặc đổi prediction. Mỗi câu có question/business/as-of, gold, runtime expected, actual/verdict/điểm hai lượt; S2 giữ đủ 15 synthetic, phân biệt 11 gold xác định và 4 diagnostic. Source evidence SHA và runtime hashes được đối chiếu; S1 12/0/1, S2 native 8/0/0 mỗi lượt. `readiness` chỉ nghiệm thu scope hẹp CUDA; broader S2/holdout/CPU vẫn mở.
+
+**S2 operator — nghiệm thu trên nguồn đã bật (03/11/2026):** 366 tests, lint/format,
+lockfile offline và fixed-plan wiring 17/17 đạt. Hai fresh CUDA workers trên cùng source/image
+chạy 52 câu/lượt: **S1 12 correct / 0 wrong / 1 abstain** (13 câu), **S2 native
+22 correct / 0 wrong / 0 abstain** (8 growth + 7 AOV + 7 cancellation), **17/17 synthetic
+đúng behavior**; 15 fixture có gold xác định đạt 15 correct/0 wrong/0 abstain, hai zero-denominator
+diagnostics không tạo gold. Predictions 52/52 khớp giữa hai lượt. Gold chỉ evaluator host đọc
+sau khi cả hai containers thoát; source/model/raw/staged hashes và isolation đạt.
+
+S2 đủ bộ operator trong scope nguồn S1 đã bật: signed difference, revenue/order_count growth,
+cancellation ratio, AOV, daily/weekday average và group share có mapping rõ. Tỉ trọng và trung
+bình ngày/thứ mới có nghiệm thu synthetic; native dev phù hợp trên source hiện tại chỉ kiểm
+chứng growth/AOV/cancellation. **Không phải hoàn tất S2 mọi source family**: native share đang
+cần master/group mappings và thường raw JOIN trên các family chưa bật. Header-only revenue,
+multi-sheet, raw JOIN và toàn S1 mọi shape vẫn mở. Không chứng nhận CPU LLM source mới,
+Blackwell, official scorer equivalence hoặc PA đại diện.
+
+Schema tuple bind metric/filter/ID/ref theo vai trò operand **trước generation**, dựa vào finite
+question cues; validator tổng quát vẫn kiểm tra plan độc lập, không sửa semantic plan sau sinh.
+Một lượt diagnostic trước binding đã bị chặn vì duplicate IDs/sai operand; giữ trong
+`pre_binding_diagnostic`, không dùng làm acceptance. Half-up có authority riêng cho AOV;
+zero/âm và half-tie khác chưa có luật vẫn abstain. Requested/effective windows và denominator
+được giữ trong JSON từng câu. Tiếp tục dùng một QueryPlan/entrypoint/model worker, không
+thêm dependency/framework/script thực thi vào repo.
+
+- [x] Tuần/tháng/N ngày và per-window requested/effective/coverage, MTD comparison.
+- [x] Difference/growth cùng metric, scope, units; Decimal/exact rational; percent output.
+- [x] Cancellation ratio: cancelled/all placed; AOV: revenue/eligible orders; native 14 câu mới.
+- [x] Daily/weekday average chia mọi ngày effective, kể cả ngày không bán; group share giữ whole-shop denominator (synthetic).
+- [x] Hai lượt offline LLM/evaluator source mới, S1 regression, input immutability và label isolation.
+- [ ] Numeric native share/weekday-average trên source family có dữ liệu phù hợp; cần mở dependencies S1 tương ứng.
+- [ ] Mọi source shape S1, model CPU source mới, Blackwell/BTC và PA đại diện; không tự tick từ operator acceptance.
+
+Checkpoint trước mở rộng đã commit/push **b46b263** lên origin/feature/phase5-s2 theo yêu cầu;
+implementation/evidence bổ sung sau đó ở working tree, chưa tự commit/push tiếp.
 
 **Deliverables:** local model adapter, context builder, planner, JSON schema, prompt templates được version hóa.  
 **Exit criteria:** Planner chạy offline và sinh plan parse được trên các câu train đại diện; đo được plan validity, latency, failure types.

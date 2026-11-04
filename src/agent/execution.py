@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from contextlib import closing
+from datetime import date, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from fractions import Fraction
 
@@ -15,6 +16,7 @@ from src.data.normalization.values import exact_add, parse_datetime
 from src.data.split import Question
 from src.jsonio import ContractError, loads
 from src.semantics.answerability import preflight
+from src.semantics.rulebook import plain
 
 
 def _rounded(value: Decimal, policy: dict) -> Decimal:
@@ -28,31 +30,42 @@ def _rounded(value: Decimal, policy: dict) -> Decimal:
         return rounded
 
 
-def _percent_change(change: Decimal, baseline: Decimal, policy: dict) -> dict:
+def _divide(numerator: Decimal, denominator: Decimal, policy: dict, *, scale: int = 1) -> dict:
     """Round an exact rational once, without finite-precision division near a half tie."""
-    if baseline <= 0:
-        raise ContractError("percent_change_nonpositive_baseline_undefined")
+    if denominator <= 0:
+        raise ContractError("nonpositive_denominator_undefined")
     places = policy["decimal_places"]
-    percent = Fraction(change) / Fraction(baseline) * 100
+    percent = Fraction(numerator) / Fraction(denominator) * scale
     scaled = percent * 10**places
     whole, remainder = divmod(abs(scaled.numerator), scaled.denominator)
-    if remainder * 2 == scaled.denominator:
+    if remainder * 2 == scaled.denominator and policy.get("mode") != "half_up":
         raise ContractError("rounding_tie_unspecified")
-    whole += remainder * 2 > scaled.denominator
+    whole += remainder * 2 >= scaled.denominator
     rounded = Decimal((int(percent < 0), tuple(int(c) for c in str(whole)), -places))
-    if abs(percent - Fraction(rounded)) >= Fraction(1, 2 * 10**places):
+    if abs(percent - Fraction(rounded)) > Fraction(1, 2 * 10**places):
         raise ContractError("percent_change_rounding_verification_failed")
     return {
         "exact_ratio": {"numerator": percent.numerator, "denominator": percent.denominator},
+        "numerator_value": numerator,
+        "denominator_value": denominator,
+        "rounded_value": rounded,
+    }
+
+
+def _percent_change(change: Decimal, baseline: Decimal, policy: dict) -> dict:
+    if baseline <= 0:
+        raise ContractError("percent_change_nonpositive_baseline_undefined")
+    return {
+        **_divide(change, baseline, policy, scale=100),
         "exact_change": change,
         "baseline_value": baseline,
-        "rounded_value": rounded,
     }
 
 
 def _compute(context: BusinessContext, check: dict, *, round_result: bool = True) -> dict:
     contract, window = check["contract"], check["effective_window"]
     statuses = contract["status_policy"]
+    filters = check.get("filters", {})
     sql = (
         "SELECT order_key, ordered_at, status, mapping_status FROM orders "
         f"WHERE status IN ({','.join('?' for _ in statuses)}) ORDER BY order_key"
@@ -68,6 +81,23 @@ def _compute(context: BusinessContext, check: dict, *, round_result: bool = True
     lines_seen = set()
     lineage_samples = []
     with closing(context.prepared.connect()) as conn:
+        customer_groups = (
+            dict(conn.execute("SELECT order_key,customer_group FROM order_groups"))
+            if "customer_group" in filters
+            else {}
+        )
+        item_groups = (
+            dict(conn.execute("SELECT line_key,item_group FROM line_groups"))
+            if "item_group" in filters
+            else {}
+        )
+        for field, groups in [("customer_group", customer_groups), ("item_group", item_groups)]:
+            if field in filters:
+                matches = {
+                    v.casefold().strip() for v in groups.values() if plain(v) == filters[field]
+                }
+                if len(matches) > 1:
+                    raise ContractError("group_name_ambiguous")
         conn.set_progress_handler(lambda: int(time.monotonic() - started > 15), 1000)
         for key, ordered_at, status, mapping in conn.execute(sql, statuses):
             budget()
@@ -76,6 +106,13 @@ def _compute(context: BusinessContext, check: dict, *, round_result: bool = True
                 continue
             if mapping != "resolved" or key in selected or status not in statuses:
                 raise ContractError("order_grain_or_mapping_failed")
+            if "weekday" in filters and date.fromisoformat(day).weekday() != filters["weekday"]:
+                continue
+            if "customer_group" in filters:
+                if key not in customer_groups:
+                    raise ContractError("order_group_missing")
+                if plain(customer_groups[key]) != filters["customer_group"]:
+                    continue
             selected.add(key)
         line_sql = (
             "SELECT line_key, order_key, net_amount, row_role FROM order_lines ORDER BY line_key"
@@ -88,6 +125,12 @@ def _compute(context: BusinessContext, check: dict, *, round_result: bool = True
                     continue
                 if role not in contract["row_roles"] or amount is None or line in lines_seen:
                     raise ContractError("line_grain_role_or_amount_failed")
+                if "item_group" in filters:
+                    if line not in item_groups:
+                        raise ContractError("line_group_missing")
+                    orders_with_lines.add(order)
+                    if plain(item_groups[line]) != filters["item_group"]:
+                        continue
                 money = Decimal(amount)
                 if not money.is_finite():
                     raise ContractError("nonfinite_fact")
@@ -103,6 +146,16 @@ def _compute(context: BusinessContext, check: dict, *, round_result: bool = True
                     )
             if orders_with_lines != selected:
                 raise ContractError("selected_order_missing_lines")
+        elif contract["metric_id"] == "calendar_day_count":
+            start, end = (date.fromisoformat(window[k]) for k in ["start", "end"])
+            value = Decimal(
+                sum(
+                    1
+                    for offset in range((end - start).days + 1)
+                    if "weekday" not in filters
+                    or (start + timedelta(days=offset)).weekday() == filters["weekday"]
+                )
+            )
         else:
             value = Decimal(len(selected))
     # S1 verifier: no cardinality fan-out, finite scalar, nonnegative exact count,
@@ -185,13 +238,17 @@ def execute_plan(draft: dict, question: Question, context: BusinessContext) -> d
     windows = {w["id"]: w for w in plan["time_windows"]}
     checks = []
     for entry in plan["aggregations"]:
+        entry_filters = filters
+        if entry["filters"]:
+            key, value = entry["filters"][0].split("=", 1)
+            entry_filters = {key: int(value) if key == "weekday" else value}
         window = windows[entry["window_ref"]]
         check = preflight(
             context,
             entry["metric_id"],
             window["expression"],
             as_of_date=question.as_of_date,
-            filters=filters,
+            filters=entry_filters,
         )
         check.update(aggregation_ref=entry["id"], window_ref=window["id"])
         effective = check["effective_window"]
@@ -230,8 +287,9 @@ def execute_plan(draft: dict, question: Question, context: BusinessContext) -> d
                 measure = plan["derived_measures"][0]
                 current = operands[measure["current_ref"]]["exact_value"]
                 baseline = operands[measure["baseline_ref"]]["exact_value"]
-                value = exact_add(current, baseline.copy_negate())
-                if not value.is_finite() or exact_add(value, baseline) != current:
+                comparison = measure["operator"] in {"difference", "percent_change"}
+                value = exact_add(current, baseline.copy_negate()) if comparison else current
+                if not value.is_finite() or (comparison and exact_add(value, baseline) != current):
                     raise ContractError("difference_verification_failed")
                 execution = {
                     "status": "verified",
@@ -247,9 +305,10 @@ def execute_plan(draft: dict, question: Question, context: BusinessContext) -> d
                     else None,
                     "checks": [
                         "each_window",
-                        "same_metric_unit_scope",
-                        "signed_difference",
-                        "recomposition",
+                        "validated_metric_scope_dependencies",
+                        "signed_difference_recomposition"
+                        if comparison
+                        else "same_effective_window",
                         "finite",
                         "round_once_at_output",
                     ],
@@ -258,6 +317,25 @@ def execute_plan(draft: dict, question: Question, context: BusinessContext) -> d
                     execution.pop("exact_value")
                     execution.update(_percent_change(value, baseline, plan["output"]["rounding"]))
                     execution["checks"] += ["positive_baseline", "exact_rational", "percent_scale"]
+                elif not comparison:
+                    execution.pop("exact_value")
+                    if measure["operator"] == "cancellation_rate" and not 0 <= current <= baseline:
+                        raise ContractError("cancelled_count_outside_denominator")
+                    execution.update(
+                        _divide(
+                            current,
+                            baseline,
+                            plan["output"]["rounding"],
+                            scale=100
+                            if measure["operator"] in {"share", "cancellation_rate"}
+                            else 1,
+                        )
+                    )
+                    execution["checks"] += [
+                        "positive_denominator",
+                        "exact_rational",
+                        "denominator_scope",
+                    ]
             else:
                 execution = (
                     _snapshot_value(context, checks[0]) if stock else _compute(context, checks[0])

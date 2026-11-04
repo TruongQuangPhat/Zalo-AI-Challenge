@@ -130,7 +130,7 @@ def prepare_semantics(context: BusinessContext) -> dict:
                     if summary.get("shape") == "inventory_snapshot"
                     else ["orders"]
                     if summary.get("shape") == "csv_order_headers"
-                    else ["orders", "order_lines"]
+                    else ["orders", "order_lines", "order_groups", "line_groups"]
                 )
             }
     contracts = {}
@@ -204,12 +204,19 @@ def preflight(
             fingerprint(prepared.summary) if prepared else None
         ):
             raise SemanticError("stale_context", "prepared revision changed after semantics")
-        if (
-            filters is not None
-            and (not isinstance(filters, dict) or filters)
-            and metric_id != "inventory_on_hand"
-        ):
-            return stop("abstain", "filter_unsupported")
+        if filters and metric_id != "inventory_on_hand":
+            if not isinstance(filters, dict) or len(filters) != 1:
+                return stop("abstain", "filter_unsupported")
+            key, value = next(iter(filters.items()))
+            if key == "weekday":
+                if type(value) is not int or not 0 <= value <= 6:
+                    return stop("abstain", "filter_unsupported")
+            elif key in {"customer_group", "item_group"} and metric_id == "revenue":
+                if not isinstance(value, str) or not value.strip():
+                    return stop("abstain", "filter_unsupported")
+            else:
+                return stop("abstain", "filter_unsupported")
+            result["filters"] = filters
         if context.rules is None:
             return stop("abstain", "rule_unresolved")
         if any(context.semantics[key] != context.catalog[key] for key in ["split", "business_id"]):
@@ -240,11 +247,24 @@ def preflight(
             return stop("abstain", "required_facts_unsupported")
         if not context.catalog["read_complete"] or coverage["conflicts"]:
             return stop("abstain", "coverage_conflict_or_incomplete_read")
-        if metric_id in prepared.summary.get("blocking_metrics", []):
+        quality_metric = (
+            "order_count"
+            if metric_id in {"cancelled_order_count", "placed_order_count", "calendar_day_count"}
+            else metric_id
+        )
+        dependent_metrics = {quality_metric}
+        if filters and any(key.endswith("_group") for key in filters):
+            key = next(iter(filters))
+            if key not in prepared.summary.get("mapping", {}).get("fields", {}):
+                return stop("abstain", "group_mapping_unsupported")
+            if key == "customer_group" and "customer" not in prepared.summary["mapping"]["fields"]:
+                return stop("abstain", "customer_mapping_unsupported")
+            dependent_metrics.add(key + "_share")
+        if dependent_metrics.intersection(prepared.summary.get("blocking_metrics", [])):
             result["issue_refs"] = [
                 row["issue_id"]
                 for row in prepared.iter_records("issues")
-                if metric_id in row["detail"]["affected_metrics"]
+                if dependent_metrics.intersection(row["detail"]["affected_metrics"])
                 and row["detail"]["severity"] == "blocking"
             ]
             return stop("abstain", "dependent_quality_issue")

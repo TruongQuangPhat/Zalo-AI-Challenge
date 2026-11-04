@@ -6,7 +6,7 @@ from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.answerability import prepare_semantics
 
-VERSION = "planner-context-v6"
+VERSION = "planner-context-v7"
 
 
 def build_context(question: Question, context: BusinessContext) -> dict:
@@ -96,6 +96,10 @@ def build_context(question: Question, context: BusinessContext) -> dict:
                 "inclusive_range",
                 "difference",
                 "percent_change",
+                "cancellation_rate",
+                "average_order_value",
+                "customer_share",
+                "item_group",
             }
         ],
         "warnings": [
@@ -104,7 +108,7 @@ def build_context(question: Question, context: BusinessContext) -> dict:
             (
                 "One inventory_on_hand product at snapshot/base unit; no history/conversion."
                 if semantics.get("snapshot")
-                else "Totals/difference; revenue growth requires a positive baseline."
+                else "S2 needs verified operands and a positive denominator for division."
             ),
         ],
         "preparation_status": context.prepared.summary["status"] if context.prepared else None,

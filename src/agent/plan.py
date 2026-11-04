@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
+from dataclasses import replace
 from datetime import date, timedelta
 
 from src.data.catalog import BusinessContext
@@ -14,7 +15,7 @@ from src.semantics.metric_registry import metric_contract
 from src.semantics.rulebook import plain
 from src.temporal.resolver import TimeWindow, resolve_window
 
-VERSION = "query-plan-v6"
+VERSION = "query-plan-v9"
 
 
 def _object(properties: dict, *, optional: tuple[str, ...] = ()) -> dict:
@@ -32,7 +33,7 @@ def _array(items: dict, *, minimum: int = 0, maximum: int = 4) -> dict:
 
 TEXT = {"type": "string", "maxLength": 256}
 INTEGER = {"type": "integer"}
-# One grammar shared by generation and validation; S2 adds only two-window difference.
+# One grammar shared by generation and validation, with at most one derived scalar.
 TIME_FIELDS = {
     "day": {"date": TEXT},
     "range": {"start": TEXT, "end": TEXT},
@@ -70,7 +71,15 @@ PLAN_SCHEMA = _object(
                 {
                     "id": TEXT,
                     "metric_id": {
-                        "enum": ["revenue", "order_count", "inventory_on_hand", "unsupported"]
+                        "enum": [
+                            "revenue",
+                            "order_count",
+                            "inventory_on_hand",
+                            "cancelled_order_count",
+                            "placed_order_count",
+                            "calendar_day_count",
+                            "unsupported",
+                        ]
                     },
                     "window_ref": TEXT,
                     "scope": {"enum": ["whole_business", "product", "unsupported"]},
@@ -87,7 +96,16 @@ PLAN_SCHEMA = _object(
             _object(
                 {
                     "id": TEXT,
-                    "operator": {"enum": ["difference", "percent_change"]},
+                    "operator": {
+                        "enum": [
+                            "difference",
+                            "percent_change",
+                            "average_order_value",
+                            "cancellation_rate",
+                            "share",
+                            "average_daily",
+                        ]
+                    },
                     "current_ref": TEXT,
                     "baseline_ref": TEXT,
                 }
@@ -136,8 +154,15 @@ def _schema(value, schema: dict, path: str = "plan") -> None:
             or not schema["minItems"] <= len(value) <= schema["maxItems"]
         ):
             raise ContractError(f"{path}: expected bounded array")
-        for item in value:
-            _schema(item, schema["items"], path)
+        items = schema["items"]
+        if isinstance(items, list):
+            if len(items) != len(value):
+                raise ContractError(f"{path}: wrong dependency count")
+            for item, item_schema in zip(value, items, strict=True):
+                _schema(item, item_schema, path)
+        else:
+            for item in value:
+                _schema(item, items, path)
     elif kind == "string" and (not isinstance(value, str) or len(value) > schema["maxLength"]):
         raise ContractError(f"{path}: expected bounded text")
     elif kind == "integer" and type(value) is not int:
@@ -170,7 +195,7 @@ def _metric_cues(question: Question) -> set[str]:
 
 def _literal_windows(question: Question) -> list[dict]:
     """Finite relative or fully specified date/period cues, never business IDs."""
-    text = plain(question.question)
+    text = re.sub(r"\bthangs\b", "thang", plain(question.question))
     dates = r"(\d{1,2})/(\d{1,2})/(\d{4})"
 
     def iso(parts) -> str:
@@ -186,7 +211,82 @@ def _literal_windows(question: Question) -> list[dict]:
             expressions.append({"kind": kind, "year": int(year), field: int(value)})
     for match in re.finditer(r"\bngay " + dates + r"\b", text):
         expressions.append({"kind": "day", "date": iso(match.groups())})
+    for days in re.findall(r"\b(\d+) ngay gan nhat\b", text):
+        expressions.append({"kind": "last_n_days", "days": int(days)})
+    if re.search(r"\btu dau nam(?: toi nay)?\b", text):
+        expressions.append({"kind": "year_to_date"})
+    for year in re.findall(r"\bnam (\d{4})\b", text):
+        if not expressions:
+            expressions.append({"kind": "year", "year": int(year)})
     return expressions
+
+
+def _period_measure(question: Question) -> dict | None:
+    """Recognize bounded S2 same-period intents without looking at source values."""
+    text = plain(question.question)
+    op, metrics, filters, refs = None, [], [], []
+    weekday = re.search(r"\b(thu (?:hai|ba|tu|nam|sau|bay)|chu nhat)\b", text)
+    weekdays = {
+        "thu hai": 0,
+        "thu ba": 1,
+        "thu tu": 2,
+        "thu nam": 3,
+        "thu sau": 4,
+        "thu bay": 5,
+        "chu nhat": 6,
+    }
+    average = bool(re.search(r"\b(trung binh|binh quan|aov)\b", text))
+    if re.search(r"\b(ti le|ty le) don (?:bi |bij )?huy\b", text):
+        op, metrics, refs = (
+            "cancellation_rate",
+            ["cancelled_order_count", "placed_order_count"],
+            ["cancellation_rate"],
+        )
+        text = re.sub(r"\b(ti le|ty le) don (?:bi |bij )?huy\b|%|\bphan tram\b", "", text)
+    elif average and re.search(r"\b(moi don(?: hang)?|mot don|aov)\b", text):
+        op, metrics, refs = (
+            "average_order_value",
+            ["revenue", "order_count"],
+            ["average_order_value", "rounding"],
+        )
+        text = re.sub(r"\b(trung binh|binh quan|gia tri|moi don(?: hang)?|mot don|aov)\b", "", text)
+    elif average and (weekday or re.search(r"\b(moi ngay|mot ngay|hang ngay)\b", text)):
+        cue = _metric_cues(question)
+        if len(cue) != 1:
+            return None
+        op, metrics, refs = "average_daily", [cue.pop(), "calendar_day_count"], ["rounding"]
+        text = re.sub(r"\b(trung binh|binh quan|moi ngay|mot ngay|hang ngay|cac ngay)\b", "", text)
+        if weekday:
+            filters = ["weekday=" + str(weekdays[weekday[0]])]
+            text = text.replace(weekday[0], "")
+    elif re.search(r"\b(ti trong|ty trong)\b", text):
+        customer = re.search(
+            r"\bkhach (?:hang )?nhom (.+?) trong (?:tong )?(?:doanh thu|dthu)\b", text
+        )
+        item = re.search(r"\bnhom (.+?) trong (?:tong )?(?:doanh thu|dthu)\b", text)
+        match = customer or item
+        if not match:
+            return None
+        field = "customer_group" if customer else "item_group"
+        op, metrics, refs = (
+            "share",
+            ["revenue", "revenue"],
+            ["customer_share"] if customer else ["item_group"],
+        )
+        filters = [field + "=" + match[1].strip()]
+        text = text[: match.start()] + text[match.end() :]
+        text = re.sub(r"\b(ti trong|ty trong|cua)\b|%|\bphan tram\b", "", text)
+    if op is None:
+        return None
+    # Strip only the newly authorized intent; all existing filter/negation guards
+    # still inspect the remaining wording. Never repair the model's plan.
+    return {
+        "operator": op,
+        "metrics": metrics,
+        "filters": filters,
+        "rule_refs": refs,
+        "guard_question": replace(question, question=text),
+    }
 
 
 def _difference_windows(question: Question, *, percent_change: bool = False) -> list[dict]:
@@ -228,7 +328,7 @@ def _difference_windows(question: Question, *, percent_change: bool = False) -> 
     if expressions[0]["kind"] == "current_month" and expressions[1]["kind"] == "previous_month":
         expressions[1] = {"kind": "previous_mtd"}
     elif expressions[1]["kind"] == "previous_month":
-        if not percent_change or expressions[0]["kind"] != "month":
+        if expressions[0]["kind"] != "month":
             return []
         # Anchor "previous month" to the asked explicit month, never the machine/as-of month.
         current = expressions[0]
@@ -238,6 +338,50 @@ def _difference_windows(question: Question, *, percent_change: bool = False) -> 
             return []
         expressions[1] = {"kind": "month", "year": previous.year, "month": previous.month}
     return expressions
+
+
+def _bind_dependencies(
+    schema: dict, metrics: list[str], *, filters: list[str], operator: str, comparison: bool
+) -> None:
+    """Constrain symbolic operand roles before generation, never repair a draft.
+
+    Tuple items are supported by the pinned llama.cpp JSON-schema converter.
+    These names bind dependencies only; no source values or numeric answers enter
+    the grammar. The general QueryPlan validator still accepts arbitrary valid IDs.
+    """
+    props = schema["properties"]
+    window = props["time_windows"]["items"]
+    agg = props["aggregations"]["items"]
+    props["time_windows"]["items"] = []
+    for index, name in enumerate(["period", "baseline_period"] if comparison else ["period"]):
+        item = deepcopy(window)
+        item["properties"]["id"] = {"const": name}
+        if comparison:
+            item["properties"]["expression"] = deepcopy(
+                window["properties"]["expression"]["anyOf"][index]
+            )
+        props["time_windows"]["items"].append(item)
+    props["aggregations"]["items"] = []
+    for index, (name, metric) in enumerate(zip(["total", "baseline_total"], metrics, strict=True)):
+        item = deepcopy(agg)
+        item["properties"].update(
+            id={"const": name},
+            metric_id={"const": metric},
+            window_ref={"const": "baseline_period" if comparison and index else "period"},
+            scope={"const": "whole_business"},
+            group_by=_array(TEXT, maximum=0),
+        )
+        values = filters if index == 0 or operator == "average_daily" else []
+        item["properties"]["filters"] = _array(
+            {"const": values[0]} if values else TEXT, minimum=len(values), maximum=len(values)
+        )
+        props["aggregations"]["items"].append(item)
+    props["derived_measures"]["items"]["properties"].update(
+        id={"const": "delta"},
+        current_ref={"const": "total"},
+        baseline_ref={"const": "baseline_total"},
+    )
+    props["output"]["properties"]["result_refs"]["items"] = {"const": "delta"}
 
 
 def generation_schema(
@@ -265,6 +409,34 @@ def generation_schema(
         metrics = _metric_cues(question)
         if len(metrics) == 1:
             agg["properties"]["metric_id"] = {"const": metrics.pop()}
+    measure = None if stock else _period_measure(question)
+    if measure:
+        for key in ("aggregations",):
+            schema["properties"][key].update(minItems=2, maxItems=2)
+        schema["properties"]["time_windows"].update(minItems=1, maxItems=1)
+        schema["properties"]["derived_measures"].update(minItems=1, maxItems=1)
+        agg["properties"]["metric_id"] = {"enum": list(dict.fromkeys(measure["metrics"]))}
+        schema["properties"]["derived_measures"]["items"]["properties"]["operator"] = {
+            "const": measure["operator"]
+        }
+        schema["properties"]["output"]["properties"]["expected_type"] = {
+            "const": "percent"
+            if measure["operator"] in {"share", "cancellation_rate"}
+            else "number"
+        }
+        expressions = _literal_windows(question)
+        if len(expressions) == 1:
+            schema["properties"]["time_windows"]["items"]["properties"]["expression"] = _object(
+                {key: {"const": value} for key, value in expressions[0].items()}
+            )
+        _bind_dependencies(
+            schema,
+            measure["metrics"],
+            filters=measure["filters"],
+            operator=measure["operator"],
+            comparison=False,
+        )
+        return schema
     growth_windows = [] if stock else _difference_windows(question, percent_change=True)
     comparison = growth_windows or ([] if stock else _difference_windows(question))
     difference = bool(comparison)
@@ -290,6 +462,11 @@ def generation_schema(
                 for expression in comparison
             ]
         }
+        metrics = _metric_cues(question)
+        if len(metrics) == 1:
+            _bind_dependencies(
+                schema, [next(iter(metrics))] * 2, filters=[], operator=operator, comparison=True
+            )
         return schema
     expressions = [{"kind": "today"}] if stock else _literal_windows(question)
     if len(expressions) != 1:
@@ -330,7 +507,8 @@ def _check_question_scope(
     if re.search(
         r"\b(rieng|san pham|mat hang|khach|nhan vien|ty le|trung binh|so voi|"
         r"nhieu nhat|cao nhat|thap nhat|top|kg|don huy|don tra|khong|chi tinh|"
-        r"ngoai tru|loai tru|tru don|tien mat|chuyen khoan|cod|theo kenh|tung nhom)\b",
+        r"ngoai tru|loai tru|tru don|tien mat|chuyen khoan|cod|theo kenh|tung nhom|"
+        r"ca sang|ca chieu)\b",
         text,
     ):
         raise ContractError("question_scope_or_operator_unsupported")
@@ -376,6 +554,9 @@ def validate_query_plan(draft: dict, question: Question, context: BusinessContex
         draft["aggregations"],
         draft["derived_measures"],
     )
+    period_measure = _period_measure(question)
+    if period_measure:
+        return _validate_period_measure(draft, question, context, period_measure)
     difference = bool(derived)
     stock = len(aggregations) == 1 and aggregations[0]["metric_id"] == "inventory_on_hand"
     growth = difference and derived[0]["operator"] == "percent_change"
@@ -420,8 +601,6 @@ def validate_query_plan(draft: dict, question: Question, context: BusinessContex
         if not expected_expressions or len(metrics) != 1 or stock:
             raise ContractError("question_difference_direction_or_windows_unsupported")
         operator = derived[0]["operator"]
-        if growth and contract.metric_id != "revenue":
-            raise ContractError("percent_change_revenue_only")
         context.rules.require(operator)
         rule_refs.append(operator)
         if growth:
@@ -536,5 +715,119 @@ def validate_query_plan(draft: dict, question: Question, context: BusinessContex
         ordering="not_applicable",
         empty_policy=contract.empty_policy,
         undefined_policy=contract.undefined_policy,
+    )
+    return plan
+
+
+def _validate_period_measure(
+    draft: dict, question: Question, context: BusinessContext, measure: dict
+) -> dict:
+    """Validate one shared period and two scalar dependencies in the same QueryPlan."""
+    _check_question_scope(measure["guard_question"])
+    if (
+        question.business_id != context.catalog["business_id"]
+        or draft["entities"]
+        or draft["uncertainties"]
+    ):
+        raise ContractError("period_measure_namespace_or_scope")
+    windows, aggs, derived = draft["time_windows"], draft["aggregations"], draft["derived_measures"]
+    if len(windows) != 1 or len(aggs) != 2 or len(derived) != 1:
+        raise ContractError("period_measure_requires_one_window_two_aggregates")
+    ids = [x["id"] for x in [*windows, *aggs, *derived]]
+    if any(not x.strip() for x in ids) or len(set(ids)) != len(ids):
+        raise ContractError("dependency IDs must be nonempty and distinct")
+    d = derived[0]
+    amap = {a["id"]: a for a in aggs}
+    if (
+        d["operator"] != measure["operator"]
+        or d["current_ref"] == d["baseline_ref"]
+        or {d["current_ref"], d["baseline_ref"]} != set(amap)
+    ):
+        raise ContractError("period_measure_operator_or_references")
+    operands = [amap[d[key]] for key in ["current_ref", "baseline_ref"]]
+    contracts = []
+    for index, (a, metric) in enumerate(zip(operands, measure["metrics"], strict=True)):
+        expected_filters = (
+            measure["filters"] if index == 0 or measure["operator"] == "average_daily" else []
+        )
+        if (
+            a["metric_id"] != metric
+            or a["window_ref"] != windows[0]["id"]
+            or a["scope"] != "whole_business"
+            or a["group_by"]
+            or a["filters"] != expected_filters
+        ):
+            raise ContractError("period_measure_metric_window_scope_or_filters")
+        c = metric_contract(context.rules, metric)
+        if a.get("unit", c.unit) != c.unit:
+            raise ContractError("unit_mismatch")
+        contracts.append(c)
+    for ref in measure["rule_refs"]:
+        context.rules.require(ref)
+    resolved = resolve_window(
+        windows[0]["expression"], question.as_of_date, context.rules, context.calendar
+    )
+    refs = [
+        *measure["rule_refs"],
+        *resolved.rule_refs,
+        *_check_relative_window(question, context, resolved),
+    ]
+    for c in contracts:
+        refs.extend(c.rule_refs)
+    percent = measure["operator"] in {"cancellation_rate", "share"}
+    output_type = "percent" if percent else "number"
+    if draft["output"] != {"expected_type": output_type, "result_refs": [d["id"]]}:
+        raise ContractError("output must reference its scalar result")
+    money = contracts[0].unit == "VND" and not percent
+    rounding = {
+        "decimal_places": 0
+        if money
+        else context.rules.require("rounding").parameters["other_places"],
+        "mode": "nearest",
+        "unspecified_tie": "abstain",
+    }
+    if measure["operator"] == "average_order_value":
+        rounding = context.rules.require("average_order_value").parameters
+    plan = deepcopy(draft)
+    plan["time_windows"][0].update({**resolved.summary(), "id": windows[0]["id"]})
+    for a in plan["aggregations"]:
+        c = metric_contract(context.rules, a["metric_id"])
+        a.update(
+            unit=c.unit,
+            count_unit=c.count_unit,
+            status_policy=c.status_policy,
+            time_axis=c.time_axis,
+        )
+    plan["derived_measures"][0].update(
+        unit="percent" if percent else contracts[0].unit,
+        input_unit=contracts[0].unit,
+        rule_refs=measure["rule_refs"],
+        denominator_policy="positive_observed_denominator_only",
+        undefined_policy="abstain",
+    )
+    plan["output"].update(
+        rounding=rounding,
+        ordering="not_applicable",
+        empty_policy="zero_numerator_if_positive_denominator",
+        undefined_policy="abstain",
+    )
+    plan.update(
+        version=VERSION,
+        question_id=question.id,
+        business_id=question.business_id,
+        as_of_date=question.as_of_date,
+        rulebook_version=context.rules.sha256,
+        rule_refs=list(dict.fromkeys(refs)),
+        requirements=[
+            {
+                "metric_id": c.metric_id,
+                "window_refs": [windows[0]["id"]],
+                "required_fields": c.required_fields,
+                "history_requirement": c.history_requirement,
+                "coverage_check": "each_window",
+                "capability_check": True,
+            }
+            for c in contracts
+        ],
     )
     return plan

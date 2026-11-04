@@ -19,10 +19,12 @@ Chỉ khi có bằng chứng dữ liệu gốc thiếu mới trả unanswerable.
 | S1-RELATIONAL / P0 mở rộng | Header/detail CSV/XLSX/SQLite, revenue/count | Reader tương ứng; orders N:1 detail; keys/orphan/cardinality checks; preaggregation, no fan-out | planned, runtime unsupported; key mappings hiện là candidates ngoại trừ phạm vi EDA POS cũ | S1 cases + C09; multi-source reconciliation | abstain; đọc được bảng chưa đủ bật JOIN |
 | S1-EXCEL / P0 mở rộng | Nhiều sheet/tháng/phần, header nhiều dòng/kế thừa | Header/group/continuation recognition; all sheets; year hints; native cell types; summary/role gate | planned, runtime unsupported | C01–C06, C09 khi JOIN, C18, C27 khi cache; P1-SUMMARY/P1-ERROR | abstain nếu thiếu sheet/unknown boundary; không fill tiền/SL |
 | LEDGER / P1 | Sổ no-order, revenue/quantity | Ledger-record grain, giữ raw copies, bỏ summary; amount/date/status rõ; unit conversion cho quantity | planned, runtime unsupported | C02, C05, C13, C18, P1-SUMMARY | Revenue abstain tới khi kiểm chứng; count order/customer chỉ unanswerable sau xác nhận thiếu thông tin gốc |
-| S2-DIFF / P0 | Cùng hai shape CSV S1; chênh lệch hai kỳ revenue hoặc order_count toàn business | Cùng QueryPlan, hai independent windows/aggregates, difference current_ref/baseline_ref; runtime difference rule, same metric/unit/scope; exact Decimal và round-once | supported hẹp ở deterministic executor và local LLM CUDA; 318 tests; reports/s2_verification.json: 12/12 expected behaviors synthetic (evaluator 7 correct/0 wrong/5 abstain), S1 regression 12 correct/0 wrong/1 abstain; numeric CPU/native train S2 chưa nghiệm thu | Signed/zero/large precision/MTD/future facts, refs/reversal/scope/unit, per-window partial/outside/unknown, unresolved rule và S1/snapshot regression | Growth hẹp xem S2-GROWTH; ratio/average/entity/JOIN chưa bật; guard directional và literal periods hữu hạn; explicit month + relative previous month abstain; không missing→0 |
+| S2-DIFF / P0 | Cùng hai shape CSV S1; chênh lệch hai kỳ revenue hoặc order_count toàn business | Cùng QueryPlan, hai independent windows/aggregates, difference current_ref/baseline_ref; runtime difference rule, same metric/unit/scope; exact Decimal và round-once | supported hẹp ở deterministic executor và local LLM CUDA; 318 tests; reports/s2_verification.json: 12/12 expected behaviors synthetic (evaluator 7 correct/0 wrong/5 abstain), S1 regression 12 correct/0 wrong/1 abstain; numeric CPU/native train S2 chưa nghiệm thu | Signed/zero/large precision/MTD/future facts, refs/reversal/scope/unit, per-window partial/outside/unknown, unresolved rule và S1/snapshot regression | Growth hẹp xem S2-GROWTH; ratio/average xem S2-RATIO-AVG/S2-SHARE; entity/JOIN ngoài group filters chưa bật; guard directional/literal periods hữu hạn; explicit month anchor kỳ hỏi; không missing→0 |
 | S1-XLSX-LINE / P0 hẹp | Một sheet XLSX order-line header đơn lặp, README mappings theo file; whole-business revenue/count | Existing reader, exact native numeric/text parsing, all rows/statuses, summary exclusion, dedup, lineage; optional conversion lookup unused, no raw JOIN | supported hẹp; 343 tests; source native 39.006 orders/62.451 lines/443 summary/0 issues, native growth evidence ở reports/s2_verification.json.native_growth_continuation | Filename/section authority, grain/required fields, role/mapping/status/coverage gates; numeric tiền từ summary chỉ là format evidence; Topping có line amount riêng theo product-row README | Multi-sheet/unclassified sources/unknown roles không bỏ qua; không header revenue/quantity conversion/ranking/physical-shipment inference |
 | S2-GROWTH / P0 hẹp | Hai kỳ revenue toàn business, baseline dương; prior-month hoặc hai tháng/năm tường minh | Cùng QueryPlan percent_change + current/baseline refs; runtime growth/rounding rules, preflight mỗi kỳ; Decimal sums + exact rational division; output percent | supported native CUDA hẹp: **8 correct/0 wrong/0 abstain mỗi lượt, hai fresh workers**; 6 giá trị không dùng triển khai trước selection/inference + 2 exposed; predictions bằng nhau; S1 regression 12/0/1 | 343 tests; raw XML reference/wiring trước gold; native operands/windows và gold/actual tại reports/s1_s2_results.md; synthetic 15/15 behaviors, 9/0/2 trên 11 fixture có gold | Baseline 0/âm/undefined/half-tie hoặc authority thiếu abstain; unknown/outside riêng; không ratio/share/average/JOIN/CPU/Blackwell certification hoặc PA toàn dataset |
-| TEMPORAL / P0 mở rộng | Nhiều kỳ, MTD, ratios, weekday/lunar | Per-window coverage, runtime calendar/as-of, independent scopes, DAG + denominator/undefined policy | Structured resolver day/week/month/MTD/N days/quarter/year/Tết đã kiểm chứng; signed difference hai kỳ xem S2-DIFF; growth hẹp xem S2-GROWTH; ratios/weekday average vẫn planned | C17, C19–C20, C22, C26–C27; tests/test_temporal.py chỉ chứng nhận phần resolver | abstain cho ambiguity/divide-by-zero chưa có rule; không missing→0; chưa có ca hoặc D…D+N |
+| S2-RATIO-AVG / P0 | Nguồn orders S1; revenue khi cần AOV/daily revenue | Cùng QueryPlan: cancelled/all placed, revenue/eligible orders, metric/calendar days; cùng effective window, weekday mask hai operands, exact rational/round once | Implementation và behavioral tests đạt; kết quả LLM/evaluator mới nhất xem JSON S1/S2 và section s2_operator_completion trong verification | C16/C18–C20/C26; distinct statuses, zero denominator, half-up AOV, zero-sales days, partial calendar denominator, ID/ref/metric/scope guards | Header-only chỉ count/cancellation/day-count; revenue cần lines; 0/âm/unknown hoặc half-tie chưa có luật abstain |
+| S2-SHARE / P0 | CSV/XLSX order-line có README mapping nhóm tường minh | revenue nhóm/revenue toàn shop cùng kỳ; customer_group + customer hoặc item_group, group identity không mơ hồ, grain/quality checks | Behavioral tests/wiring đạt; LLM synthetic và giới hạn native ở JSON S2 | C22; denominator không giữ filter nhóm, giữ walk-ins, missing mapping/error/collision abstain | Không bật raw JOIN/entity ranking; không chứng nhận numeric native ở source family chưa hỗ trợ |
+| TEMPORAL / P0 mở rộng | Nhiều kỳ, MTD, ratios, weekday/lunar | Per-window coverage, runtime calendar/as-of, independent scopes, DAG + denominator/undefined policy | Structured resolver day/week/month/MTD/N days/quarter/year/Tết đã kiểm chứng; signed difference hai kỳ xem S2-DIFF; growth hẹp xem S2-GROWTH; ratios/weekday average xem S2-RATIO-AVG và S2-SHARE | C17, C19–C20, C22, C26–C27; tests/test_temporal.py chỉ chứng nhận phần resolver | abstain cho ambiguity/divide-by-zero chưa có rule; không missing→0; chưa có ca hoặc D…D+N |
 | RANK / P1 | Product/customer/staff ranking/list | Identity resolution, metric-specific scope, base units, stable code tie-break, output ordering | planned, runtime unsupported | C13, C21–C22, C25, P1-IDENTITY | abstain khi aliases collision hoặc không đủ metric; không lấy mọi số trong tên làm attribute |
 | DEBT / P1 | Payment history, receivable/collection | Orders/payments separate; cutoff by payment date; COD/status policy riêng; per-order positive balance; earlier orders retained | planned, runtime unsupported | C09, C12, C15, C18, C26 | Source missing proof → unanswerable; engine/parser thiếu → abstain |
 | STOCK-COST / P1 | Stock event/snapshot, COGS/inventory value | Snapshot timestamp or ordered stock events; catalog vs line cost bases; unit conversions | SNAPSHOT-POINT đã có lookup hẹp; event/history/cost/valuation/conversion vẫn planned | C10–C14, C17–C18, C27 | Không dùng snapshot khác mốc, không SUM balances, không FIFO tự suy |
@@ -51,7 +53,7 @@ ghi latency/RSS/VRAM và giới hạn so sánh sau laptop reset. Đây là bằn
 các capability S1 đã bật, không mở thêm metric/shape hoặc chứng nhận PA đại diện,
 SLA toàn dataset hay Blackwell.
 
-S2 lát cắt đầu (source cuối trong S2 report): hai windows/aggregates cùng metric và một
+S2 lát cắt đầu (checkpoint difference trước growth trong S2 report): hai windows/aggregates cùng metric và một
 signed difference; authority/requirements/time bounds/refs/scope/unit phải đạt, preflight
 từng window trước numeric query. Model CUDA offload 29 layers; full subset dev 15 gồm
 13 S1 regression và 2 S2 percent unsupported, không phải numeric train S2 acceptance.
@@ -76,3 +78,32 @@ Report JSON đọc trực tiếp: [S1](../reports/s1_results.json),
 [S2](../reports/s2_results.json). `readiness` của S2 là verified narrow native revenue growth
 CUDA; không đồng nghĩa full S2 đã hoàn tất. `questions[]` và synthetic giữ gold/expected/actual
 cả hai lượt; không tính abstain đúng fallback thành correct.
+
+Checkpoint b46b263 đã commit/push lên origin/feature/phase5-s2 theo yêu cầu người dùng.
+Phần bổ sung sau checkpoint giữ giới hạn S1; S2 operator không tự mở mọi source shape.
+Hai JSON theo giai đoạn là đầu mối kết quả hiện tại; các con số 318/343 tests và 0/2 native
+ở các đoạn lịch sử phía trên thuộc revision trước, không dùng để mô tả source mới.
+
+**S2 operator — nghiệm thu trên nguồn đã bật (03/11/2026):** 366 tests, lint/format,
+lockfile offline và fixed-plan wiring 17/17 đạt. Hai fresh CUDA workers trên cùng source/image
+chạy 52 câu/lượt: **S1 12 correct / 0 wrong / 1 abstain** (13 câu), **S2 native
+22 correct / 0 wrong / 0 abstain** (8 growth + 7 AOV + 7 cancellation), **17/17 synthetic
+đúng behavior**; 15 fixture có gold xác định đạt 15 correct/0 wrong/0 abstain, hai zero-denominator
+diagnostics không tạo gold. Predictions 52/52 khớp giữa hai lượt. Gold chỉ evaluator host đọc
+sau khi cả hai containers thoát; source/model/raw/staged hashes và isolation đạt.
+
+S2 đủ bộ operator trong scope nguồn S1 đã bật: signed difference, revenue/order_count growth,
+cancellation ratio, AOV, daily/weekday average và group share có mapping rõ. Tỉ trọng và trung
+bình ngày/thứ mới có nghiệm thu synthetic; native dev phù hợp trên source hiện tại chỉ kiểm
+chứng growth/AOV/cancellation. **Không phải hoàn tất S2 mọi source family**: native share đang
+cần master/group mappings và thường raw JOIN trên các family chưa bật. Header-only revenue,
+multi-sheet, raw JOIN và toàn S1 mọi shape vẫn mở. Không chứng nhận CPU LLM source mới,
+Blackwell, official scorer equivalence hoặc PA đại diện.
+
+Schema tuple bind metric/filter/ID/ref theo vai trò operand **trước generation**, dựa vào finite
+question cues; validator tổng quát vẫn kiểm tra plan độc lập, không sửa semantic plan sau sinh.
+Một lượt diagnostic trước binding đã bị chặn vì duplicate IDs/sai operand; giữ trong
+`pre_binding_diagnostic`, không dùng làm acceptance. Half-up có authority riêng cho AOV;
+zero/âm và half-tie khác chưa có luật vẫn abstain. Requested/effective windows và denominator
+được giữ trong JSON từng câu. Tiếp tục dùng một QueryPlan/entrypoint/model worker, không
+thêm dependency/framework/script thực thi vào repo.

@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 from src.semantics.rulebook import RuleProfile, SemanticError
 
-VERSION = "metric-contracts-v2"
-METRICS = ("revenue", "order_count", "inventory_on_hand")
+VERSION = "metric-contracts-v3"
+METRICS = (
+    "revenue",
+    "order_count",
+    "inventory_on_hand",
+    "cancelled_order_count",
+    "placed_order_count",
+    "calendar_day_count",
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +48,26 @@ def metric_contract(rules: RuleProfile, metric_id: str) -> MetricContract:
     """A contract authorizes no output until requirements/execution are verified."""
     if metric_id not in METRICS:
         raise SemanticError("metric_unsupported", f"metric is not implemented: {metric_id}")
+    if metric_id in {"cancelled_order_count", "placed_order_count", "calendar_day_count"}:
+        base = metric_contract(rules, "order_count")
+        refs = list(base.rule_refs)
+        statuses = ["completed", "shipping", "cancelled", "returned"]
+        if metric_id != "calendar_day_count":
+            rules.require("cancellation_rate")
+            refs.append("cancellation_rate")
+        if metric_id == "cancelled_order_count":
+            statuses = ["cancelled"]
+        return replace(
+            base,
+            metric_id=metric_id,
+            status_policy=statuses,
+            rule_refs=refs,
+            unit="day" if metric_id == "calendar_day_count" else "order",
+            count_unit="day" if metric_id == "calendar_day_count" else "order",
+            formula="count_calendar_days_in_effective_window"
+            if metric_id == "calendar_day_count"
+            else "count_distinct_order_key",
+        )
     if metric_id == "inventory_on_hand":
         return MetricContract(
             metric_id=metric_id,

@@ -19,7 +19,7 @@ from src.data.normalization.sales import build_sales, sales_mapping
 from src.data.normalization.stock import build_stock, stock_mapping
 from src.jsonio import ContractError, dumps, loads
 
-VERSION = "prepared-facts-v2"
+VERSION = "prepared-facts-v3"
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
@@ -43,6 +43,12 @@ CREATE TABLE issues (issue_id TEXT PRIMARY KEY, detail TEXT NOT NULL) STRICT;
 CREATE TABLE inventory_snapshot (
     product_code TEXT PRIMARY KEY, product_name TEXT NOT NULL, base_unit TEXT NOT NULL,
     quantity TEXT NOT NULL, snapshot_at TEXT NOT NULL, source_ref TEXT NOT NULL
+) STRICT;
+CREATE TABLE order_groups (
+    order_key TEXT PRIMARY KEY REFERENCES orders(order_key), customer_group TEXT NOT NULL
+) STRICT;
+CREATE TABLE line_groups (
+    line_key TEXT PRIMARY KEY REFERENCES order_lines(line_key), item_group TEXT NOT NULL
 ) STRICT;
 """
 

@@ -756,7 +756,8 @@ def test_difference_generation_preserves_prior_mtd_before_coverage_clipping(sema
     # Narrowing generation never authorizes reversed operand refs.
     candidate["time_windows"][1]["expression"] = {"kind": "previous_mtd"}
     candidate["derived_measures"][0].update(current_ref="baseline_total", baseline_ref="total")
-    _schema(candidate, schema)
+    with pytest.raises(ContractError):
+        _schema(candidate, schema)
     with pytest.raises(ContractError, match="question_time_mismatch"):
         validate_query_plan(candidate, q, context)
 
@@ -880,9 +881,7 @@ def test_growth_never_erases_filter_ratio_or_difference_semantics(semantic_sourc
         validate_query_plan(growth_draft(), question(question=text), semantic_source())
 
 
-def test_growth_requires_its_runtime_rule_and_rejects_unsupported_count(
-    semantic_source, rulebook_text
-):
+def test_growth_requires_its_runtime_rule_and_supports_count(semantic_source, rulebook_text):
     context = semantic_source(
         rules=rulebook_text.replace("so với kỳ trước; giảm thì ra số âm", "không có quy định")
     )
@@ -892,10 +891,11 @@ def test_growth_requires_its_runtime_rule_and_rejects_unsupported_count(
     p = growth_draft()
     for a in p["aggregations"]:
         a["metric_id"] = "order_count"
-    with pytest.raises(ContractError, match="revenue_only"):
-        validate_query_plan(
-            p, question(question="Số đơn hôm nay so với hôm qua tăng bao nhiêu phần trăm?"), context
-        )
+    result = execute_plan(
+        p, question(question="Số đơn hôm nay so với hôm qua tăng bao nhiêu phần trăm?"), context
+    )
+    assert result["answer"]["type"] == "abstain"
+    assert result["execution"]["reason"] == "percent_change_nonpositive_baseline_undefined"
 
 
 def test_recorded_active_and_return_aliases_follow_metric_exclusion_policy(semantic_source):
@@ -914,3 +914,311 @@ def test_recorded_active_and_return_aliases_follow_metric_exclusion_policy(seman
     )
     rows = list(context.prepared.iter_records("order_lines"))
     assert any("Đang giao dịch" in dumps(row["source_values"]) for row in rows)
+
+
+def period_draft(operator, metrics, expression=None, filters=None):
+    plan = draft(metrics[0], expression)
+    plan["aggregations"][0]["id"] = "numerator"
+    plan["aggregations"][0]["filters"] = filters or []
+    baseline = deepcopy(plan["aggregations"][0])
+    baseline.update(
+        id="denominator",
+        metric_id=metrics[1],
+        filters=filters or [] if operator == "average_daily" else [],
+    )
+    plan["aggregations"].append(baseline)
+    plan["derived_measures"] = [
+        {
+            "id": "result",
+            "operator": operator,
+            "current_ref": "numerator",
+            "baseline_ref": "denominator",
+        }
+    ]
+    plan["output"] = {
+        "expected_type": "percent" if operator in {"share", "cancellation_rate"} else "number",
+        "result_refs": ["result"],
+    }
+    return plan
+
+
+def test_cancel_ratio_uses_all_statuses_and_distinct_orders(semantic_source):
+    context = semantic_source(
+        rows=[
+            ["1", "01/01/2026", "Huỷ", "90", "A"],
+            ["1", "01/01/2026", "Huỷ", "90", "A"],
+            ["2", "01/01/2026", "Xong", "100", "B"],
+            ["3", "01/01/2026", "Đổi trả", "20", "C"],
+            ["4", "01/01/2026", "Đang giao", "30", "D"],
+            ["5", "02/01/2026", "Xong", "200", "E"],
+        ]
+    )
+    p = period_draft("cancellation_rate", ["cancelled_order_count", "placed_order_count"])
+    result = execute_plan(
+        p, question(question="Tháng này tỉ lệ đơn bị huỷ là bao nhiêu phần trăm?"), context
+    )
+    assert result["answer"]["answer"] == 20
+    assert result["execution"]["denominator_value"] == 5
+    assert result["execution"]["numerator_value"] == 1
+    for agg in result["execution"]["aggregations"].values():
+        assert agg["status"] == "verified"
+
+
+def test_aov_uses_unrounded_revenue_and_rounds_half_up_once(semantic_source):
+    context = semantic_source(
+        rows=[
+            ["1", "01/01/2026", "Xong", "100", "A"],
+            ["1", "01/01/2026", "Xong", "1", "B"],
+            ["2", "01/01/2026", "Đang giao", "100", "C"],
+            ["3", "03/01/2026", "Huỷ", "10000", "D"],
+        ]
+    )
+    p = period_draft("average_order_value", ["revenue", "order_count"])
+    result = execute_plan(
+        p, question(question="Giá trị trung bình một đơn tháng này là bao nhiêu?"), context
+    )
+    assert result["answer"]["answer"] == 101
+    assert result["execution"]["numerator_value"] == 201
+    assert result["execution"]["denominator_value"] == 2
+
+
+@pytest.mark.parametrize(
+    "operator,metrics,text",
+    [
+        (
+            "average_order_value",
+            ["revenue", "order_count"],
+            "Giá trị trung bình một đơn tháng này?",
+        ),
+        (
+            "cancellation_rate",
+            ["cancelled_order_count", "placed_order_count"],
+            "Tỉ lệ đơn huỷ tháng này là bao nhiêu %?",
+        ),
+    ],
+)
+def test_undefined_zero_and_unknown_coverage_are_not_fabricated(
+    semantic_source, operator, metrics, text
+):
+    p = period_draft(operator, metrics, {"kind": "day", "date": "2026-01-02"})
+    q = question(question=text.replace("tháng này", "ngày 02/01/2026"))
+    result = execute_plan(p, q, semantic_source())
+    assert result["answer"]["type"] == "abstain"
+    assert result["execution"]["reason"] == "nonpositive_denominator_undefined"
+    context = semantic_source(rows=[], complete=False)
+    result = execute_plan(p, q, context)
+    assert result["answer"]["type"] == "abstain"
+    assert all(c["reason"] == "coverage_unknown" for c in result["plan"]["preflight"])
+
+
+def test_weekday_average_counts_calendar_days_including_days_without_orders(semantic_source):
+    context = semantic_source(
+        coverage_end="31/01/2026",
+        rows=[
+            ["1", "05/01/2026", "Xong", "100", "A"],
+            ["2", "12/01/2026", "Xong", "100", "B"],
+            ["3", "19/01/2026", "Đang giao", "200", "C"],
+            ["4", "06/01/2026", "Xong", "9999", "D"],
+        ],
+    )
+    p = period_draft(
+        "average_daily",
+        ["revenue", "calendar_day_count"],
+        {"kind": "month", "year": 2026, "month": 1},
+        ["weekday=0"],
+    )
+    result = execute_plan(
+        p, question(question="Doanh thu trung bình các ngày thứ Hai trong tháng 1/2026?"), context
+    )
+    assert result["answer"]["answer"] == 100
+    assert result["execution"]["denominator_value"] == 4
+    assert result["execution"]["numerator_value"] == 400
+
+
+def test_share_denominator_keeps_other_groups_and_walkins(semantic_source):
+    context = semantic_source(
+        extra_columns=["group", "customer"],
+        readme_extra="- **group**: customer group\n- **customer**: customer name\n",
+        rows=[
+            ["1", "01/01/2026", "Xong", "20", "A", "VIP", "Lan"],
+            ["2", "01/01/2026", "Xong", "50", "B", "VIP", ""],
+            ["3", "01/01/2026", "Đang giao", "30", "C", "Other", "Anh"],
+        ],
+    )
+    p = period_draft("share", ["revenue", "revenue"], filters=["customer_group=vip"])
+    result = execute_plan(
+        p,
+        question(
+            question="Tỉ trọng doanh thu của khách nhóm VIP trong tổng doanh thu tháng này "
+            "là bao nhiêu %?"
+        ),
+        context,
+    )
+    assert result["answer"]["answer"] == 20
+    assert result["execution"]["denominator_value"] == 100
+    assert result["execution"]["numerator_value"] == 20
+
+
+@pytest.mark.parametrize(
+    "change", ["denominator_filter", "reverse", "metric", "window", "unit", "operator"]
+)
+def test_period_measure_rejects_changed_dependencies(semantic_source, change):
+    p = period_draft("average_order_value", ["revenue", "order_count"])
+    if change == "denominator_filter":
+        p["aggregations"][1]["filters"] = ["weekday=0"]
+    if change == "reverse":
+        p["derived_measures"][0].update(current_ref="denominator", baseline_ref="numerator")
+    if change == "metric":
+        p["aggregations"][1]["metric_id"] = "placed_order_count"
+    if change == "window":
+        p["aggregations"][1]["window_ref"] = "missing"
+    if change == "unit":
+        p["aggregations"][0]["unit"] = "order"
+    if change == "operator":
+        p["derived_measures"][0]["operator"] = "cancellation_rate"
+    with pytest.raises(ContractError):
+        execute_plan(
+            p, question(question="Doanh thu trung bình mỗi đơn tháng này?"), semantic_source()
+        )
+
+
+def test_period_measure_does_not_drop_other_scope_conditions(semantic_source):
+    p = period_draft("cancellation_rate", ["cancelled_order_count", "placed_order_count"])
+    with pytest.raises(ContractError):
+        execute_plan(
+            p,
+            question(question="Tỉ lệ đơn huỷ riêng khách Lan tháng này bao nhiêu %?"),
+            semantic_source(),
+        )
+    p = period_draft("share", ["revenue", "revenue"], filters=["item_group=tra sua"])
+    result = execute_plan(
+        p,
+        question(question="Tỉ trọng của nhóm trà sữa trong doanh thu tháng này là bao nhiêu %?"),
+        semantic_source(),
+    )
+    assert result["answer"]["type"] == "abstain"
+    assert result["plan"]["preflight"][0]["reason"] == "group_mapping_unsupported"
+
+
+@pytest.mark.parametrize("partial,expected_denominator,expected", [(False, 31, 10), (True, 3, 100)])
+def test_daily_average_partial_coverage_uses_effective_calendar_span(
+    semantic_source, partial, expected_denominator, expected
+):
+    context = semantic_source(
+        coverage_end="03/01/2026" if partial else "31/01/2026",
+        rows=[["1", "01/01/2026", "Xong", "300" if partial else "310", "A"]],
+    )
+    p = period_draft(
+        "average_daily",
+        ["revenue", "calendar_day_count"],
+        {"kind": "month", "year": 2026, "month": 1},
+    )
+    result = execute_plan(
+        p, question(question="Doanh thu trung bình mỗi ngày tháng 1/2026?"), context
+    )
+    assert result["execution"]["denominator_value"] == expected_denominator
+    assert result["answer"]["answer"] == expected
+    assert result["plan"]["time_windows"][0]["coverage_status"] == (
+        "partial" if partial else "full"
+    )
+
+
+def test_item_share_and_group_collision_fail_closed(semantic_source):
+    context = semantic_source(
+        extra_columns=["group"],
+        readme_extra="- **group**: product group\n",
+        rows=[
+            ["1", "01/01/2026", "Xong", "20", "A", "Trà sữa"],
+            ["1", "01/01/2026", "Xong", "30", "B", "Khác"],
+            ["2", "02/01/2026", "Đang giao", "50", "C", "Khác"],
+        ],
+    )
+    p = period_draft("share", ["revenue", "revenue"], filters=["item_group=tra sua"])
+    q = question(question="Tỉ trọng của nhóm trà sữa trong doanh thu tháng này bao nhiêu %?")
+    result = execute_plan(p, q, context)
+    assert result["answer"]["answer"] == 20
+    assert result["execution"]["denominator_value"] == 100
+    ambiguous = semantic_source(
+        extra_columns=["group"],
+        readme_extra="- **group**: product group\n",
+        rows=[
+            ["1", "01/01/2026", "Xong", "20", "A", "Trà sữa"],
+            ["2", "02/01/2026", "Xong", "30", "B", "Tra sua"],
+        ],
+    )
+    result = execute_plan(p, q, ambiguous)
+    assert result["answer"]["type"] == "abstain"
+    assert result["execution"]["reason"] == "group_name_ambiguous"
+
+
+def test_count_ratio_not_blocked_by_irrelevant_amount_error(semantic_source):
+    context = semantic_source(
+        rows=[["1", "01/01/2026", "Huỷ", "bad", "A"], ["2", "02/01/2026", "Xong", "100", "B"]]
+    )
+    p = period_draft("cancellation_rate", ["cancelled_order_count", "placed_order_count"])
+    assert (
+        execute_plan(p, question(question="Tỉ lệ đơn huỷ tháng này bao nhiêu %?"), context)[
+            "answer"
+        ]["answer"]
+        == 50
+    )
+    p = period_draft("average_order_value", ["revenue", "order_count"])
+    result = execute_plan(p, question(question="Giá trị trung bình một đơn tháng này?"), context)
+    assert result["answer"]["type"] == "abstain"
+    assert result["execution"]["status"] == "not_performed"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Doanh thu tuần này so với tuần trước chênh lệch bao nhiêu?",
+        "Doanh thu 7 ngày gần nhất so với 14 ngày gần nhất tăng bao nhiêu %?",
+        "Doanh thu tháng 1/2026 so với tháng trước chênh lệch bao nhiêu?",
+    ],
+)
+def test_comparison_generation_preserves_two_temporal_dependencies(text):
+    schema = generation_schema(question(question=text))
+    assert schema["properties"]["time_windows"]["minItems"] == 2
+    windows = schema["properties"]["time_windows"]["items"]
+    assert len(windows) == 2
+    assert windows[0]["properties"]["expression"] != {}
+
+
+def test_period_measure_preserves_model_dependency_ids(semantic_source):
+    p = period_draft("average_order_value", ["revenue", "order_count"])
+    p["time_windows"][0]["id"] = "model_window"
+    for a in p["aggregations"]:
+        a["window_ref"] = "model_window"
+    result = execute_plan(
+        p, question(question="Giá trị trung bình một đơn tháng này?"), semantic_source()
+    )
+    assert result["plan"]["time_windows"][0]["id"] == "model_window"
+    assert result["answer"]["answer"] == 75
+
+
+def test_generation_binds_aov_roles_and_rejects_duplicate_or_wrong_operands():
+    q = question(question="Giá trị trung bình một đơn tháng này?")
+    p = difference_draft(current={"kind": "current_month"})
+    p["time_windows"] = p["time_windows"][:1]
+    p["aggregations"][1].update(metric_id="order_count", window_ref="period")
+    p["derived_measures"][0]["operator"] = "average_order_value"
+    schema = generation_schema(q)
+    _schema(p, schema)
+    p["aggregations"][1]["metric_id"] = "revenue"
+    with pytest.raises(ContractError):
+        _schema(p, schema)
+    p["aggregations"][1].update(metric_id="order_count", id="total")
+    with pytest.raises(ContractError):
+        _schema(p, schema)
+
+
+def test_generation_preserves_distinct_comparison_periods_before_model_output():
+    q = question(question="Doanh thu tháng 12/2025 so với tháng trước tăng bao nhiêu %?")
+    p = growth_draft(
+        {"kind": "month", "year": 2025, "month": 12}, {"kind": "month", "year": 2025, "month": 11}
+    )
+    schema = generation_schema(q)
+    _schema(p, schema)
+    p["time_windows"][1]["expression"] = deepcopy(p["time_windows"][0]["expression"])
+    with pytest.raises(ContractError):
+        _schema(p, schema)

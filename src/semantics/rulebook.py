@@ -16,7 +16,7 @@ from typing import Any
 from src.data.profiling import normalized
 from src.jsonio import ContractError
 
-VERSION = "runtime-rules-v4"
+VERSION = "runtime-rules-v5"
 
 
 class SemanticError(ContractError):
@@ -85,6 +85,10 @@ LABELS = {
     "return_policy": "don tra mot phan",
     "difference": "chenh lech, hon / kem, tang / giam bao nhieu (so, khong phai %)",
     "percent_change": "phan tram thay doi, tang truong",
+    "cancellation_rate": "ti le don huy trong ky",
+    "customer_share": "doanh thu theo nhom khach",
+    "item_group": "nhom hang",
+    "average_order_value": "gia tri trung binh mot don",
 }
 
 # Deliberately small wording variants for the same finite clauses. The value
@@ -127,6 +131,30 @@ def _unhandled_qualifications(text: str, section: str) -> set[str]:
 def _decode(rule_id: str, value: str) -> tuple[str, dict] | None:
     """Finite supported meanings. Full matches reject unhandled qualifications."""
     patterns = {
+        "cancellation_rate": (
+            r"phan tram don huy trong moi don dat trong ky \(theo ngay dat, moi trang thai: "
+            r"ca don huy, don tra, don dang giao\)\. lam tron 2 chu so thap phan",
+            "cancelled_over_all_placed_percent",
+            {},
+        ),
+        "customer_share": (
+            r"nhom theo cot nhom khach\. don khong ghi khach \(khach vang lai\) khong "
+            r"thuoc nhom nao, ke ca nhom le\. ti trong cua nhom chia cho doanh thu "
+            r"ca shop cung ky, tinh ca don vang lai",
+            "group_over_whole_business_percent",
+            {},
+        ),
+        "item_group": (
+            r"theo cot nhom hang, dung ten nhom cau hoi neu; khong gop nhom khac ten "
+            r"du ten gan nhau",
+            "exact_source_group",
+            {},
+        ),
+        "average_order_value": (
+            r"lam tron ve dong, nua dong lam tron len",
+            "revenue_over_eligible_orders",
+            {"decimal_places": 0, "mode": "half_up"},
+        ),
         "percent_change": (
             r"so voi ky truoc; giam thi ra so am",
             "current_minus_baseline_over_baseline_percent",

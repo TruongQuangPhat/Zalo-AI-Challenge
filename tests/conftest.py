@@ -65,6 +65,15 @@ def rulebook_text() -> str:
         "| Chênh lệch, hơn / kém, tăng / giảm bao nhiêu (số, không phải %) | "
         "kỳ hỏi − kỳ so: ít hơn ra số âm, giữ đơn vị của số đo |\n"
         "| Phần trăm thay đổi, tăng trưởng | so với kỳ trước; giảm thì ra số âm |\n"
+        "| Tỉ lệ đơn huỷ trong kỳ | phần trăm đơn huỷ trong mọi đơn đặt trong kỳ "
+        "(theo ngày đặt, mọi trạng thái: cả đơn huỷ, đơn trả, đơn đang giao). "
+        "Làm tròn 2 chữ số thập phân. |\n"
+        "| Giá trị trung bình một đơn | làm tròn về đồng, nửa đồng làm tròn lên |\n"
+        "| Doanh thu theo nhóm khách | nhóm theo cột nhóm khách. Đơn không ghi khách "
+        "(khách vãng lai) không thuộc nhóm nào, kể cả nhóm lẻ. Tỉ trọng của nhóm chia "
+        "cho doanh thu cả shop cùng kỳ, tính cả đơn vãng lai |\n"
+        "| Nhóm hàng | theo cột nhóm hàng, đúng tên nhóm câu hỏi nêu; không gộp nhóm "
+        "khác tên dù tên gần nhau |\n"
         "| Từ X đến Y, nhóm X–Y | gồm cả X và Y |\n"
         "| N ngày gần nhất | N ngày liền nhau kể cả hôm nay, ngày cuối là hôm nay |\n"
         "| Tuần | bắt đầu thứ Hai. Tuần này: từ thứ Hai của tuần chứa hôm nay đến hết hôm"
@@ -116,6 +125,7 @@ def semantic_source(synthetic_split, tmp_path, rulebook_text):
         readme_extra="",
         cache_dir=None,
         coverage_end="03/01/2026",
+        extra_columns=(),
     ):
         nonlocal revision
         revision += 1
@@ -135,7 +145,7 @@ Dữ liệu có đến hết {coverage_end}.
         (synthetic_split / "rulebook.md").write_text(rulebook_text if rules is None else rules)
         with (business / "sales.csv").open("w", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["order_id", "date", "status", "amount", "item"])
+            writer.writerow(["order_id", "date", "status", "amount", "item", *extra_columns])
             writer.writerows(
                 rows
                 if rows is not None

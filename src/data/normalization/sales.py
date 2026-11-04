@@ -62,8 +62,15 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
         "item": {"ten hang", "ten san pham", "product name"},
         "quantity": {"so luong", "quantity"},
         "returned_at": {"ngay tra hang", "return date"},
-        "customer": {"ten khach", "ten khach hang", "customer name"},
+        "customer": {
+            "ten khach",
+            "ten khach hang",
+            "customer name",
+            "ten khach (khach le neu khong luu)",
+        },
         "note": {"ghi chu don", "order note"},
+        "customer_group": {"nhom khach", "nhom khach hang", "customer group"},
+        "item_group": {"nhom hang", "nhom san pham", "product group"},
     }
 
     def descriptions(section: str) -> dict[str, str]:
@@ -282,7 +289,9 @@ def build_sales(
         issue("number_convention_conflict", table.source_ref, sorted(evidence), ["revenue"])
     group: dict[str, Cell] = {}
     header_fields = [
-        f for f in ["order_id", "ordered_at", "status", "customer", "note"] if f in mapping.fields
+        f
+        for f in ["order_id", "ordered_at", "status", "customer", "note", "customer_group"]
+        if f in mapping.fields
     ]
     for row in table.iter_rows():
         reference = row.reference(table)
@@ -406,6 +415,39 @@ def build_sales(
                     connection.execute(
                         "UPDATE orders SET status='returned' WHERE order_key=?", (order_key,)
                     )
+                if "customer_group" in mapping.fields:
+                    try:
+                        cell = cells.get(mapping.fields["customer_group"])
+                        group_value = (
+                            ""
+                            if cell is None or cell.raw_value in {None, ""}
+                            else str(cell_value(cell)).strip()
+                        )
+                        if "customer" in mapping.fields:
+                            customer = cells.get(mapping.fields["customer"])
+                            customer_value = (
+                                cell_value(customer)
+                                if customer and customer.raw_value not in {None, ""}
+                                else ""
+                            )
+                            if normalized(str(customer_value)).strip() in {
+                                "",
+                                "khach le",
+                                "khach vang lai",
+                            }:
+                                group_value = ""
+                        old_group = connection.execute(
+                            "SELECT customer_group FROM order_groups WHERE order_key=?",
+                            (order_key,),
+                        ).fetchone()
+                        if old_group and old_group[0] != group_value:
+                            raise ParseError("customer_group_conflict", "conflicting order group")
+                        connection.execute(
+                            "INSERT OR IGNORE INTO order_groups VALUES (?,?)",
+                            (order_key, group_value),
+                        )
+                    except ParseError as exc:
+                        issue(exc.code, reference, None, ["customer_group_share"])
             else:
                 group = {}
             if mapping.shape == "csv_order_headers":
@@ -489,6 +531,19 @@ def build_sales(
                                 event_at,
                             ),
                         )
+                        if "item_group" in mapping.fields:
+                            try:
+                                cell = cells.get(mapping.fields["item_group"])
+                                group_value = (
+                                    ""
+                                    if cell is None or cell.raw_value in {None, ""}
+                                    else str(cell_value(cell)).strip()
+                                )
+                                connection.execute(
+                                    "INSERT INTO line_groups VALUES (?,?)", (fact_key, group_value)
+                                )
+                            except ParseError as exc:
+                                issue(exc.code, reference, None, ["item_group_share"])
                     methods.extend(
                         [
                             "parse_date",
