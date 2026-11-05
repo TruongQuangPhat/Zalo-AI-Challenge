@@ -281,6 +281,10 @@ def execute_plan(
 ) -> dict:
     """Validate and preflight every question; no model-provided numeric values or SQL."""
     plan = validate_query_plan(draft, question, context)
+    if "business_spec" in plan:
+        from src.agent.business_execution import execute_business_plan
+
+        return execute_business_plan(plan, question, context, deadline)
     for requirement in plan["requirements"]:
         requirement["source_joins"] = (
             context.prepared.summary.get("joins", []) if context.prepared else []

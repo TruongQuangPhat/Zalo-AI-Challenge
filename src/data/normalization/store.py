@@ -15,12 +15,13 @@ from pathlib import Path
 
 from src.data.cache import fingerprint
 from src.data.catalog import BusinessContext, digest, discover_sources, require_output
+from src.data.normalization.entities import build_entities
 from src.data.normalization.relational import build_relational, relational_mapping
 from src.data.normalization.sales import build_sales, sales_mapping
 from src.data.normalization.stock import build_stock, stock_mapping
 from src.jsonio import ContractError, dumps, loads
 
-VERSION = "prepared-facts-v5"
+VERSION = "prepared-facts-v6"
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
@@ -100,6 +101,14 @@ class PreparedBusiness:
             "order_groups",
             "line_groups",
             "event_groups",
+            "entities",
+            "order_parties",
+            "line_items",
+            "payments",
+            "purchases",
+            "stock_balances",
+            "lots",
+            "lot_allocations",
         }:
             raise ContractError("unknown prepared table")
         with closing(self.connect()) as connection:
@@ -260,6 +269,7 @@ def prepare_facts(
                         set(summary.get("blocking_metrics", []))
                         | set(stock_summary["blocking_metrics"])
                     )
+            summary["extensions"] = build_entities(context, connection, summary, mapping)
             for key, value in [("dependencies", dependencies), ("summary", summary)]:
                 connection.execute("INSERT INTO metadata VALUES (?,?)", (key, dumps(value)))
             connection.commit()

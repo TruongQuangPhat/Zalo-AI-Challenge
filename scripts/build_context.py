@@ -141,6 +141,9 @@ def build_context(
 ) -> dict:
     root = root.resolve()
     candidates = [root / p for p in ["Dockerfile", ".dockerignore", "predict.sh"]]
+    license_path = root / "docs/model-license.txt"
+    if license_path.exists():
+        candidates.append(license_path)
     candidates.extend(sorted((root / "src").rglob("*.py")))
     sources = {p.relative_to(root).as_posix(): p for p in candidates}
     packages = {}

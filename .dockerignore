@@ -14,7 +14,8 @@ dataset/**
 reports
 reports/**
 tests
-docs
+docs/*
+!docs/model-license.txt
 *.log
 *.sqlite
 *.xlsx

@@ -157,6 +157,15 @@ def prepare_business(
         split = load_split(split.root)
     readme = (split.root / "data" / business / "README.md").read_text(encoding="utf-8-sig")
     industries = re.findall(r"^\s*(?:-\s*)?(?:\*\*)?Ngành(?:\*\*)?\s*:\s*(.+)$", readme, re.M)
+    # A pharmacy export explicitly describes prescription flags and active ingredients,
+    # and lot/expiry semantics. This is source evidence, independent of questions.
+    pharmacy_basis = (
+        not industries
+        and bool(re.search(r"(?im)^- \*\*Thuốc\*\*:", readme))
+        and bool(re.search(r"(?im)^- \*\*Lô, hạn dùng\*\*:", readme))
+    )
+    if pharmacy_basis:
+        industries = ["nhà thuốc"]
     if len(industries) > 1:
         raise ContractError("conflicting industry declarations in README")
     rules = split.rules

@@ -1,6 +1,6 @@
 # Zalo AI Challenge — DataMate
 
-Runtime đọc CSV/XLSX/SQLite, chuẩn bị context một lần/business và ghi JSONL/log theo câu. Mặc định vẫn **mock abstain**; `--model` bật local planner S1/S2, QueryPlan validator, resolve/preflight và executor xác định. S2 gồm difference/growth, tỉ lệ huỷ, giá trị trung bình đơn, trung bình ngày/thứ, tỉ trọng nhóm/kênh và ca bán hàng có authority phù hợp. Tiền tính bằng Python Decimal trên SQLite read-only, rồi verifier và output validator kiểm tra trước khi ghi đáp án. Coverage dùng khoảng ngày của toàn export khi đọc/parse đầy đủ, ưu tiên khoảng đầy đủ được README khai báo và chặn mâu thuẫn. Giới hạn và bằng chứng theo revision nằm trong [roadmap.md](roadmap.md), [JSON kết quả](reports/stage_results.json); kết quả dev không chứng nhận PA toàn dataset. Giữ lookup inventory snapshot hẹp từ M1.
+Runtime đọc CSV/XLSX/SQLite, chuẩn bị context một lần/business và ghi JSONL/log theo câu. `--model` bật local LLM → cùng QueryPlan → preflight → SQLite read-only/Decimal executor → typed output. Baseline có S1/S2 và các operator S3/S4 hữu hạn cho ranking/entity, payment/debt, purchase headers, line-cost profit, stock balance/snapshot và nearest expiry. Điều kiện hỗ trợ theo nguồn nằm trong [capability matrix](docs/capability-matrix.md); kết quả và lịch sử theo revision nằm trong [roadmap](roadmap.md) và [JSON chung](reports/stage_results.json). CLI không truyền model vẫn mock abstain; image `datamate-baseline:local` có default CMD chạy model đã đóng gói.
 
 ## Môi trường riêng
 
@@ -11,6 +11,44 @@ uv sync --locked --python /usr/bin/python3.11
 ```
 
 Không cần chạy setup lại nếu `.venv` đã có. Không cài package hoặc tải weights trong inference.
+
+## Chạy full pipeline trên Colab GPU
+
+Mở [scripts/DataMate_Colab.ipynb](scripts/DataMate_Colab.ipynb), chọn GPU rồi chạy các cell
+theo thứ tự. Notebook clone repository, tạo `.venv` Python 3.11, tải Qwen GGUF và wheel
+CUDA từ revision/version đã khóa, kiểm SHA-256, cài dependency từ `uv.lock`, chạy
+lint/format/tests, load model thật, chứng minh offload 29 layers, inference đủ **3.000 câu**
+và chấm cả **3.000 đáp án** bằng evaluator hiện có. Không dùng API inference.
+
+Repo private cần Colab Secret `GITHUB_TOKEN` có quyền Contents:read cho repo; token
+không được ghi vào URL Git hoặc source. `REPO_REF` phải chứa code S3–S5 và script Colab
+mới; clone checkpoint S1/S2 cũ sẽ dừng với thông báo thiếu source. Nếu thay đổi mới chưa được xuất bản,
+cần commit/push source trước khi dùng luồng clone.
+
+Đặt `train.zip` gốc vào `MyDrive/DataMate/train.zip`, gồm `data/`, `questions.jsonl`,
+`answers.jsonl`, `rulebook.md`, `calendar.csv` (có thể nằm trong thư mục `train/`). Dataset
+không được commit. Không cần upload model/wheel; notebook tự tải và xác minh ở setup.
+Input inference được staging riêng, chỉ có bốn đầu vào không chứa labels. Model/cache/
+SQLite chạy trên SSD `/content`; gold chỉ được evaluator đọc sau khi kiểm đủ IDs/types,
+checksum và trạng thái hoàn tất 3.000 câu.
+
+`CHUNK_SIZE=100` lưu checkpoint phần đã hoàn tất về Drive; giữ cùng `RUN_ID`, source,
+model và cấu hình để resume. Chọn `3000` nếu cần một process liên tục. Cả hai cách đều
+giữ đủ mẫu số, không bỏ unsupported hoặc sửa outputs. Bản sao facts sau mỗi phần chỉ
+bị dọn khi khớp byte với cache canonical đã kiểm chứng. Thời gian có model loading,
+preparation và các lần reload theo chunk; không gọi chunked run là single-process run.
+
+Kết quả câu hỏi cập nhật duy nhất `reports/stage_results.json`, giữ lịch sử S1/S2;
+bản sao cùng file và evidence được lưu vào `MyDrive/DataMate/results/<RUN_ID>/`.
+Buckets S1–S5 dùng lexical proposals đã khóa trước gold, S6 rollup đủ 3.000 câu;
+không coi các bucket này là chứng nhận mọi capability hoặc cộng S6 vào mẫu số lần nữa.
+Theo yêu cầu mới, cả 1.224 câu trước đây giữ lại sẽ được chấm; membership split không đổi,
+nhưng không còn gọi chúng là unscored/blind holdout ở evaluation này. Không dùng feedback
+đó để sửa source rồi báo như một lần đánh giá độc lập.
+
+Notebook chưa được thực thi trên hosted Colab trong phiên phát triển. S6 chỉ được ghi
+nhận theo các gate thực sự chạy đạt; Colab không thay nghiệm thu Docker/Blackwell hoặc
+SLA BTC. Phạm vi nghiệp vụ hữu hạn vẫn theo capability matrix, không mở thêm nghiệp vụ.
 
 ## Kiểm tra runtime
 
@@ -178,6 +216,79 @@ không phải chứng nhận completeness từ bên ngoài.
 Kiểm tra bằng `uv run --no-sync python -m pytest tests/test_semantics.py tests/test_temporal.py`.
 Bằng chứng dev/cold/warm nằm trong [reports/semantics_verification.json](reports/semantics_verification.json).
 
+## Tái chạy baseline local S3–S6
+
+Một image production: `datamate-baseline:local`, chứa source S1–S5, model Qwen2.5
+1.5B Q4_K_M, runtime CUDA và license. Default CMD chạy model thật với `/data`,
+`/result/submission.jsonl` và `--gpu-layers -1`; runtime từ chối GPU request nếu không
+offload được layer. S6 là nghiệm thu/freeze, không thêm nghiệp vụ.
+
+Build offline bằng runtime/model đã có trong image local; context chỉ gồm source
+allowlist và license, không sao chép weights hoặc dataset:
+
+```bash
+uv run --no-sync python -m scripts.build_context \
+  --output .artifacts/baseline-source.tar --manifest .artifacts/baseline-source.json
+docker build --network=none --pull=false --target baseline \
+  --build-arg BASE_IMAGE=datamate-baseline:local \
+  -t datamate-baseline:local - < .artifacts/baseline-source.tar
+```
+
+Đây là source refresh dựa trên image chứa runtime/model sẵn có; cần giữ image đó ở
+máy hoặc có bản lưu offline để phục hồi. Không phải build runtime từ máy trống.
+Lượt build đầu của phiên nghiệm thu dùng `datamate-llm-cuda:local`; rebuild từ
+`datamate-baseline:local` đã kiểm tra offline trước khi dọn các checkpoint cũ.
+
+Full train có **3.000 câu**, gồm dev 1.776 và 1.224 câu thuộc các partition giữ lại.
+Theo yêu cầu Colab mới, evaluator sẽ chấm cả 3.000 sau inference; membership không đổi. Không mount
+thư mục train nguyên vì có answers. Lệnh dưới chỉ mount bốn đầu vào inference,
+network disabled và input read-only; dùng output mới trên ổ D ở máy nghiệm thu:
+
+```bash
+DATAMATE_CACHE=$(uv run --no-sync python -c \
+  'import json; print(json.load(open(".artifacts/s3-s6/runtime-storage.json"))["cache_dir"])')
+DATAMATE_RUN=/mnt/d/DataMate-Zalo-AI-Challenge-20261105/.artifacts/full-train-rerun
+mkdir "$DATAMATE_RUN"
+docker run --rm --gpus all --network none --read-only \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,size=256m \
+  --mount "type=bind,source=$PWD/dataset/train/data,target=/train/data,readonly" \
+  --mount "type=bind,source=$PWD/dataset/train/questions.jsonl,target=/train/questions.jsonl,readonly" \
+  --mount "type=bind,source=$PWD/dataset/train/rulebook.md,target=/train/rulebook.md,readonly" \
+  --mount "type=bind,source=$PWD/dataset/train/calendar.csv,target=/train/calendar.csv,readonly" \
+  --mount "type=bind,source=$DATAMATE_CACHE,target=/cache" \
+  --mount "type=bind,source=$DATAMATE_RUN,target=/result" \
+  datamate-baseline:local \
+  --data-dir /train --output-dir /result --cache-dir /cache \
+  --model /opt/model/model.gguf --gpu-layers -1 --model-threads 4 --question-timeout 120
+```
+
+Mount `/train` giữ namespace của cache nghiệm thu. Với input mới, runtime tự invalidation
+và preparation theo dependencies; không sửa cache manifests để ép hit. Để chạy default
+CMD, đổi bốn mount input sang `/data/...` và bỏ mọi argument sau tên image; output vẫn
+`/result`. Cho thư mục result quyền ghi của UID mặc định 65532 hoặc truyền `--user`.
+
+Core cuối khóa **262 unique: 224 native +31 synthetic +6 diagnostic +1 scenario**, tại
+`.artifacts/s3-s6/input-final/train`. Tái chạy core bằng cùng command, thay bốn input
+mount bằng một mount read-only thư mục staging này tới `/train`, dùng cache read-only
+sau khi preparation đầy đủ và một output mới. Hai lượt CUDA chạy tuần tự một worker.
+Core là dev engineering có historical exposure, không phải full train hoặc blind holdout.
+
+CPU smoke dùng cùng image, bỏ `--gpus all`, truyền `--gpu-layers 0` và chọn ba câu:
+`--question-id q_38e2b6cef714 --question-id q_0bf0638eaa4d --question-id q_b3104dec243e`.
+Giữ budget 120 giây/câu; smoke không chứng nhận full CPU. Cấu hình chung: context 4096,
+batch 128, threads 4, seed 0, temperature 0. Timeout dừng model worker; các câu sau
+vẫn có output abstain và lỗi worker được ghi, không kéo dài budget hoặc sửa output.
+
+Chỉ evaluator chạy sau khi mọi inference worker thoát mới đọc nhãn. Theo yêu cầu
+mới, notebook Colab chấm toàn bộ **3.000 train**, không còn giữ 1.224 câu unscored trong
+lượt đó. Giữ toàn bộ unsupported trong mẫu số; không dùng feedback này để tuning rồi
+báo như holdout độc lập. Các kết quả/handoff dev-only cũ giữ đúng lịch sử của chúng.
+Kiểm tra đủ 3.000 IDs duy nhất, kiểu hợp lệ và source/input bất biến trước scoring.
+Kết quả câu hỏi chỉ ghi trong [reports/stage_results.json](reports/stage_results.json);
+native, synthetic, diagnostic, scenario và repetitions báo riêng. Technical evidence
+ở `.artifacts/s3-s6/`; Colab có bộ evidence riêng theo RUN_ID.
+
 ## Local planner S1 và S2
 
 Cài dependency ở bước setup (cần C/C++ compiler và CMake nếu build từ source), trước inference:
@@ -235,7 +346,7 @@ mọi ngày thuộc effective window, kể cả không có đơn. Tỉ trọng c
 mapping customer_group kèm customer hoặc item_group; không fuzzy merge các nhóm có tên
 mơ hồ, mẫu số giữ nhóm khác và khách vãng lai. Có checked header/detail/master joins
 N:1 cho các schema đã nhận diện; orphan/conflicting keys chặn metric phụ thuộc, không
-JOIN payments vào sales để cộng tiền. Product/customer ranking vẫn ngoài scope.
+JOIN payments vào sales để cộng tiền. Product/customer ranking dùng extension S3 hữu hạn trong capability matrix.
 Identity, SQL, policy hay numeric answer do model tự thêm bị từ chối.
 Context chỉ lấy metadata schema/contracts/coverage/rule refs/warnings, không đưa raw rows vào prompt.
 Authority hashes được chia sẻ thay vì lặp theo từng rule; metadata business đứng trước
@@ -262,7 +373,7 @@ tháng này/trước. “Tháng này so với tháng trước” dùng `current_
 runtime rule, gồm trường hợp tháng trước ngắn hơn. Tháng tường minh so với “tháng trước”
 được anchor tháng trước của kỳ hỏi, gồm rollover tháng 1. Ca sáng/chiều dùng clock nguồn
 và khoảng nửa mở từ rulebook; không suy clock từ ngày. Tổng/so sánh ca, tổng nhóm và
-tỉ trọng nhóm/kênh chỉ chạy khi mapping/authority tương ứng đủ. Entity/ranking rộng chưa bật.
+tỉ trọng nhóm/kênh chỉ chạy khi mapping/authority tương ứng đủ. Entity/ranking dùng extension hữu hạn; fuzzy matching và ranking tùy ý chưa bật.
 Không coi các guard này là parser tiếng Việt tổng quát.
 
 Kết quả các giai đoạn dùng chung [reports/stage_results.json](reports/stage_results.json).
@@ -300,7 +411,7 @@ Evidence kỹ thuật chi tiết giữ local tại `.artifacts/s1-s2-full/verifi
 section `s1_s2_final_baseline`; không thuộc file kết quả. Checkpoint gốc là `0421d68`;
 các checkpoint phía dưới là lịch sử.
 
-Tái chạy batch 47 câu đã kiểm chứng bằng image/cache local hiện có (input staging
+Tái chạy tập 47 câu lịch sử bằng image baseline hiện tại (source khác checkpoint lịch sử) (input staging
 không chứa nhãn). Chạy từ repo root và dùng output mới; mount `/train` giữ cùng
 namespace với cache đã chuẩn bị. Không truyền `--model` ở entrypoint sẽ chạy mock.
 
@@ -312,7 +423,7 @@ docker run --rm --gpus all --network none --read-only \
   --mount "type=bind,src=$(pwd)/.artifacts/s1-s2-full/final-scope/input/train,dst=/train,readonly" \
   --mount "type=bind,src=$(pwd)/.artifacts/s1-s2-full/cache-final,dst=/cache,readonly" \
   --mount "type=bind,src=$(pwd)/.artifacts/baseline-s1-s2-run,dst=/result" \
-  datamate-s1-s2-complete-cuda:local \
+  datamate-baseline:local \
   --data-dir /train --output-dir /result --cache-dir /cache \
   --model /opt/model/model.gguf --gpu-layers -1 --question-timeout 120
 ```
@@ -370,7 +481,7 @@ Source mới có **343 tests**, lint/format và lockfile đạt. Hai fresh CUDA 
 11 fixture có gold xác định chấm 9 correct/0 wrong/2 abstain, 4 diagnostic không được gán placeholder gold.
 Source/model/input hashes và read-only/network-none/label isolation đạt; gold chỉ evaluator host đọc sau cả hai containers.
 Evidence hiện tại ở `native_growth_continuation` trong JSON; các root fields giữ checkpoint cũ theo đúng hashes.
-Image mới: `datamate-s2-growth-cuda:local`, build source target offline trên `datamate-llm-cuda:local` bằng
+Image tại checkpoint lịch sử: `datamate-s2-growth-cuda:local`, build source target offline trên `datamate-llm-cuda:local` bằng
 `scripts.build_context`/Dockerfile hiện có. Chưa nghiệm thu model CPU growth, Blackwell hoặc toàn S2/Phase 5–7.
 
 Bằng chứng S2 mới nhất và các checkpoint lịch sử theo source hashes tại
@@ -392,20 +503,10 @@ worker bị dừng; các câu sau worker-unavailable không phải evidence cho 
 swap và host load/cache không kiểm soát; startup/preparation/generation chỉ là quan sát,
 không phải SLA. Không tăng budget để đổi kết quả. Native numeric S2 cũng chưa được nghiệm thu.
 
-Image baseline hiện tại: `datamate-s1-s2-complete-cpu:local` và
-`datamate-s1-s2-complete-cuda:local`; source/model/image hashes nằm trong JSON mới nhất.
-Dùng lại source target trên hai image LLM S1 local để giữ nguyên weights/dependencies;
-COPY entrypoint dùng `--chmod` nên hoạt động cả khi base image có USER non-root.
-Có thể rebuild source layer offline bằng entrypoint hiện có:
-
-```bash
-uv run --no-sync python -m scripts.build_context \
-  --output .artifacts/s2-context.tar --manifest .artifacts/s2-context.json
-docker build --network none --pull=false --target source \
-  --build-arg BASE_IMAGE=datamate-llm-cpu:local -t datamate-s1-s2-complete-cpu:local - < .artifacts/s2-context.tar
-docker build --network none --pull=false --target source \
-  --build-arg BASE_IMAGE=datamate-llm-cuda:local -t datamate-s1-s2-complete-cuda:local - < .artifacts/s2-context.tar
-```
+Các image theo stage và cặp CPU/CUDA của checkpoint S1/S2 là lịch sử; không cần duy
+trì như bản chạy riêng. Source/model/image hashes lịch sử giữ trong evidence local.
+Tái chạy tập câu hỏi cũ dùng image baseline hiện tại theo lệnh bên trên, với source mới;
+không dùng kết quả đó để thay bằng chứng của checkpoint cũ.
 
 Bằng chứng S1 trước thay đổi S2 tại [reports/planner_verification.json](reports/planner_verification.json).
 Hai report normalization/semantics trước đó giữ phạm vi lịch sử; không chứng nhận thay đổi S1 mới.
@@ -448,79 +549,23 @@ nằm trong [planner report](reports/planner_verification.json).
 
 ## Docker LLM offline
 
-Target `llm` dùng cùng entrypoint, đóng gói GGUF local, sáu dependency runtime theo
-`uv.lock`, license và thư viện OpenMP cần thiết. Build context chỉ lấy allowlist; không
-copy toàn `.venv`, dataset, credentials hoặc reports. Kiểm tra RECORD trước khi bundle;
-base image Python 3.11 Bookworm được pin digest trong Dockerfile. Setup cần môi trường
-Linux x86_64/Python 3.11 đã sync group `llm`; inference không cài hoặc tải artifact.
+Image production và lệnh rebuild/rerun hiện tại nằm ở phần
+[Tái chạy baseline](#tái-chạy-baseline-local-s3s6). Dockerfile giữ các target bootstrap
+`llm`/`cuda` cho quy trình bundle runtime gốc; không cần giữ các image bootstrap như
+sản phẩm riêng sau khi baseline đã được kiểm chứng.
 
-```bash
-uv run --no-sync python -m scripts.build_context \
-  --model .artifacts/models/qwen2.5-1.5b-instruct/model.gguf \
-  --output .artifacts/llm-cpu-context.tar --manifest .artifacts/llm-cpu-context.json
-# Base image pin trong Dockerfile phải có sẵn local; không pull trong lượt offline.
-docker build --network none --pull=false --target llm \
-  -t datamate-llm-cpu:local - < .artifacts/llm-cpu-context.tar
-uv run --no-sync python -m scripts.verify_runtime --scope llm \
-  --image datamate-llm-cpu:local --context-manifest .artifacts/llm-cpu-context.json
-```
+Bundle gốc dùng Linux x86_64/Python 3.11, dependency theo `uv.lock`, RECORD checks,
+license/OpenMP và hai package NVIDIA đã khóa. Không copy toàn `.venv`, Torch,
+dataset, credentials hoặc reports. Runtime `llama-cpp-python==0.3.16`, CUDA 12.4;
+wheel [upstream](https://github.com/abetlen/llama-cpp-python/releases/tag/v0.3.16-cu124)
+có SHA-256 `a455263e7608a51c26079e82fe524f9b7f1f73ee9fc563221a297de8da2a8c51`.
+Wheel đã chuyển có checksum sang D; đường `.artifacts/wheels/` cũ giữ symlink tương thích.
+Không cài dependency hoặc tải weights trong inference.
 
-Verifier dùng 13 câu S1 dev đã khóa trong planner report, hai container mới với cache
-preparation dùng lại ở lượt hai. Chỉ mount questions/rulebook/calendar/raw data read-only;
-labels/reports không có trong container. Root read-only, network none, output/cache nằm
-ngoài dataset. Chỉ evaluator host đọc nhãn sau khi cả hai inference đã thoát. Runs/facts/gold
-được dọn tự động; image và model local được giữ. Target `runtime` mặc định vẫn là source-only.
-
-`--gpu-layers 0` giữ CPU; `-1` yêu cầu offload toàn bộ layers. Adapter ghi số layer thực sự
-offloaded từ native log và bác yêu cầu GPU nếu không offload được, không âm thầm tính CPU.
-GPU cần backend CUDA riêng và Docker GPU access; verifier chỉ cho so sánh sau khi CPU đã đạt
-trên cùng source runtime. Không dùng Torch/CUDA host làm bằng chứng LLM Docker đã tương thích.
-
-Bản CUDA local dùng wheel cùng version `0.3.16`, CUDA 12.4/cp311 x86_64 từ
-[upstream release](https://github.com/abetlen/llama-cpp-python/releases/tag/v0.3.16-cu124).
-SHA-256 wheel: `a455263e7608a51c26079e82fe524f9b7f1f73ee9fc563221a297de8da2a8c51`.
-Tải ở bước setup vào `.artifacts/wheels/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl`,
-kiểm hash trước khi stage. Phiên bản dependency vẫn theo `uv.lock`; checksum binary build
-được ghi riêng trong build-context manifest. Không thay `.venv` CPU.
-
-```bash
-uv pip install --no-cache --no-index --no-deps --link-mode copy --python .venv/bin/python \
-  --target .artifacts/llama-cuda \
-  .artifacts/wheels/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
-uv run --no-sync python -m scripts.build_context --cuda-runtime .artifacts/llama-cuda \
-  --output .artifacts/llm-cuda-context.tar --manifest .artifacts/llm-cuda-context.json
-docker build --network none --pull=false --target cuda \
-  -t datamate-llm-cuda:local - < .artifacts/llm-cuda-context.tar
-uv run --no-sync python -m scripts.verify_runtime --scope llm --gpu-layers -1 \
-  --image datamate-llm-cuda:local --context-manifest .artifacts/llm-cuda-context.json
-```
-
-Target CUDA kế thừa model/source từ `datamate-llm-cpu:local` đã nghiệm thu, thêm binding
-và các thư viện cần từ hai package NVIDIA đã khóa. Không bundle bản CMake `lib/` trùng
-với `llama_cpp/lib`, không copy Torch hay toàn bộ CUDA environment. Verifier so sánh cùng
-source, weights và input hashes; GPU memory là số đo toàn device, gồm desktop/process khác.
-Hai backend cập nhật cùng report Docker, không tạo các báo cáo lặp theo từng run.
-Kết quả và giới hạn tại [reports/docker_llm_verification.json](reports/docker_llm_verification.json).
-
-**Nghiệm thu ngày 03/11/2026:** CPU trước, sau đó CUDA trên GTX 1650 4 GiB,
-driver 555.97; mỗi backend hai lượt trên cùng 13 câu đã khóa. Cả bốn lượt đều
-**12 correct / 0 wrong / 1 abstain**, không missing/malformed; predictions bằng nhau
-giữa các lượt và CPU/GPU, weights/source/input hashes khớp.
-
-| Số đo | CPU | CUDA, 29 layer offload |
-|---|---|---|
-| Generation median / p95, 26 calls/backend | 33,27 / 73,64 s | 5,77 / 10,30 s |
-| Wall time hai lượt, gồm startup/preparation | 505,93 / 601,67 s | 171,05 / 169,02 s |
-| Peak worker RSS lớn nhất | 1.870,79 MiB | 1.313,64 MiB |
-| Peak VRAM toàn device, sampling 500 ms | Không đo | 1197 MiB |
-
-Lượt GPU đầu bị laptop reset gián đoạn đã được loại khỏi nghiệm thu; hai lượt trên
-được chạy lại đầy đủ sau khi khôi phục Docker Desktop. Tải host và OS cache không được
-kiểm soát, nên số đo latency chỉ mô tả các lượt này. Chứng nhận giới hạn ở model/runtime,
-GTX 1650 và subset S1 trên; chưa chứng nhận Blackwell, toàn dataset hoặc SLA.
-Quality sau thay đổi đóng gói: **285 tests**, lint/format và lockfile đạt.
-Tar build context và thư mục stage CUDA có thể dọn sau khi build; giữ image, model,
-wheel và manifest nhỏ để chạy/rebuild offline.
+Bằng chứng CPU/CUDA ngày 03/11 giữ riêng tại
+[Docker report lịch sử](reports/docker_llm_verification.json) và roadmap. Bằng chứng đó
+không nghiệm thu source hiện tại hoặc Blackwell. GTX1650/cu124 local chưa chứng nhận
+CUDA≥12.8, runner BTC hoặc SLA 6 giờ trên phần cứng tham chiếu.
 
 ## M1 ban đầu — inventory snapshot tại mốc xác nhận
 

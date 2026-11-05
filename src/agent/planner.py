@@ -12,7 +12,7 @@ from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError, dumps, loads
 
-PROMPT_VERSION = "planner-v13"
+PROMPT_VERSION = "planner-v14"
 SYSTEM = """Lập QueryPlan JSON theo schema; không trả số đáp án, SQL hoặc code.
 Giữ mọi điều kiện. Ngoài scope/schema: uncertainties=["unsupported_scope_or_operator"].
 Trong scope thì uncertainties=[]; không ghi uncertainty chỉ vì không có raw rows.
@@ -71,6 +71,20 @@ mốc snapshot, identity và đơn vị, không mở coverage cho revenue/order_
 """
 
 
+BUSINESS_SYSTEM = """Lập QueryPlan JSON theo schema. Không trả numeric answer, SQL, code.
+operation là phạm vi đã nhận diện từ câu hỏi; giữ metric/group/limit/time và entity.
+Mỗi time window có một aggregation. entities chỉ chứa entity_key của ứng viên được
+nhắc trong câu, khi cần một sản phẩm. Không chọn gần đúng hoặc gộp mã khác nhau.
+Xếp hạng: group_by=[product] hoặc [customer], limit=top k, output string nếu hỏi
+một đối tượng; list khi top k; table khi hỏi khách kèm số nợ. Không tính tên/đáp án.
+Số tổng/quantity/kho/nợ/thu nợ/nhập: output number. Mọi filters=[];
+derived_measures=[]. Boolean trend dùng 3 windows và 3 revenue aggregates theo
+thứ tự tháng, output boolean và result_refs đúng thứ tự. Executor tính so sánh.
+Trong scope thì uncertainties=[]; ngoài scope hoặc entity mơ hồ thì ghi uncertainty.
+Thiếu source/coverage không tự đoán dữ liệu; server preflight quyết định.
+"""
+
+
 class LocalPlanner:
     name = "local-planner"
     is_mock = False
@@ -99,10 +113,18 @@ class LocalPlanner:
         schema = generation_schema(
             question,
             stock=stock,
-            entity_codes=[e["product_code"] for e in selected["inventory_entities"]],
+            entity_codes=[e["product_code"] for e in selected.get("inventory_entities", [])],
+            candidates=selected.get("entity_candidates", []),
         )
         messages = [
-            {"role": "system", "content": STOCK_SYSTEM if stock else SYSTEM},
+            {
+                "role": "system",
+                "content": STOCK_SYSTEM
+                if stock
+                else BUSINESS_SYSTEM
+                if "operation" in selected
+                else SYSTEM,
+            },
             {"role": "user", "content": dumps(selected)},
         ]
         attempts = []

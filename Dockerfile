@@ -6,6 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATAMATE_CONTAINER=1
 WORKDIR /app
 COPY src/ /app/src/
 COPY --chmod=0555 predict.sh /app/
+COPY docs/model-license.txt /opt/model/LICENSE
 USER 65532:65532
 ENTRYPOINT ["/app/predict.sh"]
 
@@ -29,6 +30,11 @@ COPY llm/python/ /usr/local/lib/python3.11/site-packages/
 COPY llm/lib/ /opt/llm/lib/
 COPY llm/licenses/ /opt/llm/licenses/
 USER 65532:65532
+CMD ["--data-dir", "/data", "--output-dir", "/result", "--model", "/opt/model/model.gguf", "--gpu-layers", "-1"]
+
+# Refresh source over a locally verified model/runtime image without copying weights again.
+# BASE_IMAGE must be a packaged CUDA LLM image when building this target.
+FROM source AS baseline
 CMD ["--data-dir", "/data", "--output-dir", "/result", "--model", "/opt/model/model.gguf", "--gpu-layers", "-1"]
 
 # Preserve the lightweight default target used by source-only verification.

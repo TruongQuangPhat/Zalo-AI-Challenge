@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, replace
 
 from src.semantics.rulebook import RuleProfile, SemanticError
 
-VERSION = "metric-contracts-v4"
+VERSION = "metric-contracts-v5"
 METRICS = (
     "revenue",
     "order_count",
@@ -14,7 +14,89 @@ METRICS = (
     "cancelled_order_count",
     "placed_order_count",
     "calendar_day_count",
+    "quantity",
+    "gross_profit",
+    "receivable",
+    "receivable_customer_count",
+    "debt_collection",
+    "purchase_amount",
+    "stock_balance",
+    "lot_expiry",
 )
+
+
+BUSINESS_METRICS = {
+    "lot_expiry": (
+        {
+            "lots": ["lot_id", "product_key", "purchase_id", "expiry", "received_quantity"],
+            "lot_allocations": [
+                "order_key",
+                "line_key",
+                "lot_id",
+                "quantity",
+                "returned_quantity",
+                "returned_at",
+            ],
+        },
+        ["lot_expiry"],
+        "snapshot_at",
+        "date",
+    ),
+    "quantity": (
+        {"line_items": ["line_key", "product_key", "base_quantity"]},
+        ["quantity_ranking"],
+        "ordered_at",
+        "source_base_unit",
+    ),
+    "gross_profit": (
+        {
+            "line_items": ["line_key", "sold_quantity", "unit_cost"],
+            "order_lines": ["net_amount", "row_role"],
+        },
+        ["gross_profit"],
+        "ordered_at",
+        "VND",
+    ),
+    "receivable": (
+        {
+            "order_parties": ["order_key", "customer_key", "payable", "payment_method"],
+            "payments": ["order_key", "paid_at", "amount"],
+        },
+        ["debt_status", "debt_balance", "debt_cod", "debt_customer"],
+        "ordered_at",
+        "VND",
+    ),
+    "receivable_customer_count": (
+        {
+            "order_parties": ["order_key", "customer_key", "payable", "payment_method"],
+            "payments": ["order_key", "paid_at", "amount"],
+        },
+        ["debt_status", "debt_balance", "debt_cod", "debt_customer", "customer_identity"],
+        "ordered_at",
+        "customer",
+    ),
+    "debt_collection": (
+        {
+            "order_parties": ["order_key", "payment_method"],
+            "payments": ["order_key", "paid_at", "amount"],
+        },
+        ["debt_collection"],
+        "paid_at",
+        "VND",
+    ),
+    "purchase_amount": (
+        {"purchases": ["purchase_key", "purchased_at", "status", "amount"]},
+        ["purchase_amount"],
+        "purchased_at",
+        "VND",
+    ),
+    "stock_balance": (
+        {"stock_balances": ["product_key", "occurred_at", "balance"]},
+        [],
+        "occurred_at",
+        "source_base_unit",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -50,6 +132,75 @@ def metric_contract(
     """A contract authorizes no output until requirements/execution are verified."""
     if metric_id not in METRICS:
         raise SemanticError("metric_unsupported", f"metric is not implemented: {metric_id}")
+    if metric_id in BUSINESS_METRICS:
+        base = metric_contract(
+            rules, "revenue" if metric_id == "gross_profit" else "order_count", shape=shape
+        )
+        fields, refs, axis, unit = BUSINESS_METRICS[metric_id]
+        if metric_id not in {"purchase_amount", "stock_balance"}:
+            fields = {
+                "orders": ["order_key", "ordered_at", "status", "mapping_status"],
+                **fields,
+            }
+        if unit == "VND":
+            rules.require("rounding")
+            refs = [*refs, "rounding"]
+        for ref in refs:
+            rules.require(ref)
+        grain = {
+            "quantity": "order_line",
+            "gross_profit": "order_line",
+            "receivable": "order",
+            "receivable_customer_count": "customer",
+            "debt_collection": "payment",
+            "purchase_amount": "purchase_header",
+            "stock_balance": "product_balance",
+            "lot_expiry": "lot_snapshot",
+        }[metric_id]
+        return replace(
+            base,
+            metric_id=metric_id,
+            required_fields=fields,
+            rule_refs=list(dict.fromkeys(base.rule_refs + refs)),
+            time_axis=axis,
+            unit=unit,
+            input_grain=grain,
+            count_unit="customer" if metric_id == "receivable_customer_count" else None,
+            formula=metric_id,
+            status_policy=["completed", "shipping", "returned"]
+            if metric_id in {"receivable", "receivable_customer_count", "debt_collection"}
+            else ["received"]
+            if metric_id == "purchase_amount"
+            else []
+            if metric_id in {"stock_balance", "lot_expiry"}
+            else base.status_policy,
+            row_roles=["sale_item"] if metric_id in {"quantity", "gross_profit"} else [grain],
+            price_basis="line_cost_per_selling_unit"
+            if metric_id == "gross_profit"
+            else "order_payable"
+            if metric_id == "receivable"
+            else "explicit_purchase_header_total"
+            if metric_id == "purchase_amount"
+            else "payment_amount"
+            if metric_id == "debt_collection"
+            else None,
+            history_requirement="all_prior_orders_and_payments_through_cutoff"
+            if metric_id in {"receivable", "receivable_customer_count"}
+            else "payment_window_of_all_debt_orders_after_purchase_day"
+            if metric_id == "debt_collection"
+            else "declared_export_end_with_checked_allocations_and_dated_returns"
+            if metric_id == "lot_expiry"
+            else "last_recorded_balance_or_exact_declared_snapshot"
+            if metric_id == "stock_balance"
+            else "fully_read_metric_export",
+            rounding={
+                "decimal_places": rules.require("rounding").parameters["money_places"],
+                "mode": "nearest",
+                "unspecified_tie": "abstain",
+            }
+            if unit == "VND"
+            else {"mode": "exact_source"},
+        )
     if metric_id in {"cancelled_order_count", "placed_order_count", "calendar_day_count"}:
         base = metric_contract(rules, "order_count", shape=shape)
         refs = list(base.rule_refs)

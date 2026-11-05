@@ -6,20 +6,41 @@ from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.answerability import prepare_semantics
 
-VERSION = "planner-context-v9"
+VERSION = "planner-context-v10"
 
 
 def build_context(question: Question, context: BusinessContext) -> dict:
     if len(question.question) > 4096:
         raise ContractError("question exceeds planner context budget")
     semantics = context.semantics or prepare_semantics(context)
+    from src.agent.entities import business_spec, entity_candidates
+    from src.semantics.metric_registry import BUSINESS_METRICS
+
+    spec = business_spec(question)
+    if spec and not (semantics.get("snapshot") and spec["metric"] == "stock_balance"):
+        return {
+            "version": VERSION,
+            "authority": {
+                "split": context.catalog["split"],
+                "business_id": context.catalog["business_id"],
+                "rulebook_hash": context.rules.sha256,
+            },
+            "operation": spec,
+            "metric": semantics["metrics"].get(spec["metric"]),
+            "entity_candidates": entity_candidates(context, question.question),
+            "as_of_date": question.as_of_date,
+            "question": question.question,
+        }
     metrics = {
         key: entry
         for key, entry in semantics["metrics"].items()
-        if entry["status"] != "resolved"
-        or all(
-            set(columns) <= set(semantics["facts_schema"].get(table, []))
-            for table, columns in entry["contract"]["required_fields"].items()
+        if key not in BUSINESS_METRICS
+        and (
+            entry["status"] != "resolved"
+            or all(
+                set(columns) <= set(semantics["facts_schema"].get(table, []))
+                for table, columns in entry["contract"]["required_fields"].items()
+            )
         )
     }
     fields = {}

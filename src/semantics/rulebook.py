@@ -15,8 +15,9 @@ from typing import Any
 
 from src.data.profiling import normalized
 from src.jsonio import ContractError
+from src.semantics.business_rules import CLAUSES
 
-VERSION = "runtime-rules-v7"
+VERSION = "runtime-rules-v8"
 
 
 class SemanticError(ContractError):
@@ -93,6 +94,8 @@ LABELS = {
     "average_order_value": "gia tri trung binh mot don",
 }
 
+LABELS.update({key: label for key, (label, _) in CLAUSES.items() if not label.startswith("-")})
+
 # Deliberately small wording variants for the same finite clauses. The value
 # still has to match a supported meaning in full, including qualifications.
 LABEL_ALIASES = {
@@ -135,6 +138,8 @@ def _unhandled_qualifications(text: str, section: str) -> set[str]:
 
 def _decode(rule_id: str, value: str) -> tuple[str, dict] | None:
     """Finite supported meanings. Full matches reject unhandled qualifications."""
+    if rule_id in CLAUSES:
+        return (rule_id, {}) if value == CLAUSES[rule_id][1] else None
     patterns = {
         "shift": (
             r"theo gio tao don: ca sang 06:00[–-]13:59, ca chieu 14:00[–-]21:59\. "
@@ -369,6 +374,9 @@ def parse_rulebook(
                 add("coverage", cleaned[2:], number, raw)
             if cleaned.startswith("- khong co du lieu khac voi bang 0"):
                 add("outside_coverage", cleaned[2:], number, raw)
+            for rule_id, (label, _) in CLAUSES.items():
+                if label.startswith("-") and cleaned.startswith(label):
+                    add(rule_id, cleaned[len(label) :].strip(), number, raw)
             if cleaned.startswith("- lam tron:"):
                 add("rounding", cleaned[2:], number, raw)
             if "cau hoi nhieu so " in cleaned:
@@ -380,7 +388,7 @@ def parse_rulebook(
                 add(rule_id, "unhandled qualification: " + plain(raw), number, raw)
     rules = {}
     for rule_id in [
-        *LABELS,
+        *dict.fromkeys([*LABELS, *CLAUSES]),
         "recorded_status",
         "coverage",
         "outside_coverage",
@@ -389,6 +397,8 @@ def parse_rulebook(
         "ordered_results",
     ]:
         entries = candidates.get(rule_id, [])
+        if rule_id in CLAUSES and not entries:
+            continue
         specific = [entry for entry in entries if entry[0] == plain(industry or "")]
         unknown_scope = industry is None and any(entry[0] is not None for entry in entries)
         selected = specific or [entry for entry in entries if entry[0] is None]
@@ -411,5 +421,11 @@ def parse_rulebook(
             reason,
         )
     return RuleProfile(
-        split, digest, hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), industry, rules
+        split,
+        digest,
+        hashlib.sha256(
+            Path(__file__).read_bytes() + Path(__file__).with_name("business_rules.py").read_bytes()
+        ).hexdigest(),
+        industry,
+        rules,
     )

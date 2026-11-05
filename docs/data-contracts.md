@@ -162,8 +162,10 @@ tái tạo output bằng `--reviews`; metadata này không thuộc runtime infer
 `connect()` mở database read-only/query-only; `iter_records()` chỉ đọc bảng facts/audit đã cho phép.
 
 SQLite STRICT dùng một file `facts.sqlite`, không thêm dependency. Schema version là
-`prepared-facts-v5`; dependencies/quality summary nằm trong bảng `metadata`. Money là TEXT
+`prepared-facts-v6`; dependencies/quality summary nằm trong bảng `metadata`. Money là TEXT
 Decimal chính xác, qua API trả Decimal; không dùng SUM/AVG/CAST REAL cho tiền trong SQL.
+Các bảng mở rộng bên dưới giữ numeric TEXT khi đọc records; executor chuyển trực tiếp
+từ TEXT sang Decimal. Không chuyển qua float.
 `orders` giữ raw ID/namespace key, ordered_at, canonical status, mapping_status.
 `order_lines` giữ key riêng, order FK, net_amount nullable khi lỗi có issue, row_role,
 source_values trước parse (sau phục hồi header), event_at cho return đã có nguồn ngày.
@@ -246,3 +248,59 @@ Preflight giữ checks namespace/revision/quality, rồi snapshot date/entity/un
 read-only đúng một row và giữ exact quantity, không tiền-rounding. Other dates, unit conversion,
 JOIN/history/cost/lots/quantity ranking chưa có. Tests tại `tests/test_stock_snapshot.py`;
 M1 chỉ chứng nhận wiring train-dev đã ghi trong roadmap/report, không toàn bộ capability.
+
+## Phần mở rộng S3/S4 trong cùng prepared store
+
+Đây là các bảng phụ thuộc vào mapping/authority đã nhận diện. Sự có mặt của bảng
+trong schema không cấp quyền trả lời: `summary.extensions.issues`, required fields,
+preflight và dữ liệu của các bản ghi liên quan vẫn phải qua gate. Lỗi payment/cost
+không tự chặn revenue/count S1. Kết quả nghiệm thu đọc theo evaluation trong
+[JSON chung](../reports/stage_results.json), không suy từ trạng thái preparation `ready`.
+
+| Facts | Grain và ràng buộc chính |
+|---|---|
+| `entities` | `entity_key` gồm split/business/kind và source code hoặc tên chuẩn hóa giữ dấu; giữ `source_code`, tên, aliases, base unit, source ref. Hai mã khác nhau giữ hai entity dù cùng tên. |
+| `order_parties` | Một hàng/đơn, FK tới orders và customer; payable và payment method riêng với line revenue. Named walk-in trong shop có mã khách vẫn không được đếm/xếp hạng như một khách. |
+| `line_items` | Một hàng/line key đã qua dedup/lineage; product FK, base quantity, selling quantity và cost cho một selling unit tách riêng. Lỗi lượng bán/cost không làm mất base quantity hợp lệ. |
+| `payments` | Một hàng/payment key, order FK, ngày thu, số tiền của lần thu. Không JOIN bảng này vào SUM doanh thu. Orphan, duplicate key, amount/date lỗi chặn payment metrics. |
+| `purchases` | Một hàng/purchase header key, ngày phiếu, status và tổng tiền phiếu. Không cộng header lần nữa theo số dòng nhập; nhận cả phiếu nhập đầu kỳ hợp lệ. |
+| `stock_balances` | Một hàng/event balance hoặc một hàng/product ở declared snapshot. Balance là trạng thái sau event, không phải movement để SUM. |
+| `lots` | Lot ID duy nhất, product FK, purchase FK, expiry và lượng nhập cơ bản. Không suy giá vốn bình quân/FIFO từ bảng này. |
+| `lot_allocations` | Khóa order–line–lot, lượng bán/đã trả cơ bản, ngày trả có evidence. Product phải khớp line/lot; tổng phân bổ khớp quantity của các dòng không huỷ có lô. |
+
+Name matching cho truy vấn S3 dùng source code hoặc alias có trong nguồn, chuẩn hóa
+hoa/thường, khoảng trắng và dấu câu, giữ dấu tiếng Việt. Nhiều ứng viên giữ ambiguity;
+query không rõ entity không được biến thành tổng shop. Quyết định name join mất dấu
+của S1/S2 tiếp tục giữ phạm vi cũ, không trở thành fuzzy query resolution.
+
+Ranking quantity lấy `base_quantity`, bỏ fee/adjustment và đơn huỷ/trả theo rulebook.
+Customer ranking/count áp rule source-code identity; whole-shop debt vẫn có walk-ins.
+Top-k giảm theo metric, bằng nhau theo source code tăng dần, thiếu mã theo tên nguồn;
+không dedup hai tên bằng nhau nếu chúng thuộc hai mã. Scalar series S2 và boolean
+trend giữ thứ tự câu hỏi, dùng tổng chính xác trước rounding để so sánh.
+
+Receivable giảm payments tới cutoff theo từng đơn, cộng phần dương, giữ đơn trả hàng,
+loại đơn huỷ/COD và kênh marketplace đã nhận diện. Collection dùng ngày payment,
+chỉ debt orders không huỷ, sau ngày mua; giữ đơn kỳ trước/đơn trả, không trừ refunds.
+Payment methods/kênh ngoài vocabulary đã kiểm chứng giữ unsupported. Payment XLSX chỉ nhận serial theo workbook epoch có evidence và các format hiển thị whole-second đã hỗ trợ; metadata giữ basis/warning, không tự suy clock cho ô ngày thường. Gross-profit
+ranking dùng `line_net_amount - selling_quantity * line_unit_cost`; phí phục vụ vẫn
+thuộc whole-shop revenue, không thành product trong ranking.
+
+Stock event lookup lấy balance cuối theo timestamp tới cutoff; timestamp bằng nhau
+mà balance khác nhau giữ ambiguity. CSV snapshot cần README chỉ rõ cuối ngày kết thúc,
+base units và product keys kiểm tra được; snapshot chỉ dùng đúng ngày đó. Nearest-lot
+lookup chỉ bật tại declared export end, còn tồn và chưa quá hạn; allocations/returns
+phải đối soát được. Không chứng nhận generic movement/history, đổi đơn vị lớn, giá trị
+kho/lô, FIFO, weighted purchase price hoặc net-profit/expense workflow.
+
+Planner v14/context v10 và QueryPlan v13 mở rộng cùng grammar hiện có bằng grouped
+aggregations/limit và các metric trên; scalar decoder cũ không nhận nhầm business
+operators. Server giữ identity, rule refs, unit/status/axis và required fields; LLM
+không được xuất số đáp án, SQL hay code. Metric contracts v5 và semantics v6 đọc cùng
+rulebook parser v8; parser hash tính cả finite business-rule clauses. Mỗi row/fact còn
+source ref; cache checksum và toàn bộ normalizer dependencies vẫn được kiểm tra.
+
+Phạm vi time coverage cho metrics mới còn bảo thủ: ngoài purchase dùng extent riêng,
+một số preflight payment/balance vẫn phụ thuộc span sales của export. Chưa chứng nhận
+payment-only/stock-only packages hoặc các kỳ tách khỏi span đó. Không dùng kết quả trên
+subset hiện tại để tuyên bố đã tái lập đầy đủ lịch sử kho/công nợ trên mọi nguồn.

@@ -66,6 +66,18 @@ def test_llm_bundle_copies_only_explicit_runtime_model_and_licenses(tmp_path, mo
         build_context(root, target, model=link)
 
 
+def test_source_refresh_includes_model_license_without_other_documents(tmp_path):
+    root = source_tree(tmp_path)
+    (root / "docs").mkdir()
+    (root / "docs/model-license.txt").write_text("fixture model license")
+    (root / "docs/private-notes.md").write_text("must not be packaged")
+    output = tmp_path / "licensed.tar"
+    build_context(root, output)
+    with tarfile.open(output) as archive:
+        assert archive.extractfile("docs/model-license.txt").read() == b"fixture model license"
+        assert "docs/private-notes.md" not in archive.getnames()
+
+
 @pytest.mark.parametrize("damage", [None, "record", "version", "escape"])
 def test_runtime_bundle_checks_lock_record_and_path_boundary(tmp_path, monkeypatch, damage):
     root = source_tree(tmp_path)

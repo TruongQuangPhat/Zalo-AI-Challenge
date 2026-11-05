@@ -3,13 +3,81 @@
 
 > **Dự án:** Zalo AI Challenge 2026 — *DataMate: Talking To Your Data Through Agentic AI*  
 > **Ngày lập:** 01/11/2026  
-> **Lần rà soát:** 04/11/2026 — 411 tests; scoped S1/S2 baseline đã kiểm chứng bằng replay, hai fresh CUDA batches và CPU smoke; xem kết quả/giới hạn bên dưới.
+> **Lần rà soát:** 05/11/2026 — source S3–S5 đạt 446 tests; S6 đang chạy nghiệm thu CUDA/CPU/Docker trên tập khóa. Số liệu S1/S2 ngày 04/11 bên dưới giữ đúng revision lịch sử.
 > **Mục tiêu:** Xây dựng **một baseline chạy được từ đầu đến cuối**, tự động trả lời câu hỏi tiếng Việt trên CSV/XLSX/SQLite, hoạt động hoàn toàn offline, có thể đánh giá bằng đáp án train và đóng gói Docker để nộp thi.  
 > **Phạm vi:** Tập trung vào một giải pháp **đúng quy định, tổng quát hóa được, có thể tái lập và đo lường được**. Các kỹ thuật tối ưu PA nâng cao, fine-tuning, ensemble hay multi-agent **để sau khi baseline hoàn chỉnh**.  
-> **Trạng thái:** `S1_S2_SCOPED_BASELINE_VERIFIED` — đã chốt baseline S1/S2 trong scope nguồn/câu hỏi hữu hạn; chưa toàn bộ baseline S0–S5 hay mọi schema/paraphrase. [JSON kết quả](reports/stage_results.json) dùng chung cấu trúc cho S1–S6; evidence kỹ thuật chi tiết giữ local trong `.artifacts/s1-s2-full/verification-evidence.json`, section `s1_s2_final_baseline`. Các checkpoint khác giữ đúng revision lịch sử.
+> **Trạng thái:** `S3_S6_ACCEPTANCE_PENDING_COLAB` — S1/S2 có baseline lịch sử đã kiểm chứng; code S3–S5 đã nối execution và đạt tests, đang nghiệm thu source cuối. Chưa đóng baseline hoặc tuyên bố submission-ready. [JSON kết quả](reports/stage_results.json) dùng chung cấu trúc cho S1–S6; evidence kỹ thuật chi tiết giữ local trong `.artifacts/s1-s2-full/verification-evidence.json`, section `s1_s2_final_baseline`. Các checkpoint khác giữ đúng revision lịch sử.
 > **Thiết lập hiện có (theo xác nhận của người thực hiện):** dự án đang có thư mục `dataset/` và đã đưa `dataset/` vào `.gitignore`; **không tạo lại bước gitignore dataset**. Mã nguồn dùng trực tiếp `src/`, **không có lớp thư mục `src/datamate/`**. Cần kiểm tra trạng thái Git thực tế trước khi kết luận dữ liệu chưa từng được track.
 
 **Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu lại sau cleanup; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
+
+---
+
+## Cập nhật S3–S6 ngày 05/11/2026 — nghiệm thu đang chạy
+
+
+### Phương án Colab được yêu cầu bổ sung
+
+Lượt local full train đã dừng có kiểm soát ở **9/3.000**, source/input không đổi,
+chưa chấm gold, không là kết quả nghiệm thu. Ổ C chỉ còn 78 MiB khi dừng; Docker
+stop hết timeout nên exit 137, không bị OOM. Evidence `.artifacts/s3-s6/local-interruption.json`.
+Chưa dọn image cũ. Người dùng đã cho phép commit/push source và notebook lên `main`.
+
+Notebook `scripts/DataMate_Colab.ipynb` và tool `scripts.colab_pipeline` thực hiện clone
+repo private → Python 3.11/uv.lock → tải GGUF/wheel CUDA có SHA khóa → quality gates →
+load/offload thật → inference đủ 3.000 → evaluator → JSON chung/evidence Drive. Không
+có API inference. Giữ nguyên app/QueryPlan/model và nghiệp vụ S1–S5; S6 là kiểm chứng.
+
+Theo quyết định người dùng mới trong phiên này, **chấm toàn bộ 3.000 train**, gồm cả
+1.224 câu trước đây giữ lại, sau khi inference hoàn tất. Không thay membership config;
+không dùng feedback mới để tuning rồi gọi là đánh giá độc lập. Buckets S1–S5 của lượt
+Colab dùng lexical proposals hiện có, khóa trước gold; S6 rollup không cộng thêm mẫu.
+Các yêu cầu dev-only/unscored trong handoff cũ là lịch sử trước quyết định này.
+
+Checkpoint theo chunk có source/model/input/config identity; cache/SQLite ở `/content`.
+Chỉ dọn bản sao facts khi byte-matching canonical cache; không nhân bản DB qua mọi chunk.
+Quality của app source đã đạt 446 tests trước bổ sung notebook. Sau bổ sung orchestration,
+**463 tests passed trong 346,85 giây** (17 tests mới), Ruff lint/format 67 files, uv lock
+check offline và whitespace đạt. Notebook có 8 code cells parse được bằng Python 3.11;
+askpass private clone được kiểm bằng credential synthetic, không nhúng token. Chưa thực thi
+trên hosted Colab, chưa chấm gold train thật. Người dùng đã cho phép xuất bản đầy đủ
+source S3–S5 và Colab tool lên `main` để notebook clone đúng bản đã kiểm tra. Không tuyên
+bố S6/freeze, Docker/Blackwell/SLA đã đạt từ source/notebook.
+
+
+S6 được bổ sung theo quy ước người dùng: nghiệm thu/freeze tổng thể, không mở nghiệp vụ.
+Source hiện tại giữ một entrypoint, một QueryPlan và một local model. Extension facts v6
+có source-keyed entities, order parties, line quantities/cost, payments, purchase headers,
+stock balances, lots và allocations; các family optional thất bại độc lập. QueryPlan v13,
+rulebook parser v8 và metric contracts v5 nối trực tiếp planner/preflight/executor hiện có.
+
+- S3: ranking product/base quantity, customer revenue; scalar quantity theo entity có
+  candidates và base unit tường minh; string/list có order và code tie-break. Customer
+  order-count ranking có behavioral test và một native đã khóa, đang chờ nghiệm thu.
+- S4: debt balance/count/table và debt collection; purchase header totals; product gross
+  profit theo sold-unit line cost; latest event balance/declared snapshot; nearest nonexpired
+  remaining lot tại export end. Mọi phần chỉ bật với schema và authority tương ứng.
+- Chưa hỗ trợ: fuzzy identity, staff/domain, tuổi nợ/no-thêm, supplier average prices,
+  generic stock movement/history/valuation/FIFO, unit conversion tùy ý, generic lot list/count.
+  Non-sales preflight còn bảo thủ theo sales span ở một số metric; chưa chứng nhận các
+  nguồn payment/stock độc lập ngoài span đó. Không tuyên bố cả nhóm S4 đã hoàn chỉnh.
+- Quality source cuối: **446 passed**, Ruff lint/format, lock offline đạt. Lượt tích hợp
+  CUDA trước các sửa an toàn cuối: **13 fixture có gold đúng và 4 behavior checks đạt**;
+  đây không phải native hay acceptance source cuối.
+- Khóa **262 unique cases: 224 native +31 synthetic có gold +6 diagnostic +1 scenario**.
+  Trong đó 50 native mới: S3=14, S4=33, S5=3, đã chọn trước khi đọc gold mới. Hai lượt
+  CUDA độc lập, CPU smoke ba native và default-CMD Docker ba fixture đang được thực hiện
+  tuần tự; chỉ evaluator host đọc gold sau khi toàn bộ inference thoát.
+- Không thay split, không mở nhãn holdout, không sửa draft/refs/filter/window/output để pass;
+  không cộng repetitions/fixtures/S6 rollup vào mẫu số native. Lịch sử 153/13/8 trước fix và
+  replay 166/0/8 của S1/S2 phải giữ nguyên trong JSON chung.
+
+Chưa đóng baseline trong lúc các gate nghiệm thu còn chạy. Evidence kỹ thuật giữ tại
+`.artifacts/s3-s6/`, kết quả từng câu sẽ thêm vào [JSON chung](reports/stage_results.json).
+Lệnh tái chạy ở [README](README.md#tái-chạy-baseline-local-s3s6). Một image production `datamate-baseline:local` chứa source/model/license/runtime đã khớp checksum;
+source refresh offline từ chính image đã được kiểm tra. Full train 3.000 câu đang được ưu tiên
+trước hai lượt core 262; chỉ chấm dev 1.776, giữ 1.224 holdout unscored. Runtime cu124/GTX1650 chưa chứng nhận Blackwell/CUDA≥12.8 và
+chưa có tài liệu base image/runner riêng của BTC. Các giới hạn quy định đã xác minh ở mục 2.1.
 
 ---
 
@@ -56,14 +124,14 @@ Không coi mọi con số của bản roadmap trước là quy định đã đư
 |---|---|---|
 | Ngữ nghĩa và chấm đáp án | Rulebook đúng split, README của shop, calendar; điểm đúng +1, sai −1, abstain 0 | Đã đối chiếu các file phát hành cục bộ; đọc lại tại runtime, không mặc định hai split cùng luật. Công thức PA chuẩn hóa nội bộ được nêu ở mục 3 / Phase 8. |
 | Lịch thi | Nộp giải pháp 16/11 lúc 23:59 GMT+7; private phát hành 20/11 lúc 09:00; nộp kết quả 23/11 lúc 23:59 | Đã đối chiếu timeline trên trang BTC; đối chiếu lại hướng dẫn nộp thực tế. |
-| Offline và input bất biến | Không network/API lúc inference, không tải weights/package khi chạy; input chỉ đọc | Ràng buộc thiết kế của baseline. Đối chiếu quy định kỹ thuật trước final image. |
-| Model eligibility | Bản trước dùng mốc weights công khai **trước 01/10/2026**; license phải phù hợp | **Cần đối chiếu** mốc và cách tính với tài liệu BTC; ghi nguồn, phiên bản, release date, license của từng model trước khi lựa chọn cho bài nộp. |
-| Parameter budget | Bản trước dùng tổng **≤ 15B**, gồm model phụ và toàn bộ MoE, không phụ thuộc quantization | **Cần đối chiếu** giá trị và cách tính. Giữ như giới hạn làm việc tạm thời, chưa coi là thông số BTC đã xác nhận. |
-| Hardware / runtime | Bản trước nêu **2 × RTX 5090 32 GB**, RAM 512 GB, CUDA ≥ 12.8 | **Cần đối chiếu** GPU/RAM, driver, base image và runtime chính thức; không suy ra cấu hình máy phát triển từ cấu hình này. |
-| Time budget | Lập kế hoạch theo **6 giờ wall-clock**, tính cả model loading và data preparation | **Cần đối chiếu** thời lượng, điểm bắt đầu/kết thúc và cơ chế timeout; cấu hình được, có headroom và benchmark cold start. |
-| Entrypoint / mounts | Thiết kế dự kiến: `predict.sh`, `/data` read-only, `/result/submission.jsonl`, `/result/logs/` | **Cần đối chiếu** hợp đồng Docker; dùng adapter/config đường dẫn nếu BTC yêu cầu khác. |
-| Submission quota | Bản trước nêu **5 lượt public/ngày**, tối đa **2 lần nộp Docker** | **Cần đối chiếu** hạn mức và cách chọn bản xét; không tự động nộp khi chưa biết hợp đồng. |
-| Reproducibility | Bản trước nêu chênh PA upload/re-run **≤ 0,03** | **Cần đối chiếu** ngưỡng và cách so. Baseline vẫn phải lưu seed/config/hash, stable ordering và đo độ lặp lại. |
+| Offline và input bất biến | Không network/API lúc inference, không tải weights/package khi chạy; input chỉ đọc | Đã đối chiếu public Rule BTC ngày 04/11/2026; Docker local kiểm tra network none, input/root read-only. |
+| Model eligibility | Weights công khai **trước 26/10/2026**, license phù hợp | Public Rule BTC đã đối chiếu 04/11/2026, thay mốc 01/10 cũ. Qwen2.5-1.5B-Instruct GGUF dùng revision 2024, SHA LFS khớp file local, Apache-2.0; evidence `.artifacts/s3-s6/model-upstream.json`. |
+| Parameter budget | Tổng **≤ 15B**, gồm model phụ và toàn bộ MoE, không phụ thuộc quantization | Đã đối chiếu public Rule BTC 04/11/2026; baseline chỉ một Qwen2.5-1.5B. |
+| Hardware / runtime | **2 × RTX 5090 32 GB**, RAM 512 GB; Blackwell cần CUDA ≥ 12.8 | Đã đối chiếu public Rule BTC; local GTX1650/cu124 chưa chứng nhận Blackwell. Chưa có tài liệu base image/runner riêng. |
+| Time budget | **6 giờ wall-clock**, gồm model loading và preparation | Đã đối chiếu public Rule BTC; đo local báo riêng cold/warm, không suy SLA BTC từ smoke hoặc batch dev. |
+| Entrypoint / mounts | Input `/data` read-only, output `/result/submission.jsonl` | Public Rule BTC đã đối chiếu; `predict.sh` và default CMD baseline dùng hai mount này. Hợp đồng runner/base image riêng vẫn chưa có. |
+| Submission quota | **5 lượt public/ngày**, tối đa **2 lần nộp giải pháp Docker**, chỉ xét lần cuối | Đã đối chiếu public guidance và nội dung người dùng cung cấp; không tự nộp. |
+| Reproducibility | Chênh PA tuyệt đối upload/re-run **≤ 0,03** | Đã đối chiếu public Rule BTC; các lượt local lưu seed/config/hash và báo độ lặp lại riêng. |
 | Dữ liệu và can thiệp | Không hard-code đáp án/ID, không sửa output thủ công; phát triển bằng train và synthetic hợp lệ, không train bằng public/private test | Chính sách phát triển của dự án; đối chiếu thêm quyền dùng dữ liệu ngoài và quy định test của BTC. Đọc README/rulebook/dữ liệu test tại runtime là đầu vào inference, không phải bước học/cập nhật weights. |
 
 **Gate:** Phase 0 ghi rõ nguồn còn thiếu và triển khai các phần độc lập với chúng. Chưa xác minh cấu hình không chặn viết parser/evaluator hoặc Docker stub cấu hình được; nhưng phải giải quyết trước quyết định model/image không dễ đổi và trước nộp bài. Không biến trạng thái `cần đối chiếu` thành `đã đạt` chỉ vì smoke test chạy trên máy local.
@@ -827,7 +895,8 @@ Nếu làm lần lượt toàn bộ EDA → toàn bộ ETL → toàn bộ semant
 | **S2 — Temporal & comparisons** | Tuần/tháng/N ngày, tăng trưởng, tỉ trọng, trung bình, `percent` | Query plan có thời gian và phép so sánh; tăng coverage. |
 | **S3 — Ranking & entities** | Product/customer identity, đơn vị cơ bản, top-k, `string`, `list` | Trả đúng tên, thứ tự và tie-break. |
 | **S4 — Multi-table business metrics** | Thanh toán/công nợ, nhập/kho, giá vốn, lô thuốc/hạn dùng (khi có dữ liệu) | Thử thách JOIN/grain và các chỉ tiêu phức hợp. |
-| **S5 — Robustness & packaging** | Hoàn thiện verifier, bảng/boolean, unfamiliar schema, offline & speed trên nền kiểm tra đã có từ S0–S1 | Baseline v1 sẵn sàng submission; unsupported vẫn có fallback đúng. |
+| **S5 — Robustness & packaging** | Hoàn thiện verifier, bảng/boolean, unfamiliar schema, offline & speed trên nền kiểm tra đã có từ S0–S1 | Nghiệm thu đóng gói trên backend đã đo; submission-ready cần hợp đồng và phần cứng BTC được xác minh riêng. |
+| **S6 — Nghiệm thu tổng thể và freeze** | Regression S1/S2 và acceptance S3–S5 trên source cuối; các lượt LLM độc lập trên tập khóa; CPU smoke, Docker/CUDA, isolation, đủ IDs/types, evaluator sau inference và tài liệu tái chạy | S6 không mở nghiệp vụ mới. Chỉ đóng baseline khi các gate tương ứng đạt; giới hạn backend và blocker nộp thi phải báo riêng. |
 
 Mỗi slice bắt buộc đi qua **ingest → normalize → semantics → plan → execute → verify → output → evaluate**. Chỉ mở rộng khi các acceptance cases liên quan của slice trước đạt hoặc capability bị tắt rõ ràng. Capability/answerability, output validator, log và evaluator xuất hiện từ S0–S1, không đợi S5. Bật output type mới chỉ sau khi serializer và comparator tương ứng đã có fixture. Không bật nghiệp vụ mới chỉ vì reader đã đọc được cột.
 
@@ -1053,9 +1122,17 @@ Mỗi khi kết thúc milestone, cập nhật: `Status`, `Deliverables`, `Valida
 - [Báo cáo EDA](dataset/explore/explore.md), [schema catalog](dataset/explore/schema_catalog.md), [scan summary](dataset/explore/scan_summary.json), [kiểm chứng POS](dataset/explore/sqlite_findings.json): bằng chứng cục bộ; 259 file, 504 bảng, 5.327.618 dòng thô. Profile ngày sơ bộ không phải coverage nghiệp vụ. Các số liệu được kế thừa từ lượt EDA đã chạy, không phải lượt quét toàn bộ mới trong lần sửa roadmap này.
 - [Trang BTC](https://challenge.zalo.ai/) và [portal DataMate](https://challenge.zalo.ai/portal/datamate/): timeline đã đối chiếu; portal động chưa cung cấp nội dung đọc được đầy đủ cho việc xác minh mọi thông số kỹ thuật. Bản roadmap trước nêu các thông số ở mục 2.1 nhưng chưa kèm tài liệu BTC cụ thể cho từng giá trị; vì vậy các mục đó được giữ dưới trạng thái **cần đối chiếu**, không xác nhận lại bằng suy đoán.
 
+**Cập nhật đối chiếu 04/11/2026:** public Rule và Submission Guidance của
+[portal DataMate](https://challenge.zalo.ai/portal/datamate/) đã lấy được qua API công khai.
+Mục 2.1 dùng các giới hạn đã xác minh; evidence nguyên nội dung và thời điểm cập nhật ở
+`.artifacts/s3-s6/competition-rule.json`, `competition-submissionGuidance.json` và
+`competition-verification.json`. Người dùng chỉ có hướng dẫn chung này, chưa có tài liệu
+base image/runner riêng. Qwen GGUF được đối chiếu revision upstream và LFS SHA thực tế;
+license Apache-2.0 đã đóng gói trong image. Không suy chứng nhận Blackwell từ GTX1650.
+
 **Bản ghi quy định dự kiến trong Phase 0:** mỗi mục có `claim`, `value`, `status`, `source_url_or_file`, `section`, `retrieved_at`, `version_or_hash`, `verified_by`, `affected_config`, `open_question`. Khi chưa có nguồn, ghi `unverified`; không tự tạo trích dẫn. Giải quyết trước quyết định phụ thuộc vào thông số đó và trước nộp bài.
 
-**Cần kiểm tra:** hướng dẫn Docker/base image/mounts/quota, model release cutoff và cách tính tham số, giới hạn wall-clock, ngưỡng tái lập, quyền dùng dữ liệu ngoài/test, evaluator chi tiết (list/table/alias), license model và giới hạn máy phát triển. Công thức `PA_full` nội bộ suy ra từ +1/−1/0 chia tổng câu; phải đối chiếu cách BTC hiển thị/chấm khi evaluator chính thức có sẵn.
+**Còn cần kiểm tra trước nộp:** tài liệu Docker/base image/runner riêng, execution trên Blackwell/CUDA≥12.8, full-batch SLA và evaluator chính thức (list/table/alias). Các giới hạn chung đã đối chiếu ở mục 2.1 không tự chứng nhận image local. Công thức `PA_full` nội bộ suy ra từ +1/−1/0 chia tổng câu; phải đối chiếu cách BTC hiển thị/chấm khi evaluator chính thức có sẵn.
 
 **Ngoài phạm vi tài liệu này:** chọn model cụ thể, thiết kế prompt hoàn chỉnh, lựa chọn fine-tuning, mục tiêu PA dự đoán, điều chỉnh theo public/private test và kế hoạch tối ưu hậu baseline. Các quyết định này sẽ được đặt trong **Technical Blueprint** và **Experiment Log** sau khi có baseline và benchmark đầu tiên.
 
@@ -1317,7 +1394,7 @@ Hai phụ lục mới dùng ký hiệu **G–H** vì C–F đã dành cho data/m
 | **Experimental hypotheses** | Dự đoán về tác động tới PA, tổng quát hóa hoặc hiệu năng; chưa có kết quả DataMate để khẳng định. Các thứ tự benchmark và gate dưới đây là đề xuất nghiên cứu. |
 | **Validated decisions** | Chỉ ghi nhận sau thí nghiệm có config/hash, validation hợp lệ và kết quả kiểm chứng. Hiện M0 chứng minh hạ tầng mock local; **chưa có model thắng cuộc, cấu hình quantization hoặc phương pháp training nào được xác nhận**. |
 
-Theo yêu cầu mở rộng này, dùng các **ràng buộc lập kế hoạch**: tổng model inference ≤ 15B, tính toàn bộ MoE và model phụ; weights công khai trước 01/10/2026, license phù hợp; hoàn toàn offline; phần cứng tham chiếu 2 × RTX 5090 32 GB, RAM 512 GB; tối đa 6 giờ wall-clock gồm preparation/loading. Trạng thái đối chiếu BTC tại mục 2.1 và Phụ lục B vẫn giữ nguyên: yêu cầu của nhiệm vụ không tự trở thành bằng chứng BTC. Không dùng GTX 1650 local để suy ra throughput, khả năng BF16/FP8 hoặc VRAM trên máy tham chiếu.
+Theo yêu cầu mở rộng này, dùng các **ràng buộc lập kế hoạch**: tổng model inference ≤ 15B, tính toàn bộ MoE và model phụ; weights công khai trước 26/10/2026, license phù hợp; hoàn toàn offline; phần cứng tham chiếu 2 × RTX 5090 32 GB, RAM 512 GB; tối đa 6 giờ wall-clock gồm preparation/loading. Mốc weights và các giới hạn đã được đối chiếu lại public Rule BTC ngày 04/11/2026 tại mục 2.1; hướng dẫn base image/runner riêng vẫn chưa có. Không dùng GTX 1650 local để suy ra throughput, khả năng BF16/FP8 hoặc VRAM trên máy tham chiếu.
 
 **Ngân sách và dữ liệu:** lập inventory mọi checkpoint được dùng trong toàn bộ lượt inference, kể cả planner, embedding, reranker, verifier, router và draft model; không chỉ tính model đang nằm trong VRAM cùng lúc. Tính embeddings, encoder/projector và adapter chưa merge; cách đếm adapter/replica và artifact chuyển đổi phải đối chiếu BTC. Quantization, offload, sequential loading hay ít expert được kích hoạt không làm giảm parameter count. Nhiều replica cùng checkpoint cần xác minh cách BTC tính trước khi chọn; không mặc định được miễn tính bản sao.
 

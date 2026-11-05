@@ -15,7 +15,7 @@ from src.semantics.metric_registry import metric_contract
 from src.semantics.rulebook import plain
 from src.temporal.resolver import TimeWindow, resolve_window
 
-VERSION = "query-plan-v12"
+VERSION = "query-plan-v13"
 
 
 def _object(properties: dict, *, optional: tuple[str, ...] = ()) -> dict:
@@ -75,6 +75,14 @@ PLAN_SCHEMA = _object(
                             "revenue",
                             "order_count",
                             "inventory_on_hand",
+                            "quantity",
+                            "gross_profit",
+                            "receivable",
+                            "receivable_customer_count",
+                            "debt_collection",
+                            "purchase_amount",
+                            "stock_balance",
+                            "lot_expiry",
                             "cancelled_order_count",
                             "placed_order_count",
                             "calendar_day_count",
@@ -86,8 +94,9 @@ PLAN_SCHEMA = _object(
                     "filters": _array(TEXT),
                     "group_by": _array(TEXT),
                     "unit": TEXT,
+                    "limit": INTEGER,
                 },
-                optional=("unit",),
+                optional=("unit", "limit"),
             ),
             minimum=1,
             maximum=3,
@@ -114,7 +123,18 @@ PLAN_SCHEMA = _object(
         ),
         "output": _object(
             {
-                "expected_type": {"enum": ["number", "percent", "list", "unsupported"]},
+                "expected_type": {
+                    "enum": [
+                        "number",
+                        "percent",
+                        "string",
+                        "list",
+                        "table",
+                        "boolean",
+                        "date",
+                        "unsupported",
+                    ]
+                },
                 "result_refs": _array(TEXT, minimum=1, maximum=3),
             }
         ),
@@ -627,6 +647,7 @@ def generation_schema(
     *,
     stock: bool = False,
     entity_codes: list[str] | None = None,
+    candidates: list[dict] | None = None,
 ) -> dict:
     """Narrow the same QueryPlan schema for an unambiguous literal relative cue.
 
@@ -634,6 +655,19 @@ def generation_schema(
     expression grammar; the resolver/validator still applies runtime rules/as-of.
     """
     schema = deepcopy(PLAN_SCHEMA)
+    from src.agent.entities import business_schema, business_spec
+
+    spec = None if stock else business_spec(question)
+    if spec:
+        return business_schema(schema, spec, candidates or [])
+    # New grouped/business operators never enter the legacy scalar decoder.
+    from src.semantics.metric_registry import BUSINESS_METRICS
+
+    scalar = schema["properties"]["aggregations"]["items"]["properties"]
+    scalar.pop("limit", None)
+    scalar["metric_id"]["enum"] = [
+        metric for metric in scalar["metric_id"]["enum"] if metric not in BUSINESS_METRICS
+    ]
     multiple = None if stock else _multiple_results(question)
     if multiple:
         return _multiple_schema(schema, multiple)
@@ -732,6 +766,10 @@ def _check_question_scope(
     It does not infer a replacement intent or authorize execution.
     """
     text = plain(question.question)
+    if re.search(
+        r"\b(no|nowj|cong no|gia von|lai gop|lai rong|phieu nhap|han dung|het han)\b", text
+    ):
+        raise ContractError("business_metric_or_scope_unsupported")
     if _metric_cues(question) == {"cancelled_order_count"}:
         text = re.sub(r"\b(?:da huy|bi huy|trang thai huy|don huy)\b", "", text)
     if re.search(r"\b\d{1,2}(?::\d{2}|h)\b", text):
@@ -813,6 +851,21 @@ def validate_query_plan(draft: dict, question: Question, context: BusinessContex
         draft["aggregations"],
         draft["derived_measures"],
     )
+    from src.agent.entities import business_spec, validate_business_plan
+
+    spec = (
+        None
+        if any(a["metric_id"] == "inventory_on_hand" for a in aggregations)
+        else business_spec(question)
+    )
+    if spec:
+        return validate_business_plan(draft, question, context, spec)
+    from src.semantics.metric_registry import BUSINESS_METRICS
+
+    if any(a["metric_id"] in BUSINESS_METRICS for a in aggregations):
+        raise ContractError("question_business_metric_unsupported")
+    if any("limit" in a for a in aggregations):
+        raise ContractError("ranking_limit_unsupported_for_scalar")
     multiple = _multiple_results(question)
     if multiple:
         return _validate_multiple_results(draft, question, context, multiple)
@@ -855,6 +908,7 @@ def validate_query_plan(draft: dict, question: Question, context: BusinessContex
             agg["scope"] != ("product" if stock else "whole_business")
             or agg["filters"] != (shift["filters"] if shift else [])
             or agg["group_by"]
+            or "limit" in agg
         ):
             raise ContractError("only whole-business totals are supported")
     window, agg = windows[0], aggregations[0]
