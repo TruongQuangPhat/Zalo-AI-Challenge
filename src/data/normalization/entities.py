@@ -71,6 +71,10 @@ CREATE TABLE lot_allocations (
  lot_id TEXT NOT NULL REFERENCES lots(lot_id),
  quantity TEXT NOT NULL, returned_quantity TEXT NOT NULL, returned_at TEXT, source_ref TEXT NOT NULL
 ) STRICT;
+CREATE INDEX entities_kind ON entities(kind);
+CREATE INDEX payments_day ON payments(substr(paid_at,1,10));
+CREATE INDEX purchases_day ON purchases(substr(purchased_at,1,10));
+CREATE INDEX lot_allocations_lot ON lot_allocations(lot_id);
 CREATE INDEX line_items_product ON line_items(product_key);
 CREATE INDEX payments_order_date ON payments(order_key,paid_at);
 CREATE INDEX stock_product_date ON stock_balances(product_key,occurred_at);

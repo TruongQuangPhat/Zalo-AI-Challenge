@@ -26,6 +26,10 @@ def main(argv: list[str] | None = None) -> int:
     predict.add_argument("--data-dir", type=Path, required=True)
     predict.add_argument("--output-dir", type=Path, required=True)
     predict.add_argument("--cache-dir", type=Path)
+    predict.add_argument(
+        "--resume-from", type=Path, help="verify immutable prior run; output must be fresh"
+    )
+    predict.add_argument("--resume-tail", choices=["reject", "discard"], default="reject")
     predict.add_argument("--model", type=Path, help="local Qwen2.5 Instruct GGUF; enables planner")
     predict.add_argument("--question-timeout", type=float, default=120)
     predict.add_argument("--model-load-timeout", type=float, default=180)
@@ -73,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
                         cache_dir=args.cache_dir,
                         planner=LocalPlanner(model, timeout=args.question_timeout),
                         question_ids=args.question_id,
+                        resume_from=args.resume_from,
+                        resume_tail=args.resume_tail,
                     )
                 finally:
                     model.close()
@@ -82,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
                     args.output_dir,
                     cache_dir=args.cache_dir,
                     question_ids=args.question_id,
+                    resume_from=args.resume_from,
+                    resume_tail=args.resume_tail,
                 )
         elif args.command in {"catalog", "prepare"}:
             split = load_split(args.data_dir)

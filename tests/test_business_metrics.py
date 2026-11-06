@@ -280,6 +280,7 @@ def test_boolean_trend_compares_exact_totals_in_question_order(business_source, 
         c, "Từ tháng 11/2025 qua tháng 12/2025 rồi tháng 1/2026, doanh thu có tăng liên tục không?"
     )
     assert first["answer"]["answer"] is True
+    assert all(r["scan"]["queries"] > 0 for r in first["execution"]["aggregations"])
     second = run(
         c, "Từ tháng 1/2026 qua tháng 11/2025 rồi tháng 12/2025, doanh thu có tăng liên tục không?"
     )
@@ -709,3 +710,46 @@ def test_new_namespace_business_codes_file_and_row_order_preserve_ranking(
         "Cà phê",
         "Bánh",
     ]
+
+
+@pytest.mark.parametrize(
+    "wording",
+    [
+        "Khách nào chi tiêu nhiều nhất tháng này?",
+        "Khách có doanh thu cao nhất tháng này?",
+        "Top 2 khách chi tiêu nhiều nhất tháng này?",
+    ],
+)
+def test_customer_money_paraphrase_binds_context_schema_and_execution(business_source, wording):
+    from src.agent.context import build_context
+    from src.agent.plan import generation_schema
+
+    q = question(question=wording)
+    spec = business_spec(q)
+    assert spec["metric"] == "revenue" and spec["group"] == "customer"
+    assert build_context(q, business_source)["operation"] == spec
+    schema = generation_schema(q)
+    assert schema["properties"]["aggregations"]["items"][0]["properties"]["metric_id"] == {
+        "const": "revenue"
+    }
+    result = execute_plan(business_draft(q, business_source), q, business_source)
+    assert result["execution"]["status"] == "verified"
+    assert result["answer"]["answer"] == (["Lan"] if wording.startswith("Top") else "Lan")
+
+
+@pytest.mark.parametrize(
+    "qualified",
+    [
+        "Khách nào chi tiêu nhiều nhất không tính chuyển khoản tháng này?",
+        "Khách nào chi tiêu nhiều nhất trong chương trình bí mật tháng này?",
+        "Khách nào chi tiêu nhiều nhất của nhân viên Hoa tháng này?",
+        "Khách nào chi tiêu nhiều nhất từ 3 đơn trở lên tháng này?",
+        "Khách nào trung thành nhất tháng này?",
+    ],
+)
+def test_customer_paraphrase_does_not_drop_any_extra_qualifier(business_source, qualified):
+    base = question(question="Khách nào chi tiêu nhiều nhất tháng này?")
+    with pytest.raises(ContractError):
+        execute_plan(
+            business_draft(base, business_source), question(question=qualified), business_source
+        )

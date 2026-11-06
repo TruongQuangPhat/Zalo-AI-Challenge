@@ -73,3 +73,19 @@ Checkpoint cũ: 0421d68 đã push, 366 tests, S1 12/0/1 và S2 22/0/0 mỗi lư�
 Checkpoint mở 8 families: S1 46/0/6, S2 70/1/3; giữ lỗi/abstain trong verification JSON,
 không chuyển thành nghiệm thu source mới. Docker S1 CPU/CUDA và M1 snapshot reports giữ
 revision/phạm vi lịch sử; không tự chứng nhận các thay đổi hiện tại.
+
+Runtime reliability revision (06/11/2026): executor hiện có được lọc SQL theo normalized
+source-local day/status; lineage index và bounded identity/alias cache giảm scan/decodes.
+Đây là tối ưu implementation, không mở thêm payment/purchase/stock/lot authority. CPU synthetic
+benchmark và recovery tests không chứng nhận native PA, Docker/CUDA hoặc SLA.
+
+Customer revenue ranking nhận thêm **toàn câu** finite templates “Khách [hàng] [nào] [có]
+chi tiêu nhiều nhất …” / “… doanh thu cao nhất …”, tùy chọn “Top k”, với “tháng này”,
+“tháng trước”, “hôm nay”. Cùng business_spec → context/schema/validator/executor;
+qualifier bổ sung không khớp route này. Không suy loyalty, AOV qualification, threshold,
+owner hoặc product filter từ các template đó. Các scope guards khác giữ nguyên.
+
+Một source delivery phi tài chính có grain/column authority đủ có thể được cô lập để
+sales độc lập vẫn chuẩn bị được; delivery operator vẫn unsupported. Unknown financial source,
+source overlap, key/parse/grain conflict và coverage unknown vẫn chặn. Không mở purchase
+line/header aggregation, payment coverage policy, stock valuation hoặc generic lot history.

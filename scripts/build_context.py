@@ -140,7 +140,9 @@ def build_context(
     root: Path, output: Path, *, model: Path | None = None, cuda_runtime: Path | None = None
 ) -> dict:
     root = root.resolve()
-    candidates = [root / p for p in ["Dockerfile", ".dockerignore", "predict.sh"]]
+    candidates = [
+        root / p for p in ["Dockerfile", ".dockerignore", "predict.sh", "pyproject.toml", "uv.lock"]
+    ]
     license_path = root / "docs/model-license.txt"
     if license_path.exists():
         candidates.append(license_path)

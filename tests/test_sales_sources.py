@@ -664,10 +664,10 @@ def test_expired_question_budget_prevents_numeric_execution(
     c = joined_source(synthetic_split, tmp_path, rulebook_text)
     r = execute_plan(draft(), question(), c, deadline=time.monotonic() - 1)
     assert r["answer"]["type"] == "abstain"
-    assert r["execution"] == {
-        "status": "failed",
-        "reason": "question_timeout_before_execution",
-    }
+    assert r["execution"]["status"] == "failed"
+    assert r["execution"]["reason"] == "question_timeout_before_execution"
+    assert r["execution"]["error_stage"] == "execution"
+    assert r["execution"]["sqlite_errorcode"] is None
 
 
 @pytest.mark.parametrize(
@@ -729,3 +729,59 @@ Dữ liệu đầy đủ từ 01/01/2026 đến hết 03/01/2026.
         assert r["answer"]["type"] == "abstain"
     else:
         assert r["answer"]["answer"] == expected
+
+
+@pytest.mark.parametrize("variant", ["declared", "financial", "negated", "qualifier"])
+@pytest.mark.parametrize("filename", ["journeys.csv", "phieu_giao.csv"])
+def test_declared_nonfinancial_delivery_family_isolation_keeps_unknown_money_blocked(
+    synthetic_split, tmp_path, rulebook_text, variant, filename
+):
+    financial = variant == "financial"
+    folder = synthetic_split / "data/shop_a"
+    (folder / "sales.csv").unlink()
+    csv_file(
+        folder,
+        "receipts.csv",
+        ["id", "day", "state", "net", "item"],
+        [["one", "2026-01-01", "completed", "42", "Synthetic product"]],
+    )
+    header = ["order", "batch", "day", "qty"]
+    values = ["one", "a", "2026-01-02", "2"]
+    if financial:
+        header.append("money")
+        values.append("9999")
+    csv_file(folder, filename, header, [values])
+    readme = """Mỗi dòng một dòng hàng của đơn bán.
+Dữ liệu đầy đủ từ 01/01/2026 đến hết 03/01/2026.
+## Cột trong `receipts.csv`
+- **id**: order id
+- **day**: order date
+- **state**: order status
+- **net**: line net amount
+- **item**: product name
+## Cột trong `journeys.csv`
+Mỗi dòng một đợt giao hàng, không phải một đơn bán mới.
+- **order**: order id
+- **batch**: delivery batch id
+- **day**: delivery date
+- **qty**: delivered quantity
+"""
+    if financial:
+        readme += "- **money**: unclassified financial amount\n"
+    if variant == "negated":
+        readme = readme.replace(
+            "Mỗi dòng một đợt giao hàng", "Không phải mỗi dòng một đợt giao hàng"
+        )
+    elif variant == "qualifier":
+        readme += "Các dòng này cũng là một bản sao doanh thu cần đối soát.\n"
+    readme = readme.replace("journeys.csv", filename)
+    c = prepare(synthetic_split, tmp_path, rulebook_text, readme)
+    if variant != "declared":
+        assert c.prepared.summary["status"] == "unsupported"
+        assert "delivery_family_mapping_or_authority_unsupported" in c.prepared.summary["reason"]
+    else:
+        assert c.prepared.summary["status"] == "ready"
+        family = c.prepared.summary["isolated_source_families"]
+        assert len(family) == 1 and family[0]["family"] == "delivery_batches"
+        assert family[0]["status"] == "unsupported_operator"
+        assert execute_plan(draft(), question(), c)["answer"]["answer"] == 42

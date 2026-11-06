@@ -15,7 +15,14 @@ from src.jsonio import ContractError
 def source_tree(tmp_path):
     root = tmp_path / "project"
     (root / "src").mkdir(parents=True)
-    for name in ["Dockerfile", ".dockerignore", "predict.sh", "src/__init__.py"]:
+    for name in [
+        "Dockerfile",
+        ".dockerignore",
+        "predict.sh",
+        "src/__init__.py",
+        "pyproject.toml",
+        "uv.lock",
+    ]:
         (root / name).write_text("fixture\n")
     (root / "dataset").mkdir()
     (root / "dataset/secret.csv").write_text("must not be packaged")
@@ -33,6 +40,8 @@ def test_allowlisted_context_is_deterministic_and_excludes_local_inputs(tmp_path
             ".dockerignore",
             "predict.sh",
             "src/__init__.py",
+            "pyproject.toml",
+            "uv.lock",
         }
     with pytest.raises(ContractError, match="overwrite"):
         build_context(root, root / "Dockerfile")

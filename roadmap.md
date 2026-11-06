@@ -3,13 +3,71 @@
 
 > **Dự án:** Zalo AI Challenge 2026 — *DataMate: Talking To Your Data Through Agentic AI*  
 > **Ngày lập:** 01/11/2026  
-> **Lần rà soát:** 05/11/2026 — phiên rulebook S1–S5 có nguồn; chưa chạy model/native evaluation. Bằng chứng S1/S2 và các phần nghiệm thu cũ bên dưới giữ đúng revision lịch sử.
+> **Lần rà soát:** 06/11/2026 — đã chạy và chấm mẫu train100 phủ 30 businesses trên Docker/CUDA. Bằng chứng S1/S2 và các phần nghiệm thu cũ bên dưới giữ đúng revision lịch sử.
 > **Mục tiêu:** Xây dựng **một baseline chạy được từ đầu đến cuối**, tự động trả lời câu hỏi tiếng Việt trên CSV/XLSX/SQLite, hoạt động hoàn toàn offline, có thể đánh giá bằng đáp án train và đóng gói Docker để nộp thi.  
 > **Phạm vi:** Tập trung vào một giải pháp **đúng quy định, tổng quát hóa được, có thể tái lập và đo lường được**. Các kỹ thuật tối ưu PA nâng cao, fine-tuning, ensemble hay multi-agent **để sau khi baseline hoàn chỉnh**.  
-> **Trạng thái:** `RULEBOOK_S1_S5_REVIEW` — catalogue/semantics có nguồn và code/tests trong phạm vi operator đã bật; evidence hiện tại ở mục rulebook ngay dưới. S6 chưa nghiệm thu; số liệu model/image/S1–S5 cũ giữ đúng revision lịch sử. [JSON kết quả](reports/stage_results.json) không được cập nhật trong phiên này.
+> **Trạng thái:** `PIPELINE_ACCEPTED_FOR_NOW` — người dùng tạm chấp nhận pipeline hiện tại. Mẫu train100: 34 đúng, 12 sai, 54 abstain; PA mẫu 0,22, preparation chiếm 90,32% elapsed records. Kết quả ngắn gọn lưu tại đây, chi tiết run nằm ngoài source tree; [JSON kết quả lịch sử](reports/stage_results.json) giữ nguyên. S6/full3000/SLA chưa nghiệm thu.
 > **Thiết lập hiện có (theo xác nhận của người thực hiện):** dự án đang có thư mục `dataset/` và đã đưa `dataset/` vào `.gitignore`; **không tạo lại bước gitignore dataset**. Mã nguồn dùng trực tiếp `src/`, **không có lớp thư mục `src/datamate/`**. Cần kiểm tra trạng thái Git thực tế trước khi kết luận dữ liệu chưa từng được track.
 
 **Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu lại sau cleanup; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
+
+---
+
+## Train100 Docker/CUDA — 06/11/2026
+
+Mẫu hash đóng băng trước gold, 3–4 câu/business, phủ cả 30 businesses theo yêu cầu người dùng.
+Giữ Qwen2.5-1.5B Q4_K_M và budgets; GTX 1650 thực offload 29 layers. Lượt mới riêng image,
+outputs và facts; không ghép baseline. Gold chỉ chấm sau xác minh đủ 100 outputs/logs,
+identity/source/input và Docker thoát 0. Scorer nội bộ: 34 đúng, 12 sai, 54 abstain,
+coverage 46%, accuracy answered 73,91%, PA 0,22. Không suy thành blind heldout/full3000 PA.
+
+10 câu đầu: 3 đúng, 0 sai, 7 semantic/planning abstain. Preparation 61 phút 37 giây,
+generation gần 2 phút; GPU mạnh hơn đơn lẻ khó giải quyết thời gian đầu lượt. Toàn lượt:
+runtime 2 giờ 53 phút 31 giây, Docker wall 3 giờ 9 phút 16 giây; preparation 90,32%
+elapsed records, có concurrent CPU prewarm nên không phải isolated benchmark.
+12 output sai đều được executor `verified`, cho thấy phải kiểm cả semantic completeness
+của plan. Chưa sửa runtime theo gold. Scorer `internal-rulebook-v0` chưa xác minh tương đương
+official evaluator. Mẫu gồm 59 dev/21 validation/20 final_holdout; không dùng kết quả này để
+tuning heldout. Hai execution timeout được xử lý thành abstain, runtime ghi 0 question errors.
+Hai sửa packaging trước build đạt 52 focused tests + Ruff + container smoke; 542 tests
+bên dưới là gate lịch sử trước các sửa packaging.
+
+Theo yêu cầu cleanup, không thêm báo cáo riêng hoặc chi tiết từng câu vào source tree.
+Evidence đầy đủ, hai báo cáo được chuyển ra ngoài và snapshot JSON của lượt train100 ở
+`/mnt/d/DataMate-Zalo-AI-Challenge-20261105/.artifacts/train100-runtime-scope.vdhl452g/evaluation/`;
+`score.json`, `verification.json`, `timing-analysis.json`, `first10/score.json` và
+`stage_results.snapshot.json` giữ kết quả đã chấm. Snapshot này khớp report hash được ghi
+trong verification của lượt chạy; file `reports/stage_results.json` chỉ giữ lịch sử trước đó.
+Không thay model, budgets hoặc runtime theo gold. Người dùng yêu cầu commit/push pipeline này.
+
+Kiểm tra sau cleanup trên source hiện tại: **542 tests passed /78,59s**, toolchain đúng lock,
+Ruff check và format check 74 files pass, `uv lock --check --offline` pass, 50 local document
+links và diff whitespace pass. Test scratch được tự xóa; cache pytest/Ruff/Python được dọn.
+Không chạy lại model, Docker/CUDA hoặc full3000 trong bước cleanup; evidence train100 ở trên
+giữ đúng image/source đã đóng băng. Commit chỉ gồm code, tests, setup/contracts và roadmap.
+
+## Runtime/scope reliability — 06/11/2026, trước lượt train100
+
+Branch `feature/runtime-scope-reliability`, base/main `d084d22` (đã chứa `5ac4903`).
+Code đã thêm SQL date/status pushdown và indexes, giữ Decimal/coverage/quality contracts;
+calendar denominator sau preflight không scan orders. Diagnostics có phase/budget/SQLite/
+guard branch; checkpoint atomic, live heartbeat và resume cùng identity sang output mới.
+Bounded candidate cache không giữ answers/as-of. P1 chỉ mở complete customer money-ranking
+paraphrases và finite nonfinancial delivery-family isolation có source authority; các gaps
+payment/purchase/stock/lot còn lại vẫn block.
+
+Evidence synthetic giữ ngoài source tree tại
+`/mnt/d/DataMate-Zalo-AI-Challenge-20261105/.artifacts/runtime-scope-improvements/`.
+Source cuối giai đoạn synthetic đạt **542 tests /402,47s**, Ruff/format 74 files, lock offline,
+links và whitespace pass. Benchmark 300k orders/900k lines/900k lineage giữ exact reference:
+revenue baseline interrupted ~15s, source cuối 0,019–0,024s; quantity 13,1–14,7s →
+0,016–0,030s. DB index cost +34,1 MB; đây là synthetic SQL/reduction, không native SLA.
+256 raw/authority files giữ checksum, baseline submission không đổi.
+Không tuyên bố native PA/S6/SLA. Snapshot cũ vẫn 1.597/3.000, 1.118 abstain; 529 generic
+scope rejections chưa có evidence để chia thành missing operator/intent/false positives.
+Ở giai đoạn synthetic này chưa đọc native question text/gold hoặc chạy model/scoring/resume. Không
+được nối code mới vào 1.597 outputs baseline; xem lệnh run/recovery đúng revision ở README.
+Không đổi model/dependencies/budgets mặc định; không commit/push.
 
 ---
 

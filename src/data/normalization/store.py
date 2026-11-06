@@ -21,7 +21,7 @@ from src.data.normalization.sales import build_sales, sales_mapping
 from src.data.normalization.stock import build_stock, stock_mapping
 from src.jsonio import ContractError, dumps, loads
 
-VERSION = "prepared-facts-v6"
+VERSION = "prepared-facts-v7"
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
@@ -35,12 +35,14 @@ CREATE TABLE order_lines (
     line_key TEXT PRIMARY KEY, order_key TEXT NOT NULL REFERENCES orders(order_key),
     net_amount TEXT, row_role TEXT NOT NULL, source_values TEXT NOT NULL, event_at TEXT
 ) STRICT;
+CREATE INDEX orders_status_day ON orders(status,substr(ordered_at,1,10),order_key);
 CREATE INDEX order_lines_order ON order_lines(order_key);
 CREATE TABLE lineage (
     raw_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
     disposition TEXT NOT NULL, line_key TEXT REFERENCES order_lines(line_key),
     source_ref TEXT NOT NULL, transformations TEXT NOT NULL
 ) STRICT;
+CREATE INDEX lineage_line ON lineage(line_key);
 CREATE TABLE issues (issue_id TEXT PRIMARY KEY, detail TEXT NOT NULL) STRICT;
 CREATE TABLE inventory_snapshot (
     product_code TEXT PRIMARY KEY, product_name TEXT NOT NULL, base_unit TEXT NOT NULL,
@@ -54,6 +56,7 @@ CREATE TABLE sales_events (
     event_key TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, status TEXT NOT NULL,
     net_amount TEXT, row_role TEXT NOT NULL, source_ref TEXT NOT NULL
 ) STRICT;
+CREATE INDEX sales_events_status_day ON sales_events(status,substr(occurred_at,1,10));
 CREATE TABLE order_times (
     order_key TEXT PRIMARY KEY REFERENCES orders(order_key),
     seconds_of_day TEXT NOT NULL, source_ref TEXT NOT NULL
@@ -205,6 +208,11 @@ def prepare_facts(
             except ContractError as stock_error:
                 mapping = None
                 reason = f"{sales_error}; {relational_error}; {stock_error}"
+                mapping_attempts = {
+                    "sales": str(sales_error),
+                    "relational": str(relational_error),
+                    "snapshot": str(stock_error),
+                }
     if mapping is None:
         result = PreparedBusiness(
             None,
@@ -212,6 +220,8 @@ def prepare_facts(
                 "version": VERSION,
                 "status": "unsupported",
                 "reason": reason,
+                "failure_family": "unsupported_mapping",
+                "mapping_attempts": mapping_attempts,
                 "metric_execution": "not_implemented",
             },
             elapsed_seconds=time.perf_counter() - started,

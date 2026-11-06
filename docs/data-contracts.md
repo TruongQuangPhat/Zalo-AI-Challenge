@@ -163,7 +163,7 @@ tái tạo output bằng `--reviews`; metadata này không thuộc runtime infer
 `connect()` mở database read-only/query-only; `iter_records()` chỉ đọc bảng facts/audit đã cho phép.
 
 SQLite STRICT dùng một file `facts.sqlite`, không thêm dependency. Schema version là
-`prepared-facts-v6`; dependencies/quality summary nằm trong bảng `metadata`. Money là TEXT
+`prepared-facts-v7`; dependencies/quality summary nằm trong bảng `metadata`. Money là TEXT
 Decimal chính xác, qua API trả Decimal; không dùng SUM/AVG/CAST REAL cho tiền trong SQL.
 Các bảng mở rộng bên dưới giữ numeric TEXT khi đọc records; executor chuyển trực tiếp
 từ TEXT sang Decimal. Không chuyển qua float.
@@ -300,7 +300,7 @@ lookup chỉ bật tại declared export end, còn tồn và chưa quá hạn; a
 phải đối soát được. Không chứng nhận generic movement/history, đổi đơn vị lớn, giá trị
 kho/lô, FIFO, weighted purchase price hoặc net-profit/expense workflow.
 
-Planner v14/context v11 và QueryPlan v13 mở rộng cùng grammar hiện có bằng grouped
+Planner v15/context v12 và QueryPlan v14 mở rộng cùng grammar hiện có bằng grouped
 aggregations/limit và các metric trên; scalar decoder cũ không nhận nhầm business
 operators. Server giữ identity, rule refs, unit/status/axis và required fields; LLM
 không được xuất số đáp án, SQL hay code. Metric contracts v6 và semantics v7 đọc cùng
@@ -317,3 +317,45 @@ output date; không lấy expiry min/max làm coverage. Standalone payment-only/
 packages chưa có generic preparation. Đây là synthetic behavior evidence, chưa native
 acceptance cho revision mới. Parser/helper hash thay prepared fingerprint; registry/preflight/
 resolver software hashes thay semantic revision; không sửa cache/manifest bằng tay.
+
+## Runtime diagnostics và recovery — implementation boundary
+
+Prepared store `prepared-facts-v7` thêm index lineage line key và date/status/key theo
+consumer. Predicates ngày dùng prefix ISO đã parse, giữ ngày địa phương của nguồn,
+end-day fractions/offset; không dùng SQLite UTC date conversion hoặc SUM/REAL cho tiền.
+SQL chỉ chọn/join/filter, Decimal/exact_add và rational rounding giữ nguyên. Normalizer
+source hash và version invalidation tạo facts/cache revision mới; không cập nhật DB cũ.
+Calendar denominator tính trực tiếp trên effective window **sau** dependency/coverage gates.
+Debt đọc mọi đơn/payments tới cutoff; collection giữ đơn trước kỳ; lot/stock giữ own axis.
+
+`runtime-diagnostics-v2` giữ legacy reason và bổ sung stage/code, SQLite code/name,
+budget (`execution_15_seconds` hoặc `question_deadline` khi có evidence), semantic branch,
+unmet fact families và intended metric. Timings gồm context/generation, semantic validation,
+preflight, SQL execute/fetch, Decimal parse/exact_add, scalar/output verifier và commit.
+`python_seconds` bao gồm selection/other work; `decimal_seconds` là một phần trong đó,
+không cộng hai số như hai phase rời nhau. COGS multiply/ranking/JSON sampling vẫn trong
+Python time; không gọi phần dư total-generation là execution đo được. `rows_delivered`
+là rows về Python, không phải số pages/rows vật lý SQLite đã scan; VM steps lấy mẫu mỗi
+1.000 instructions. Benchmark còn đo scalar bytes delivered, không phải disk I/O bytes.
+
+Entity candidate cache chỉ giữ identities/aliases theo prepared path/inode/size/mtime/kind:
+tối đa 4 entries, mỗi entry tối đa 4.096 rows và 1 MiB UTF-8 text (Python object overhead
+thêm ngoài text). Entry lớn stream đầy đủ, không cắt candidates ở giới hạn cache. Không
+cache answers, question/as-of hoặc totals; không parse source_ref JSON cho mọi entity mỗi câu.
+
+`runtime-checkpoint-v1` gắn source/input/config/model/runtime identity và ordered selection
+với mỗi log. Log atomic + submission fsync đi trước checkpoint atomic/fsync directory.
+Hash chain kiểm committed prefix; complete records phía sau checkpoint stale cần log khớp.
+Process lock chặn resume parent còn chạy. Tail policy mặc định reject, explicit discard chỉ
+áp final bytes thiếu newline và ghi hash/evidence. Parent immutable; output mới kế thừa prefix,
+chạy phần còn lại, kiểm types/IDs/order và giữ question errors. `running` và heartbeat không
+thay liveness proof; SIGINT/TERM khác abrupt kill/power loss. Không migrate legacy proof hoặc
+trộn source revisions. Backend identity hash installed llama-cpp package Python/native files;
+không phải certification toàn bộ driver/hardware hoặc Docker/GPU repeatability.
+
+Delivery family chỉ được tách khỏi sales khi README section của đúng source tuyên bố
+finite nonfinancial delivery grain, tất cả cột có meanings được hỗ trợ và đủ order/batch/
+delivery-date/quantity. Phủ định, qualifier lạ hoặc financial column vẫn block. Metadata
+`isolated_source_families` giữ authority hash và `unsupported_operator`; không tạo delivery
+facts, coverage hoặc đáp án. Preparation unsupported có `mapping_attempts` riêng từng mapper;
+không gọi mapper chưa hỗ trợ là dữ liệu nguồn thiếu.

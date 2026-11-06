@@ -440,7 +440,16 @@ def preflight(
     except SemanticError as exc:
         return {**stop("abstain", exc.code), "diagnostic": str(exc)}
     except (OSError, sqlite3.Error) as exc:
-        return {**stop("abstain", "prepared_read_failed"), "diagnostic": str(exc)}
+        return {
+            **stop("abstain", "prepared_read_failed"),
+            "diagnostic": str(exc),
+            "diagnostics": {
+                "error_stage": "preflight",
+                "error_code": "prepared_read_failed",
+                "sqlite_errorcode": getattr(exc, "sqlite_errorcode", None),
+                "sqlite_errorname": getattr(exc, "sqlite_errorname", None),
+            },
+        }
 
 
 def _business_preflight(context, metric_id, expression, *, as_of_date, filters=None):
@@ -506,10 +515,19 @@ def _business_preflight(context, metric_id, expression, *, as_of_date, filters=N
             "stock_balance": ("stock",),
             "lot_expiry": ("lots",),
         }
-        if any(
-            family in extension.get("issues", {}) for family in quality_families.get(metric_id, ())
-        ):
-            raise ContractError("business_fact_quality_unsupported")
+        unmet = {
+            family: extension["issues"][family]
+            for family in quality_families.get(metric_id, ())
+            if family in extension.get("issues", {})
+        }
+        if unmet:
+            raise ContractError(
+                "business_fact_quality_unsupported",
+                diagnostics={
+                    "unmet_fact_families": unmet,
+                    "classification": "mapping_or_quality_requires_source_evidence",
+                },
+            )
         if metric_id in {"quantity", "gross_profit"} and prepared.summary.get("shape") in {
             "order_headers",
             "sales_ledger",
@@ -518,7 +536,17 @@ def _business_preflight(context, metric_id, expression, *, as_of_date, filters=N
         if not sales:
             _business_window(context, metric_id, expression, as_of_date, result)
     except (ContractError, ValueError, OSError, sqlite3.Error) as exc:
-        result.update(decision="abstain", reason=str(exc))
+        result.update(
+            decision="abstain",
+            reason=str(exc),
+            diagnostics={
+                "error_stage": "preflight",
+                "error_code": str(exc),
+                "sqlite_errorcode": getattr(exc, "sqlite_errorcode", None),
+                "sqlite_errorname": getattr(exc, "sqlite_errorname", None),
+                **getattr(exc, "diagnostics", {}),
+            },
+        )
     return result
 
 
