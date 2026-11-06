@@ -9,15 +9,16 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import asdict, dataclass
+from copy import deepcopy
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from src.data.profiling import normalized
 from src.jsonio import ContractError
-from src.semantics.business_rules import CLAUSES
+from src.semantics.business_rules import CATALOGUE, CLAUSE_PARAMETERS, CLAUSES, EXECUTION
 
-VERSION = "runtime-rules-v8"
+VERSION = "runtime-rules-v9"
 
 
 class SemanticError(ContractError):
@@ -38,6 +39,9 @@ class Rule:
     parameters: dict[str, Any]
     source_refs: list[dict]
     reason: str | None = None
+    requirements: str = "metric-specific fields, grain, coverage and source authority"
+    execution: str = "bounded: only registered contracts and validated plans"
+    understood: bool = False
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,7 @@ class RuleProfile:
     parser_sha256: str
     industry: str | None
     rules: dict[str, Rule]
+    clauses: list[dict] = field(default_factory=list)
 
     def require(self, rule_id: str) -> Rule:
         rule = self.rules.get(rule_id)
@@ -64,6 +69,7 @@ class RuleProfile:
             "parser_sha256": self.parser_sha256,
             "industry": self.industry,
             "rules": {key: asdict(value) for key, value in sorted(self.rules.items())},
+            "clauses": self.clauses,
         }
 
 
@@ -132,14 +138,30 @@ def _unhandled_qualifications(text: str, section: str) -> set[str]:
         "coverage": r"\b(khoang ngay|pham vi du lieu)\b",
         "difference": r"\b(chenh lech|ky hoi|ky so)\b",
         "percent_change": r"\b(tang truong|phan tram thay doi)\b",
+        "purchase_amount": r"\b(phieu nhap|tien nhap|nhap dau ky)\b",
+        "debt_balance": r"\b(con no|tong don|cong no)\b",
+        "debt_cod": r"\b(cod|san tmdt)\b",
+        "debt_collection": r"\b(thu no|tra no|no them|ngay mua)\b",
+        "gross_profit": r"\b(lai gop|gia von)\b",
+        "quantity_ranking": r"\b(ban chay|so luong|don vi co ban)\b",
+        "lot_expiry": r"\b(lo|han dung|het han)\b",
+        "customer_identity": r"\b(ma khach|xac dinh khach|khach le)\b",
     }
     return {key for key, pattern in targets.items() if re.search(pattern, text)}
 
 
 def _decode(rule_id: str, value: str) -> tuple[str, dict] | None:
     """Finite supported meanings. Full matches reject unhandled qualifications."""
+    if rule_id in CATALOGUE:
+        signature = hashlib.sha256(value.encode()).hexdigest()
+        meaning = CATALOGUE[rule_id]["meanings"].get(signature)
+        return (rule_id, deepcopy(meaning)) if meaning is not None else None
     if rule_id in CLAUSES:
-        return (rule_id, {}) if value == CLAUSES[rule_id][1] else None
+        return (
+            (rule_id, deepcopy(CLAUSE_PARAMETERS[rule_id]))
+            if value == CLAUSES[rule_id][1]
+            else None
+        )
     patterns = {
         "shift": (
             r"theo gio tao don: ca sang 06:00[–-]13:59, ca chieu 14:00[–-]21:59\. "
@@ -201,9 +223,11 @@ def _decode(rule_id: str, value: str) -> tuple[str, dict] | None:
             {},
         ),
         "time_axis": (
-            r"theo ngay dat, khong theo ngay giao hay ngay thu tien",
+            r"theo ngay dat, khong theo ngay giao hay ngay thu tien"
+            r"(?:\. don tra hang sau ky, ke ca tra sau hom nay, "
+            r"van bi loai khoi doanh thu ky dat)?",
             "ordered_at",
-            {},
+            {"return_status_cutoff": "recorded_even_after_period_and_as_of"},
         ),
         "revenue_basis": (
             r"tong thanh tien cac dong hang \(da tru giam gia tren tung dong\)\. "
@@ -315,11 +339,43 @@ def _decode(rule_id: str, value: str) -> tuple[str, dict] | None:
     return None
 
 
+def _units(text: str):
+    """Join Markdown soft wraps, retaining exact physical quotes and line spans."""
+    paragraph, start = [], 0
+    for number, raw in enumerate([*text.splitlines(), ""], 1):
+        heading = raw.lstrip()
+        boundary = not heading or heading.startswith(("#", "|", "- "))
+        # Preserve the established plain-label format too. Two complete labelled
+        # declarations can occupy consecutive physical lines without a blank.
+        # An incomplete clause or arbitrary sentence never becomes a boundary.
+        labels = {
+            key: LABELS[key] + ":" for key in ("dedup", "header_inheritance", "return_policy")
+        }
+        if paragraph and any(plain(raw).startswith(label) for label in labels.values()):
+            previous = plain("\n".join(paragraph))
+            boundary = boundary or any(
+                previous.startswith(label) and _decode(key, previous[len(label) :].strip())
+                for key, label in labels.items()
+            )
+        if boundary and paragraph:
+            yield start, "\n".join(paragraph)
+            paragraph = []
+        if not heading:
+            continue
+        if heading.startswith(("#", "|")):
+            yield number, raw
+        else:
+            if not paragraph:
+                start = number
+            paragraph.append(raw)
+
+
 def parse_rulebook(
     text: str, split: str, *, industry: str | None = None, source_sha256: str | None = None
 ) -> RuleProfile:
     digest = source_sha256 or hashlib.sha256(text.encode()).hexdigest()
     candidates: dict[str, list[tuple[str | None, str, dict]]] = {}
+    clauses = []
     section, scope = "", None
 
     def add(rule_id: str, value: str, line: int, quote: str) -> None:
@@ -330,11 +386,12 @@ def parse_rulebook(
             "section": section,
             "scope": scope or "general",
             "line": line,
+            "line_end": line + len(quote.splitlines()) - 1,
             "quote": quote,
         }
         candidates.setdefault(rule_id, []).append((scope, value, ref))
 
-    for number, raw in enumerate(text.splitlines(), 1):
+    for number, raw in _units(text):
         before = sum(len(entries) for entries in candidates.values())
         heading = raw.lstrip()
         if heading.startswith("## "):
@@ -344,6 +401,23 @@ def parse_rulebook(
         elif heading.startswith("# "):
             section, scope = heading[2:].strip(), None
         parts = raw.strip().strip("|").split("|")
+        is_row = raw.lstrip().startswith("|") and len(parts) >= 2
+        label = plain(parts[0]) if is_row else ""
+        # Capture every substantive unit, even when no executable interpretation
+        # is known. This ledger is evidence, never permission to run an operator.
+        substantive = bool(raw.strip()) and not heading.startswith("#")
+        substantive = substantive and not (
+            is_row and (label in {"luat", "cach noi", "cach ghi", "type", "tu"} or "---" in label)
+        )
+        full_value = " | ".join(plain(p) for p in parts[1:]) if is_row else plain(raw)
+        complete_prose = False
+        for rule_id, definition in CATALOGUE.items():
+            selector = definition["selector"]
+            if (is_row and label == selector and (scope or "general") == definition["scope"]) or (
+                not is_row and selector.startswith("@") and _decode(rule_id, full_value) is not None
+            ):
+                add(rule_id, full_value, number, raw)
+                complete_prose = not is_row
         if raw.lstrip().startswith("|") and len(parts) >= 2:
             label = plain(parts[0])
             value = plain(parts[1]) if len(parts) == 2 else ""
@@ -370,6 +444,20 @@ def parse_rulebook(
                         number,
                         raw,
                     )
+                # The anchor and status fragments cannot authorize unrelated
+                # text between them. The released full paragraph is recognized
+                # above; the shorter equivalent anchor/status form is explicit.
+                short_form = (
+                    len(sentences) == 3
+                    and _decode("as_of", sentences[0]) is not None
+                    and sentences[1] == "moi cach noi tuong doi tinh theo ngay nay"
+                    and _decode("recorded_status", sentences[2]) is not None
+                )
+                if not complete_prose and not short_form:
+                    for key in {"as_of", "recorded_status"} | _unhandled_qualifications(
+                        "ngoai le " + cleaned, section
+                    ):
+                        add(key, "unhandled paragraph: " + cleaned, number, raw)
             if cleaned.startswith("- ky chi co mot phan"):
                 add("coverage", cleaned[2:], number, raw)
             if cleaned.startswith("- khong co du lieu khac voi bang 0"):
@@ -381,11 +469,33 @@ def parse_rulebook(
                 add("rounding", cleaned[2:], number, raw)
             if "cau hoi nhieu so " in cleaned:
                 add("ordered_results", cleaned.split("cau hoi nhieu so ", 1)[1], number, raw)
-        if not heading.startswith(("#", "|")) and before == sum(
+                if not complete_prose and not cleaned.startswith("cau hoi nhieu so "):
+                    for key in {"ordered_results"} | _unhandled_qualifications(
+                        "ngoai le " + cleaned, section
+                    ):
+                        add(key, "unhandled paragraph: " + cleaned, number, raw)
+        if not heading.startswith("#") and before == sum(
             len(entries) for entries in candidates.values()
         ):
-            for rule_id in _unhandled_qualifications(plain(raw), section):
+            for rule_id in _unhandled_qualifications("ngoai le " + plain(raw), section):
                 add(rule_id, "unhandled qualification: " + plain(raw), number, raw)
+        if substantive:
+            ids = sorted(
+                key
+                for key, entries in candidates.items()
+                if any(r["line"] == number for _, _, r in entries)
+            )
+            clauses.append(
+                {
+                    "line": number,
+                    "line_end": number + len(raw.splitlines()) - 1,
+                    "section": section,
+                    "scope": scope or "general",
+                    "quote": raw,
+                    "rule_ids": ids,
+                    "status": "mapped" if ids else "unmapped",
+                }
+            )
     rules = {}
     for rule_id in [
         *dict.fromkeys([*LABELS, *CLAUSES]),
@@ -395,6 +505,7 @@ def parse_rulebook(
         "as_of",
         "rounding",
         "ordered_results",
+        *[key for key in CATALOGUE if key in candidates],
     ]:
         entries = candidates.get(rule_id, [])
         if rule_id in CLAUSES and not entries:
@@ -405,6 +516,8 @@ def parse_rulebook(
         meanings = [_decode(rule_id, value) for _, value, _ in selected]
         if unknown_scope:
             status, reason = "ambiguous", "industry override requires a verified industry"
+        elif entries and not selected:
+            status, reason = "not_applicable", "clause belongs to another verified industry"
         elif not meanings or any(value is None for value in meanings):
             status, reason = "unsupported", "missing or unrecognized rule clause"
         elif any(value != meanings[0] for value in meanings):
@@ -417,8 +530,22 @@ def parse_rulebook(
             status,
             meaning[0] if meaning else None,
             meaning[1] if meaning else {},
-            [ref for _, _, ref in (entries if unknown_scope else selected)],
+            [ref for _, _, ref in (entries if unknown_scope or not selected else selected)],
             reason,
+            CATALOGUE[rule_id]["requirements"]
+            if rule_id in CATALOGUE
+            else "metric-specific fields, grain, coverage and source authority",
+            CATALOGUE[rule_id]["execution"]
+            if rule_id in CATALOGUE
+            else EXECUTION.get(rule_id, "bounded: only registered contracts and validated plans"),
+            bool(entries) and all(_decode(rule_id, value) is not None for _, value, _ in entries),
+        )
+    for clause in clauses:
+        clause["understood"] = bool(clause["rule_ids"]) and all(
+            _decode(key, value) is not None
+            for key in clause["rule_ids"]
+            for _, value, ref in candidates[key]
+            if ref["line"] == clause["line"]
         )
     return RuleProfile(
         split,
@@ -428,4 +555,5 @@ def parse_rulebook(
         ).hexdigest(),
         industry,
         rules,
+        clauses,
     )
