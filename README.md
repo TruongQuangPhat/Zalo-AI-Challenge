@@ -131,5 +131,28 @@ uv run --no-sync python -m scripts.verify_runtime --scope all \
 Image cũ `/app` cần rebuild trước khi dùng đường chạy `/code`. CUDA12.4/GTX1650 local
 chưa chứng nhận RTX5090/Blackwell, và chưa chứng nhận SLA sáu giờ trên máy BTC.
 
-Colab được hoãn để setup sau khi pipeline này ổn định. Các notebook/snapshot thử nghiệm
-trước cleanup không phải đường chạy hiện hành; không dùng chúng để clone source cũ.
+## Colab: train 3000 và public test 1000
+
+Dùng duy nhất [scripts/DataMate_Colab.ipynb](scripts/DataMate_Colab.ipynb), chọn GPU và
+Run all. Notebook clone GitHub, tự setup model/runtime đã pin; không cần runtime ZIP.
+Repo private dùng Colab Secret `GITHUB_TOKEN` với quyền Contents:read. Ref được clone
+phải chứa notebook/helper train-public mới; thay đổi chưa push không tự có trên Colab.
+
+Dữ liệu đã có trong `MyDrive/DataMate/`: `train.zip`, folder `train/` và
+`public_test/`. Folder split chứa `questions.jsonl`, `rulebook.md`, `calendar.csv`,
+`data/`; train có thêm `answers.jsonl` để evaluator riêng sử dụng sau inference.
+
+| Cấu hình notebook | Hành vi |
+|---|---|
+| `SPLIT="train"` | Đủ3000 predictions, sau đó chấm cả3000 nếu `EVALUATE_TRAIN=True` |
+| `SPLIT="public_test"` | Đủ1000 predictions, không đọc nhãn/chấm điểm; tải file public JSONL |
+| `INPUT_SOURCE="auto"` | Ưu tiên `<split>.zip` nếu có, nếu không dùng folder `<split>/` |
+| `INPUT_SOURCE="folder"` | Dùng trực tiếp folder khi đã giải nén hoặc folder mới hơn ZIP |
+| `CHUNK_SIZE=100` | Checkpoint mỗi100 câu; giữ RUN_ID/source/config để resume |
+
+Chỉ đổi `SPLIT` rồi Run all để chuyển chế độ; train/public có namespace riêng.
+Inference vẫn gọi root `predict.sh`, chạy trên SSD `/content`, không đọc SQLite từ
+Drive. Kết quả/checkpoint nằm ở `DataMate/results/<split>/<RUN_ID>/`; phần đang chạy
+dở chưa checkpoint có thể phải chạy lại khi VM mất. Đổi RUN_ID cho lượt độc lập.
+Public `submission.jsonl` để tự nộp portal → Submission; file train không dùng nộp
+public leaderboard. Notebook không tự submit/commit/push và chưa được test hosted Colab.

@@ -13,6 +13,35 @@
 
 ---
 
+## Colab train/public runner — 06/11/2026
+
+Theo yêu cầu mới, tiếp tục setup Colab sau cleanup: duy nhất
+`scripts/DataMate_Colab.ipynb`, chọn `SPLIT="train"` đủ3000 hoặc
+`SPLIT="public_test"` đủ1000. Notebook clone GitHub ref, setup runtime/model đã pin
+và gọi lại root `predict.sh` qua helper hiện có; không thêm inference implementation.
+Ref trên GitHub phải chứa helper mới; guard dừng trước tải weights nếu clone nhầm
+helper train-only cũ. Không tự commit/push thay đổi của nhiệm vụ này.
+
+Dùng `DataMate/<split>.zip` hoặc folder `<split>/` đã có; auto ưu tiên ZIP, có thể
+chọn folder rõ ràng. Copy/extract và inference/prepared cache trên SSD `/content`;
+staging chỉ lấy raw inference allowlist, không copy/open answers. Train evaluator
+riêng chỉ mở labels sau khi đủ3000 predictions; public không phân bucket train hoặc
+chấm nhãn. Không sửa dataset/weights/model semantics. Checkpoint mặc định mỗi100 câu
+vào `DataMate/results/<split>/<RUN_ID>/`; ID/input/source/config/hash phải khớp khi
+resume. Train/public tách namespace; không trộn run, không coi phần dở là completed.
+Public chỉ tải JSONL đã kiểm đủ1000 IDs để người dùng tự submit trên web.
+
+**VERIFIED_CPU_TOOLING:** full CPU gate **581 tests pass /202,18s**, Ruff lint và
+format79 files pass, deterministic context49 files không chứa dataset. Tests dùng
+synthetic3000/1000 và model process giả để kiểm chunk/merge/checkpoint restore,
+count/label isolation, thay source/config phải đổi RUN_ID, worker errors và notebook
+AST; đây không là model inference benchmark. CLI `inputs --help` chạy thành công.
+`reports/runtime_verification.json` giữ `model_inference=NOT_TESTED` và
+`runtime_verified=false`. **Hosted Colab/GPU inference/full3000/public1000 accuracy
+và timing NOT_TESTED**; không tải weights, chạy model/Docker hoặc nộp bài trong phiên
+triển khai notebook. Tính mỗi chunk gồm model load/preparation, không chứng nhận
+single-process SLA sáu giờ của BTC. Mục hoãn Colab bên dưới là lịch sử trước yêu cầu mới.
+
 ## Pipeline và docs cleanup — 06/11/2026
 
 **Current path:** root `predict.sh` → `src.cli predict` → LocalModel/LocalPlanner →

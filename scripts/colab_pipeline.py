@@ -35,6 +35,7 @@ from src.evaluation.scorer import compare, evaluate
 from src.jsonio import ContractError, dumps, loads, read_jsonl, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
+SPLIT_COUNTS = {"train": 3000, "public_test": 1000}
 MODEL_SHA = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
 MODEL_URL = (
     "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/"
@@ -120,8 +121,8 @@ def setup(directory: Path) -> None:
     )
 
 
-def extract_train(archive: Path, destination: Path) -> Path:
-    """Extract the official train ZIP locally; labels stay outside staged inference inputs."""
+def extract_split(archive: Path, destination: Path) -> Path:
+    """Extract one official split locally; inference staging always excludes labels."""
     if destination.exists():
         raise ContractError("dataset extraction requires a fresh directory")
     with zipfile.ZipFile(archive) as source:
@@ -139,7 +140,7 @@ def extract_train(archive: Path, destination: Path) -> Path:
                 shutil.copyfileobj(incoming, outgoing)
     candidates = [p.parent for p in destination.rglob("questions.jsonl")]
     if len(candidates) != 1:
-        raise ContractError("ZIP must contain exactly one train split")
+        raise ContractError("ZIP must contain exactly one split")
     load_split(candidates[0])
     return candidates[0]
 
@@ -149,7 +150,7 @@ def stage_inputs(source: Path, destination: Path, *, expected_count: int = 3000)
     if len(split.questions) != expected_count:
         raise ContractError(f"expected {expected_count} questions, found {len(split.questions)}")
     if destination.resolve().is_relative_to(source.resolve()):
-        raise ContractError("stage inputs outside the raw train directory")
+        raise ContractError("stage inputs outside the raw split directory")
     files = input_files(source)
     before = {name: digest(path) for name, path in files.items()}
     if destination.exists():
@@ -169,6 +170,59 @@ def stage_inputs(source: Path, destination: Path, *, expected_count: int = 3000)
     return {"questions": expected_count, "sha256": after, "labels_staged": False}
 
 
+def stage_from_root(
+    root: Path, workspace: Path, split_name: str, *, source_kind: str = "auto"
+) -> dict:
+    """Use DataMate/<split>.zip or DataMate/<split>/; inference staging excludes labels."""
+    if split_name not in SPLIT_COUNTS or source_kind not in {"auto", "zip", "folder"}:
+        raise ContractError("choose train/public_test and auto/zip/folder input source")
+    require_output(workspace, root)
+    archive = root / f"{split_name}.zip"
+    use_zip = source_kind == "zip" or (source_kind == "auto" and archive.is_file())
+    archive_sha = None
+    if use_zip:
+        if not archive.is_file() or archive.is_symlink():
+            raise ContractError(f"missing or symlinked input ZIP: {archive}")
+        archive_sha = digest(archive)
+        local = workspace / "archives" / f"{split_name}-{archive_sha}.zip"
+        local.parent.mkdir(parents=True, exist_ok=True)
+        if local.is_symlink():
+            raise ContractError("local ZIP cannot be a symlink")
+        if not local.exists():
+            with local.open("xb") as target, archive.open("rb") as incoming:
+                shutil.copyfileobj(incoming, target)
+        if digest(local) != archive_sha:
+            raise ContractError("local ZIP checksum mismatch; use a fresh workspace")
+        raw = workspace / "extracted" / f"{split_name}-{archive_sha}"
+        complete = raw / ".extraction_complete.json"
+        if raw.exists():
+            if not complete.is_file() or loads(complete.read_text()) != {"sha256": archive_sha}:
+                raise ContractError("incomplete ZIP extraction; use a fresh workspace")
+            candidates = [p.parent for p in raw.rglob("questions.jsonl")]
+            if len(candidates) != 1:
+                raise ContractError("extracted ZIP must contain exactly one split")
+            source = candidates[0]
+        else:
+            source = extract_split(local, raw)
+            write_json(complete, {"sha256": archive_sha})
+    else:
+        source = root / split_name
+        if not (source / "questions.jsonl").is_file():
+            raise ContractError(f"missing {source}/questions.jsonl; check DataMate folder layout")
+    destination = workspace / "inference" / split_name
+    staged = stage_inputs(source, destination, expected_count=SPLIT_COUNTS[split_name])
+    result = {
+        "split": split_name,
+        "source_kind": "zip" if use_zip else "folder",
+        "raw_dir": str(source.resolve()),
+        "data_dir": str(destination.resolve()),
+        "archive_sha256": archive_sha,
+        **staged,
+    }
+    write_json(workspace / f"{split_name}-staging.json", result)
+    return result
+
+
 def source_hashes() -> dict[str, str]:
     if any(not (ROOT / name).is_file() for name in REQUIRED_MODULES):
         raise ContractError(
@@ -177,6 +231,9 @@ def source_hashes() -> dict[str, str]:
     paths = sorted((ROOT / "src").rglob("*.py")) + [
         ROOT / "predict.sh",
         ROOT / "uv.lock",
+        ROOT / "pyproject.toml",
+        ROOT / "scripts/input_data.py",
+        ROOT / "scripts/annotate_questions.py",
         Path(__file__),
     ]
     return {p.relative_to(ROOT).as_posix(): digest(p) for p in paths}
@@ -245,8 +302,10 @@ def validate_part(folder: Path, ids: list[str], identity: str) -> dict:
     model = manifest["planner_metadata"]["model"]
     if (
         manifest["adapter"] != "local-planner"
+        or manifest.get("status") != "completed"
         or manifest["question_errors"]
         or manifest["questions_written"] != len(ids)
+        or manifest.get("questions_total") != len(ids)
         or model["layers_offloaded"] != 29
         or model["sha256"] != MODEL_SHA
         or model["n_ctx"] != 4096
@@ -275,6 +334,8 @@ def validate_part(folder: Path, ids: list[str], identity: str) -> dict:
         planning = record.get("plan", {})
         planning = planning.get("planning", planning)
         errors.update(a["error"] for a in planning.get("attempts", []) if a.get("error"))
+    if any("local_model_worker" in error or "local_model_timeout" in error for error in errors):
+        raise ContractError("model worker failed; do not publish this run")
     return {"questions": len(rows), "layers_offloaded": 29, "attempt_errors": dict(errors)}
 
 
@@ -337,30 +398,47 @@ def remove_prepared_copies(folder: Path, cache: Path) -> dict:
 
 
 def run_pipeline(
-    data: Path, output: Path, cache: Path, model: Path, checkpoint: Path, *, chunk_size: int = 100
+    data: Path,
+    output: Path,
+    cache: Path,
+    model: Path,
+    checkpoint: Path,
+    *,
+    chunk_size: int = 100,
+    split_name: str = "train",
 ) -> None:
     require_project_environment()
     for path in (output, cache, checkpoint):
         require_output(path, data)
     if digest(model) != MODEL_SHA or model.is_symlink():
         raise ContractError("run requires the verified local baseline GGUF")
-    if not 1 <= chunk_size <= 3000 or (data / "answers.jsonl").exists():
-        raise ContractError("use label-free staged inputs and chunk_size1..3000")
+    if split_name not in SPLIT_COUNTS:
+        raise ContractError("choose train or public_test")
+    expected_count = SPLIT_COUNTS[split_name]
+    if not 1 <= chunk_size <= expected_count or (data / "answers.jsonl").exists():
+        raise ContractError("use label-free staged inputs and chunk_size within split size")
     split = load_split(data)
-    if len(split.questions) != 3000:
-        raise ContractError("full train requires all3000 questions")
+    if len(split.questions) != expected_count:
+        raise ContractError(f"{split_name} requires exactly {expected_count} questions")
     output.mkdir(parents=True, exist_ok=True)
     before = {name: digest(path) for name, path in input_files(data).items()}
     source = source_hashes()
     selection = {
+        "split": split_name,
         "inputs": before,
         "source": source,
         "model_sha256": MODEL_SHA,
         "chunk_size": chunk_size,
-        "questions": [asdict(q) | {"stage": reporting_stage(q)} for q in split.questions],
+        "questions": [
+            asdict(q) | ({"stage": reporting_stage(q)} if split_name == "train" else {})
+            for q in split.questions
+        ],
     }
     identity = hashlib.sha256(dumps(selection).encode()).hexdigest()
-    write_json(output / "selection.json", selection)
+    selection_path = output / "selection.json"
+    if selection_path.exists() and loads(selection_path.read_text()) != selection:
+        raise ContractError("run selection/source/config changed; use a new RUN_ID")
+    write_json(selection_path, selection)
     ids = [q.id for q in split.questions]
     parts = []
     started = time.monotonic()
@@ -458,7 +536,7 @@ def run_pipeline(
             with (folder / "submission.jsonl").open("rb") as incoming:
                 shutil.copyfileobj(incoming, merged)
     if [r["id"] for _, r in read_jsonl(submission)] != ids:
-        raise ContractError("full train merge does not contain exactly all3000 IDs")
+        raise ContractError(f"{split_name} merge does not contain exactly {expected_count} IDs")
     if source_hashes() != source or before != {
         name: digest(path) for name, path in input_files(data).items()
     }:
@@ -468,7 +546,8 @@ def run_pipeline(
         {
             "complete": True,
             "identity": identity,
-            "questions": 3000,
+            "split": split_name,
+            "questions": expected_count,
             "submission_sha256": digest(submission),
             "selection_sha256": digest(output / "selection.json"),
             "source": source,
@@ -506,6 +585,8 @@ def evaluate_pipeline(
     if (run / "RUNNING").exists():
         raise ContractError("inference is active; do not read answers yet")
     evidence = loads((run / "verification.json").read_text())
+    if evidence.get("split", "train") != "train":
+        raise ContractError("evaluation is train-only; public labels must never be opened")
     if (
         not evidence.get("complete")
         or evidence["questions"] != 3000
@@ -617,6 +698,8 @@ def evaluate_pipeline(
         run / "evaluation-verification.json",
         {
             "answers_sha256": answer_sha,
+            "submission_sha256": digest(run / "submission.jsonl"),
+            "selection_sha256": digest(run / "selection.json"),
             "report_sha256": digest(report_path),
             "evaluation_id": evaluation_id,
             "scored": 3000,
@@ -647,13 +730,20 @@ def main() -> None:
     extract = commands.add_parser("extract")
     extract.add_argument("--archive", type=Path, required=True)
     extract.add_argument("--destination", type=Path, required=True)
+    inputs = commands.add_parser("inputs", help="stage an existing DataMate folder or ZIP")
+    inputs.add_argument("--root", type=Path, required=True)
+    inputs.add_argument("--workspace", type=Path, required=True)
+    inputs.add_argument("--split", choices=SPLIT_COUNTS, required=True)
+    inputs.add_argument("--source", choices=["auto", "zip", "folder"], default="auto")
     stage = commands.add_parser("stage")
     stage.add_argument("--train-dir", type=Path, required=True)
     stage.add_argument("--data-dir", type=Path, required=True)
+    stage.add_argument("--split", choices=SPLIT_COUNTS, default="train")
     run = commands.add_parser("run")
     for name in ("data-dir", "output-dir", "cache-dir", "model", "checkpoint-dir"):
         run.add_argument("--" + name, type=Path, required=True)
     run.add_argument("--chunk-size", type=int, default=100)
+    run.add_argument("--split", choices=SPLIT_COUNTS, default="train")
     scoring = commands.add_parser("evaluate")
     scoring.add_argument("--answers", type=Path, required=True)
     scoring.add_argument("--run-dir", type=Path, required=True)
@@ -663,9 +753,17 @@ def main() -> None:
     if args.command == "setup":
         setup(args.directory)
     elif args.command == "extract":
-        print(extract_train(args.archive, args.destination))
+        print(extract_split(args.archive, args.destination))
+    elif args.command == "inputs":
+        print(
+            dumps(stage_from_root(args.root, args.workspace, args.split, source_kind=args.source))
+        )
     elif args.command == "stage":
-        print(dumps(stage_inputs(args.train_dir, args.data_dir)))
+        print(
+            dumps(
+                stage_inputs(args.train_dir, args.data_dir, expected_count=SPLIT_COUNTS[args.split])
+            )
+        )
     elif args.command == "run":
 
         def interrupted(_signal, _frame):
@@ -685,6 +783,7 @@ def main() -> None:
                 args.model,
                 args.checkpoint_dir,
                 chunk_size=args.chunk_size,
+                split_name=args.split,
             )
         finally:
             marker.unlink(missing_ok=True)

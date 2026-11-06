@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import shutil
 import sqlite3
 import tarfile
@@ -14,6 +15,77 @@ import pytest
 
 from scripts import colab_pipeline as pipeline
 from src.jsonio import ContractError, dumps, loads, write_json
+
+
+def expanded_split(root: Path, count: int) -> None:
+    record = next(pipeline.read_jsonl(root / "questions.jsonl"))[1]
+    (root / "questions.jsonl").write_text(
+        "".join(dumps(record | {"id": f"synthetic_{i}"}) + "\n" for i in range(count))
+    )
+
+
+@pytest.mark.parametrize("split_name,count", [("train", 3000), ("public_test", 1000)])
+def test_datamate_existing_folder_stages_exact_split_without_opening_labels(
+    synthetic_split, tmp_path, monkeypatch, split_name, count
+):
+    root = tmp_path / "DataMate"
+    root.mkdir()
+    source = root / split_name
+    shutil.copytree(synthetic_split, source)
+    expanded_split(source, count)
+    original = Path.open
+
+    def no_labels(path, *args, **kwargs):
+        if path.name == "answers.jsonl":
+            raise AssertionError("inference staging opened labels")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", no_labels)
+    workspace = tmp_path / "ssd"
+    result = pipeline.stage_from_root(root, workspace, split_name)
+    assert result["source_kind"] == "folder" and result["questions"] == count
+    assert Path(result["data_dir"]).name == split_name
+    assert not (Path(result["data_dir"]) / "answers.jsonl").exists()
+    assert pipeline.stage_from_root(root, workspace, split_name) == result
+    assert (source / "answers.jsonl").exists()
+
+
+def test_train_zip_is_used_once_and_folder_can_be_selected(synthetic_split, tmp_path):
+    root = tmp_path / "DataMate"
+    root.mkdir()
+    source = root / "train"
+    shutil.copytree(synthetic_split, source)
+    expanded_split(source, 3000)
+    archive = root / "train.zip"
+    with zipfile.ZipFile(archive, "w") as target:
+        for path in source.rglob("*"):
+            if path.is_file():
+                target.write(path, "train/" + str(path.relative_to(source)))
+    workspace = tmp_path / "ssd"
+    result = pipeline.stage_from_root(root, workspace, "train")
+    assert result["source_kind"] == "zip" and result["questions"] == 3000
+    assert result["archive_sha256"] == pipeline.digest(archive)
+    assert pipeline.stage_from_root(root, workspace, "train") == result
+    assert len(list((workspace / "archives").iterdir())) == 1
+    folder = pipeline.stage_from_root(root, tmp_path / "folder-ssd", "train", source_kind="folder")
+    assert folder["source_kind"] == "folder" and folder["sha256"] == result["sha256"]
+
+
+def test_public_count_guard_rejects_partial_input_before_staging(synthetic_split, tmp_path):
+    root = tmp_path / "DataMate"
+    shutil.copytree(synthetic_split, root / "public_test")
+    workspace = tmp_path / "ssd"
+    with pytest.raises(ContractError, match="expected 1000"):
+        pipeline.stage_from_root(root, workspace, "public_test")
+    assert not (workspace / "inference/public_test").exists()
+
+
+def test_public_evaluator_refuses_before_any_label_read(tmp_path):
+    run = tmp_path / "public-run"
+    run.mkdir()
+    write_json(run / "verification.json", {"split": "public_test", "complete": True})
+    with pytest.raises(ContractError, match="train-only"):
+        pipeline.evaluate_pipeline(tmp_path / "nonexistent-labels", run, tmp_path / "report.json")
 
 
 def test_stage_excludes_even_invalid_labels_and_preserves_inputs(synthetic_split, tmp_path):
@@ -58,22 +130,29 @@ def test_dataset_archive_cannot_escape_destination(tmp_path, name):
     with zipfile.ZipFile(archive, "w") as output:
         output.writestr(name, "forbidden")
     with pytest.raises(ContractError, match="unsafe"):
-        pipeline.extract_train(archive, tmp_path / "extracted")
+        pipeline.extract_split(archive, tmp_path / "extracted")
 
 
-def make_part(folder: Path) -> list[str]:
+def make_part(folder: Path, ids: list[str] | None = None) -> list[str]:
     (folder / "logs").mkdir(parents=True)
-    ids = ["fixture_a", "fixture_b"]
+    ids = ids if ids is not None else ["fixture_a", "fixture_b"]
     (folder / "submission.jsonl").write_text(
-        '{"id":"fixture_a","type":"number","answer":9007199254740993.123456789}\n'
-        '{"id":"fixture_b","type":"abstain"}\n'
+        "".join(
+            dumps({"id": qid, "type": "number", "answer": Decimal("9007199254740993.123456789")})
+            + "\n"
+            if i == 0
+            else dumps({"id": qid, "type": "abstain"}) + "\n"
+            for i, qid in enumerate(ids)
+        )
     )
     write_json(
         folder / "run_manifest.json",
         {
             "adapter": "local-planner",
+            "status": "completed",
+            "questions_total": len(ids),
             "question_errors": 0,
-            "questions_written": 2,
+            "questions_written": len(ids),
             "planner_metadata": {
                 "question_timeout_seconds": 120,
                 "model": {
@@ -91,6 +170,89 @@ def make_part(folder: Path) -> list[str]:
     for i, qid in enumerate(ids):
         write_json(folder / "logs" / f"{i:06d}.json", {"id": qid, "plan": {}})
     return ids
+
+
+@pytest.mark.parametrize("split_name,count", [("train", 3000), ("public_test", 1000)])
+def test_split_runner_uses_predict_and_resumes_complete_chunks_without_labels(
+    synthetic_split, tmp_path, monkeypatch, split_name, count
+):
+    expanded_split(synthetic_split, count)
+    (synthetic_split / "answers.jsonl").unlink()  # Own synthetic, label-free inference fixture.
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"synthetic model bytes, never loaded")
+    monkeypatch.setattr(pipeline, "MODEL_SHA", pipeline.digest(model))
+    monkeypatch.setattr(pipeline, "require_project_environment", lambda: None)
+    monkeypatch.setattr(pipeline, "source_hashes", lambda: {})
+
+    def stage(question):
+        if split_name == "public_test":
+            raise AssertionError("public questions were used for train metadata")
+        return "S1"
+
+    monkeypatch.setattr(pipeline, "reporting_stage", stage)
+    commands = []
+
+    class Process:
+        returncode = 0
+
+        def __init__(self, command, **kwargs):
+            commands.append(command)
+            assert command[:2] == ["bash", str(pipeline.ROOT / "predict.sh")]
+            ids = [command[i + 1] for i, value in enumerate(command) if value == "--question-id"]
+            make_part(Path(command[command.index("--output-dir") + 1]), ids)
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(pipeline.subprocess, "Popen", Process)
+    output, cache, checkpoints = (tmp_path / name for name in ["run", "cache", "drive-checkpoints"])
+    kwargs = {"chunk_size": 500, "split_name": split_name}
+    pipeline.run_pipeline(synthetic_split, output, cache, model, checkpoints, **kwargs)
+    selection = (output / "selection.json").read_bytes()
+    submission = (output / "submission.jsonl").read_bytes()
+    assert len(commands) == count // 500
+    assert len(submission.splitlines()) == count
+    assert b"9007199254740993.123456789" in submission
+    proof = loads((output / "verification.json").read_text())
+    assert proof["complete"] and proof["split"] == split_name and proof["questions"] == count
+    assert (checkpoints / "submission.jsonl").read_bytes() == submission
+    original_calls = len(commands)
+    pipeline.run_pipeline(synthetic_split, output, cache, model, checkpoints, **kwargs)
+    assert len(commands) == original_calls  # All verified parts were restored, no inference rerun.
+    assert (output / "submission.jsonl").read_bytes() == submission
+    path = synthetic_split / "questions.jsonl"
+    path.write_text(path.read_text().replace("Hôm nay", "Ngày hôm nay"))
+    with pytest.raises(ContractError, match="new RUN_ID"):
+        pipeline.run_pipeline(synthetic_split, output, cache, model, checkpoints, **kwargs)
+    assert (output / "selection.json").read_bytes() == selection
+
+
+def test_existing_notebook_has_train_public_modes_and_guarded_scoring():
+    import ast
+
+    notebook = json.loads((pipeline.ROOT / "scripts/DataMate_Colab.ipynb").read_text())
+    sources = ["".join(c["source"]) for c in notebook["cells"] if c["cell_type"] == "code"]
+    for source in sources:
+        ast.parse(source)
+    combined = "\n".join(sources)
+    assert '"train": 3000, "public_test": 1000' in combined
+    assert any(
+        isinstance(node, ast.List)
+        and any(
+            isinstance(left, ast.Constant)
+            and left.value == "--split"
+            and isinstance(right, ast.Name)
+            and right.id == "SPLIT"
+            for left, right in zip(node.elts, node.elts[1:], strict=False)
+        )
+        for node in ast.walk(ast.parse(combined))
+    )
+    assert "datamate_runtime.zip" not in combined
+    scoring = next(s for s in sources if '"scripts.colab_pipeline",' in s and '"evaluate",' in s)
+    guard = ast.parse(scoring).body[0]
+    assert isinstance(guard, ast.If)
+    assert ast.unparse(guard.test) == "SPLIT == 'train' and EVALUATE_TRAIN"
+    assert all(c.get("outputs", []) == [] for c in notebook["cells"])
 
 
 def test_checkpoint_preserves_decimal_bytes_excludes_facts_and_rejects_tampering(tmp_path):
@@ -121,7 +283,9 @@ def test_checkpoint_preserves_decimal_bytes_excludes_facts_and_rejects_tampering
         pipeline.validate_part(restored, ids, "source-a")
 
 
-@pytest.mark.parametrize("damage", ["offload", "duplicate", "malformed", "logs"])
+@pytest.mark.parametrize(
+    "damage", ["offload", "duplicate", "malformed", "logs", "status", "worker"]
+)
 def test_part_gate_rejects_cpu_fallback_invalid_ids_types_and_missing_logs(tmp_path, damage):
     folder = tmp_path / "part"
     ids = make_part(folder)
@@ -132,6 +296,16 @@ def test_part_gate_rejects_cpu_fallback_invalid_ids_types_and_missing_logs(tmp_p
         write_json(path, value)
     elif damage == "logs":
         (folder / "logs/000000.json").unlink()
+    elif damage == "status":
+        path = folder / "run_manifest.json"
+        value = loads(path.read_text())
+        value["status"] = "interrupted"
+        write_json(path, value)
+    elif damage == "worker":
+        path = folder / "logs/000000.json"
+        value = loads(path.read_text())
+        value["plan"] = {"attempts": [{"error": "local_model_worker_unavailable"}]}
+        write_json(path, value)
     else:
         path = folder / "submission.jsonl"
         replacement = '"fixture_a"' if damage == "duplicate" else "null"
@@ -308,3 +482,6 @@ def test_all3000_scoring_preserves_history_and_decimal_answers(tmp_path, monkeyp
     )
     assert "9007199254740993.123456789" in report.read_text()
     assert "source_sha256" not in report.read_text()
+    proof = loads((run / "evaluation-verification.json").read_text())
+    assert proof["submission_sha256"] == pipeline.digest(submission)
+    assert proof["selection_sha256"] == pipeline.digest(selection)
