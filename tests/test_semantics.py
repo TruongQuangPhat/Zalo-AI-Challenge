@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from src.agent.mock import MockPlanner
 from src.data.catalog import prepare_business
 from src.data.split import load_split
 from src.jsonio import dumps, loads
@@ -17,6 +16,7 @@ from src.runtime import run_inference
 from src.semantics.answerability import preflight, prepare_semantics
 from src.semantics.metric_registry import metric_contract
 from src.semantics.rulebook import SemanticError, parse_rulebook
+from tests.helpers import StubPlanner
 
 PERIOD = {"kind": "range", "start": "2026-01-01", "end": "2026-01-03"}
 
@@ -255,7 +255,7 @@ def test_runtime_metadata_reuse_cache_and_isolation(
     def no_network(*args, **kwargs):
         raise AssertionError("network is forbidden")
 
-    class Inspector(MockPlanner):
+    class Inspector(StubPlanner):
         def decide(self, question, *, context=None):
             seen.append(context)
             assert check(context)["decision"] == "eligible_to_execute"
@@ -313,9 +313,13 @@ def test_two_asof_dates_and_question_reordering_preserve_semantic_revision(
     assert context.prepared.path.read_bytes() == first_facts
     path = synthetic_split / "questions.jsonl"
     questions = path.read_text().splitlines()
-    run_inference(synthetic_split, tmp_path / "initial", cache_dir=tmp_path / "cache")
+    run_inference(
+        synthetic_split, tmp_path / "initial", cache_dir=tmp_path / "cache", planner=StubPlanner()
+    )
     path.write_text("\n".join(reversed(questions)) + "\n")
-    manifest = run_inference(synthetic_split, tmp_path / "reordered", cache_dir=tmp_path / "cache")
+    manifest = run_inference(
+        synthetic_split, tmp_path / "reordered", cache_dir=tmp_path / "cache", planner=StubPlanner()
+    )
     assert manifest["preparation"]["shop_a"]["facts_cache_hit"] is True
     one = loads((tmp_path / "initial/catalogs/shop_a.json").read_text())
     two = loads((tmp_path / "reordered/catalogs/shop_a.json").read_text())

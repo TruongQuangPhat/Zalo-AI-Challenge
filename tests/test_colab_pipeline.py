@@ -71,7 +71,7 @@ def make_part(folder: Path) -> list[str]:
     write_json(
         folder / "run_manifest.json",
         {
-            "is_mock": False,
+            "adapter": "local-planner",
             "question_errors": 0,
             "questions_written": 2,
             "planner_metadata": {

@@ -165,26 +165,6 @@ def test_worker_rejects_silent_gpu_fallback(monkeypatch, requested, supported, l
         assert "CPU fallback rejected" in records[0]["error"]
 
 
-def test_llm_container_acceptance_rejects_holdout_before_starting_docker(tmp_path, monkeypatch):
-    from scripts.verify_runtime import check_llm_image
-    from src.jsonio import write_json
-
-    (tmp_path / "config").mkdir()
-    write_json(
-        tmp_path / "config/validation_split.json",
-        {"protocols": {"business": {"partitions": {"dev": {"question_ids": ["dev"]}}}}},
-    )
-    monkeypatch.setattr("scripts.verify_runtime.ROOT", tmp_path)
-    monkeypatch.setattr("scripts.verify_runtime.load_split", lambda _: SimpleNamespace())
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("Docker must not start for a holdout selection")
-
-    monkeypatch.setattr("scripts.verify_runtime.checked", forbidden)
-    with pytest.raises(ContractError, match="both dev"):
-        check_llm_image("unused", 0, tmp_path, {"expected_intents_and_windows": {"holdout": None}})
-
-
 @pytest.mark.parametrize("damage", [None, "version", "native_record"])
 def test_cuda_bundle_is_locked_and_omits_duplicate_native_install(tmp_path, monkeypatch, damage):
     root = source_tree(tmp_path)

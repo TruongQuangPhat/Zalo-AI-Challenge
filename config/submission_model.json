@@ -1,0 +1,24 @@
+{
+  "models": [
+    {
+      "name": "Qwen2.5-1.5B-Instruct-GGUF",
+      "source": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+      "revision": "91cad51170dc346986eccefdc2dd33a9da36ead9",
+      "file": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "image_path": "/opt/model/model.gguf",
+      "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+      "bytes": 1117320736,
+      "parameter_budget_upper_bound": 1600000000,
+      "parameter_count_note": "Qwen model card: 1.5B; conservative 1.6B budget, not measured from quantized bytes",
+      "quantization": "Q4_K_M",
+      "license": "Apache-2.0",
+      "public_release_date": "2024-09-18",
+      "release_evidence": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/commit/dd26da440ef0330c47919d1ecae0966d24022222"
+    }
+  ],
+  "fine_tuning": false,
+  "training_data_generation": false,
+  "training_samples": 0,
+  "validation_samples_for_training": 0,
+  "note": "Current pretrained baseline only. Development evaluation uses separate competition train inputs, never packaged as weights or training data. Update this declaration before using a trained or additional model."
+}

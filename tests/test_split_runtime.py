@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from src.agent.mock import MockPlanner
 from src.cli import main
 from src.data.split import load_split
 from src.jsonio import ContractError, loads, read_jsonl
 from src.runtime import run_inference
+from tests.helpers import StubPlanner
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -48,7 +48,7 @@ def test_bad_questions_are_rejected_before_outputs(synthetic_split, tmp_path, ch
     edit_question(synthetic_split, change)
     output = tmp_path / "result"
     with pytest.raises(ContractError):
-        run_inference(synthetic_split, output)
+        run_inference(synthetic_split, output, planner=StubPlanner())
     assert not output.exists()
 
 
@@ -80,8 +80,8 @@ def test_no_labels_no_network_inputs_immutable_and_deterministic(
     monkeypatch.setattr(socket, "socket", no_network)
     monkeypatch.setattr(socket, "create_connection", no_network)
     for name in ["first", "second"]:
-        manifest = run_inference(synthetic_split, tmp_path / name)
-        assert manifest["is_mock"] is True
+        manifest = run_inference(synthetic_split, tmp_path / name, planner=StubPlanner())
+        assert manifest["adapter"] == "test-planner"
         assert manifest["status"] == "completed"
         assert manifest["question_errors"] == 0
         assert manifest["questions_written"] == 2
@@ -96,15 +96,15 @@ def test_no_labels_no_network_inputs_immutable_and_deterministic(
 
 def test_output_cannot_write_inside_input_or_replace_existing_run(synthetic_split, tmp_path):
     with pytest.raises(ContractError, match="outside"):
-        run_inference(synthetic_split, synthetic_split / "out")
+        run_inference(synthetic_split, synthetic_split / "out", planner=StubPlanner())
     output = tmp_path / "out"
-    run_inference(synthetic_split, output)
+    run_inference(synthetic_split, output, planner=StubPlanner())
     with pytest.raises(ContractError, match="already exists"):
-        run_inference(synthetic_split, output)
+        run_inference(synthetic_split, output, planner=StubPlanner())
 
 
 def test_failed_question_abstains_and_next_question_still_runs(synthetic_split, tmp_path):
-    class FailingOnce(MockPlanner):
+    class FailingOnce(StubPlanner):
         def decide(self, question, *, context=None):
             if question.id == "q_one":
                 raise RuntimeError("synthetic executor failure")
@@ -128,14 +128,17 @@ def test_cli_from_different_directory_and_separate_evaluation(synthetic_split, t
             str(synthetic_split),
             "--output-dir",
             str(output),
+            "--model",
+            str(tmp_path / "missing.gguf"),
         ],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
     )
-    assert completed.returncode == 0, completed.stderr
-    assert loads(completed.stdout)["questions_written"] == 2
+    assert completed.returncode == 2
+    assert not output.exists()
+    run_inference(synthetic_split, output, planner=StubPlanner())
     assert (
         main(
             [
@@ -173,3 +176,22 @@ def test_cuda_gate_uses_tensor_evidence_independently_of_docker_info(monkeypatch
     else:
         with pytest.raises(ContractError, match="unavailable"):
             check_gpu()
+
+
+def test_missing_weights_fail_without_creating_predictions(synthetic_split, tmp_path):
+    output = tmp_path / "missing-model-run"
+    assert (
+        main(
+            [
+                "predict",
+                "--data-dir",
+                str(synthetic_split),
+                "--output-dir",
+                str(output),
+                "--model",
+                str(tmp_path / "missing.gguf"),
+            ]
+        )
+        == 2
+    )
+    assert not output.exists()

@@ -13,6 +13,121 @@
 
 ---
 
+## Pipeline và docs cleanup — 06/11/2026
+
+**Current path:** root `predict.sh` → `src.cli predict` → LocalModel/LocalPlanner →
+run_inference → JSONL/logs. CLI giữ defaults duy nhất. Thiếu weights là lỗi trước
+output, không fallback mock. Xóa `src/agent/mock.py`, shell adapter submission và
+public Colab draft vừa tạo; hoãn setup Colab theo yêu cầu người dùng. Test doubles
+chỉ nằm trong `tests/helpers.py`, được inject rõ ràng cho behavioral tests; không
+có trong image hoặc public CLI. Planner/executor, normalization và Decimal không đổi.
+
+Docker copy **cùng root script** vào `/code/predict.sh`, cùng source/working directory
+`/code`; xóa legacy `/app` và source stale khi build lại. Bỏ source-only `runtime`
+và `baseline` targets cũ; `llm`/`cuda` chỉ bootstrap runtime/model parent, target
+production duy nhất là `submission`. Không build/thay/xóa image thực trong cleanup.
+Packaging vẫn gọi entrypoint chung, không tạo inference implementation thứ hai.
+Input staging allowlist chuyển sang `scripts/input_data.py`, bỏ phụ thuộc submission
+vào helper Colab/evaluator và giữ nguyên source data/parser hashes cho facts cache.
+
+README 718→135 dòng; docs12→5 files: capability matrix, data contracts, rulebook
+authority, model license, submission guide. Gộp requirements/provenance/checklist/
+training/image docs vào guide + machine config + README. Training no-training README
+được sinh trong package từ declaration, không giữ template thứ hai. Xóa Phase1
+acceptance/data-observation docs trùng fixture/evidence; giữ JSON fixtures, source
+authority docs, reports và lịch sử. Redirect các Markdown links cũ sang nguồn còn lại.
+
+Verifier bỏ native all-abstain mock smoke, Docker stub build và frozen13 runner trùng
+submission runner. CPU scope chỉ lint/format/tests + deterministic context; không
+chứng nhận model/Docker/GPU. Full scope yêu cầu prebuilt image và gọi submission smoke.
+**Đã chạy:** 231 focused tests pass /38,56s; full CPU gate **571 tests pass /145,43s**,
+Ruff lint/format79 files, lock check33 packages, deterministic context49 files,
+44 document links và single predict.sh inventory pass. Lần full đầu chạm pytest
+timeout120s của verifier; đã nâng riêng test timeout600s rồi chạy lại đạt, inference
+budgets không đổi. Report hiện hành ghi đúng `model_inference=NOT_TESTED` và
+`runtime_verified=false`; CPU gate không còn kế thừa chứng nhận mock/Docker lịch sử.
+CLI context mới kiểm một root script và hashes của mọi packaged file, không có
+mock/datasets/labels; chưa build image thực. Actual CPU/GPU model/Docker/RTX5090/SLA
+chưa test trong cleanup.
+Source/checkpoint identity đã đổi; không ghép run cũ vào run mới. Không sửa datasets,
+weights, drivers, Docker host config hoặc numeric semantics; không commit/push/submit.
+
+## Colab public runner — preview trước cleanup, đã hoãn — 06/11/2026
+
+Theo yêu cầu chạy public test trên Colab rồi tự nộp JSONL trên web, đã tạo cặp
+artifact `.artifacts/colab-public-dmq781z0/DataMate_Public_Colab.ipynb` và
+`datamate_runtime.zip` (181.568 bytes, 54 files). Runtime ZIP chỉ gồm source inference,
+setup helpers hiện có, lockfile và license; không dataset/labels/weights/tests/Git.
+SHA-256 ZIP: `ec1087cf41d624d3878c665396399f46736efd461f7536040cd1efb383101923`.
+Notebook kiểm đúng source snapshot, setup Python3.11 + weights/CUDA đã pin, stage
+public split không nhãn với question count động, gọi `predict.sh` hiện có, validate
+types/IDs/manifest/actual offload, lưu output/evidence vào Drive khi hoàn tất và tải
+file cho người dùng tự upload. Mặc định full; smoke 3 câu không cung cấp file nộp.
+Không clone repository, không cần GitHub token; không train, gọi evaluator, dùng Docker hoặc tự submit.
+
+**VERIFIED_LOCAL_ARTIFACTS:** 6 code cells compile/AST và Ruff F pass; ZIP member
+allowlist và toàn bộ source hashes pass; isolated bundle imports và staging fixture
+public 1 câu pass. **Hosted Colab/model inference trên Colab NOT_TESTED**. Không tải
+weights hay chạy public inference trong phiên chuẩn bị này; không đổi model/semantics,
+không upload Drive/portal hoặc commit/push. README bổ sung cách dùng cặp artifact.
+
+## Submission packaging audit — lịch sử trước cleanup — 06/11/2026
+
+**Trạng thái: IMPLEMENTED + VERIFIED_CPU_TOOLING; Docker/GPU/archive thật NOT_TESTED.**
+Không nghiệm thu/freeze final solution. Audit read-only trước sửa xác nhận source S1–S5,
+catalog/normalization, local planner/executor, evaluator riêng, manifests/recovery,
+Docker targets và allowlisted `build_context` đã có; không viết lại chúng.
+
+Đã đọc lại Rule và Submission Guidance DataMate qua public API ngày 06/11. Rule
+`updated_time=1793767860` giữ cutoff weights **trước 26/10/2026**, tổng ≤15B, offline,
+2 × RTX 5090 /512 GB và 6 giờ. Guidance mới `updated_time=1793853700` (05/11 04:41:40 UTC)
+đã thêm [Docker guide DataMate riêng](https://dl-challenge.zalo.ai/2026/datamate_dkewxftdzo/zac2026_DataMate_docker_guideline_final.pdf).
+Đã tải PDF vào scratch và đọc đủ 10 trang; 840.677 bytes, SHA-256
+`c27d52ef1ab2c5490d86ae4b371a970151740feefa626367f4cedb07c1c9cb49`.
+Không có PDF LifeMate trong workspace; nội dung LifeMate được đối chiếu từ prompt.
+DataMate yêu cầu `/code/predict.sh` no-args, README/training declaration/manifest trong
+image, logs `elapsed_ms`/`thinking` và actual code/inputs/output; tar không nén ≤100 GB,
+MD5 file và gửi tar byte size. Không yêu cầu Jupyter notebook theo guide hiện tại.
+
+Thay đổi: `scripts/submission` điều phối context → build target `submission` bằng parent
+model/runtime local → inventory → hai cold label-free offline repeats → save/gzip →
+MD5/SHA-256 → CRC/tar/all-layer checks → load → smoke/compare. Source/runtime giữ `/app`,
+weights giữ `/opt/model`; `/code/predict.sh` chỉ delegate entrypoint cũ. Submission target
+mặc định UID0 để phù hợp output bind mount của command BTC; verifier dùng UID/GID host,
+capabilities dropped. Existing targets giữ UID65532. Chỉ thêm logging bắt buộc vào
+runtime, không đổi planner, model, số học hay output JSONL. Source hash đổi nên recovery
+không trộn checkpoints trước thay đổi. Provenance/config hiện tại khai báo pretrained
+trực tiếp, training/generation samples 0; không tạo training script giả. Trained/multiple-model
+successor cần allowlist actual assets riêng trước khi packager chấp nhận.
+
+Mặc định dry-run không Docker/mutation; execute dùng tag/path mới, không overwrite,
+không xóa image/cache, không upload/submit/commit/push. Stage chỉ bốn đầu vào inference,
+không mở/mount answers; archive checker còn kiểm lower layers/whiteouts để tránh dữ liệu
+hoặc nhãn trong parent. Manifest export giữ bất biến; `after_reload/verification.json`
+là proof cuối. Same-daemon load không chứng nhận clean host.
+
+**Đã chạy:** focused runtime/recovery/packaging 85 tests pass; sau bổ sung tests roundtrip,
+full suite **571 passed /149,07 s** (542 cũ +29 mới), Ruff check và format 78 files pass,
+toolchain đúng lock (pytest 9.1.1, Ruff 0.15.22, packaging 26.3), `uv lock --check --offline`
+pass; Bash syntax, CLI help, actual prepare dry-run trên train và CLI context creation
+pass. Context có 62 members, không copy lại model hoặc datasets/answers; scratch đã dọn.
+Sau chỉnh layout tài liệu trong package, **44 packaging tests pass /1,96 s**;
+24 local document links, whitespace của 12 file mới và `git diff --check` pass. Synthetic roundtrip
+dùng archive/CLI Docker giả, inference fixture không có model; không coi là actual image
+load hoặc model inference. Lượt pytest đầu lỗi ownership `/tmp/pytest-of-phat` trước test;
+đã đổi sang scratch mới và cleanup, không sửa ownership thư mục của người khác.
+
+**Chưa chạy:** build target mới, actual CPU/GPU model inference, full train benchmark,
+large export/load, clean-host recovery, RTX5090 và six-hour SLA. Read-only inventory thấy
+baseline local ID prefix `886ae6de82e9`; GPU GTX 1650 4 GB/driver 555.97. CUDA 12.4 hiện tại
+không chứng nhận Blackwell/CUDA≥12.8. Không đổi base/driver/weights để giải quyết trong task.
+Scorer equivalence và các addenda/split authority mới vẫn `NEEDS_OFFICIAL_CONFIRMATION`.
+Actual archive, Drive upload, portal submit và freeze đều pending.
+
+Audit/matrix/gaps: [requirements](docs/submission_guide.md); lệnh và manual steps:
+[guide](docs/submission_guide.md); evidence gates: [checklist](docs/submission_guide.md);
+model/source/training declarations nằm trong image khi prepare thực sự chạy.
+
 ## Train100 Docker/CUDA — 06/11/2026
 
 Mẫu hash đóng băng trước gold, 3–4 câu/business, phủ cả 30 businesses theo yêu cầu người dùng.
@@ -240,9 +355,9 @@ Không coi mọi con số của bản roadmap trước là quy định đã đư
 | Offline và input bất biến | Không network/API lúc inference, không tải weights/package khi chạy; input chỉ đọc | Đã đối chiếu public Rule BTC ngày 04/11/2026; Docker local kiểm tra network none, input/root read-only. |
 | Model eligibility | Weights công khai **trước 26/10/2026**, license phù hợp | Public Rule BTC đã đối chiếu 04/11/2026, thay mốc 01/10 cũ. Qwen2.5-1.5B-Instruct GGUF dùng revision 2024, SHA LFS khớp file local, Apache-2.0; evidence `.artifacts/s3-s6/model-upstream.json`. |
 | Parameter budget | Tổng **≤ 15B**, gồm model phụ và toàn bộ MoE, không phụ thuộc quantization | Đã đối chiếu public Rule BTC 04/11/2026; baseline chỉ một Qwen2.5-1.5B. |
-| Hardware / runtime | **2 × RTX 5090 32 GB**, RAM 512 GB; Blackwell cần CUDA ≥ 12.8 | Đã đối chiếu public Rule BTC; local GTX1650/cu124 chưa chứng nhận Blackwell. Chưa có tài liệu base image/runner riêng. |
+| Hardware / runtime | **2 × RTX 5090 32 GB**, RAM 512 GB; Blackwell cần CUDA ≥ 12.8 | Đã đối chiếu public Rule và Docker guide DataMate (06/11); alternative phải hỗ trợ SM12.0. Local GTX1650/cu124 chưa chứng nhận Blackwell. |
 | Time budget | **6 giờ wall-clock**, gồm model loading và preparation | Đã đối chiếu public Rule BTC; đo local báo riêng cold/warm, không suy SLA BTC từ smoke hoặc batch dev. |
-| Entrypoint / mounts | Input `/data` read-only, output `/result/submission.jsonl` | Public Rule BTC đã đối chiếu; `predict.sh` và default CMD baseline dùng hai mount này. Hợp đồng runner/base image riêng vẫn chưa có. |
+| Entrypoint / mounts | Input `/data` read-only, output `/result/submission.jsonl` | Docker guide DataMate đã đọc06/11: BTC override bash, `/code/predict.sh` no-args, shm16g; target submission bổ sung adapter, actual container gate chưa chạy. |
 | Submission quota | **5 lượt public/ngày**, tối đa **2 lần nộp giải pháp Docker**, chỉ xét lần cuối | Đã đối chiếu public guidance và nội dung người dùng cung cấp; không tự nộp. |
 | Reproducibility | Chênh PA tuyệt đối upload/re-run **≤ 0,03** | Đã đối chiếu public Rule BTC; các lượt local lưu seed/config/hash và báo độ lặp lại riêng. |
 | Dữ liệu và can thiệp | Không hard-code đáp án/ID, không sửa output thủ công; phát triển bằng train và synthetic hợp lệ, không train bằng public/private test | Chính sách phát triển của dự án; đối chiếu thêm quyền dùng dữ liệu ngoài và quy định test của BTC. Đọc README/rulebook/dữ liệu test tại runtime là đầu vào inference, không phải bước học/cập nhật weights. |
@@ -376,7 +491,7 @@ Annotations, gold types và thống kê theo câu chỉ phục vụ phân tích/
 5. Contracts S1 và capability matrix có required sources/operators, expected values synthetic và fallback cụ thể. Kiểm tra schema/manifest và invariant đã triển khai phải chạy đạt; case nghiệp vụ chờ Phase 2–6 ghi `planned`, không lấy mock làm bằng chứng metric đúng. Chưa được bật revenue/count chỉ vì fixture đã được viết.
 6. Ghi trạng thái, kết quả kiểm tra, giới hạn và việc tiếp theo trong roadmap. Phase 1 hoàn thành nghĩa là đặc tả/fixtures/protocol sẵn sàng cho S1; M1 vẫn cần **LLM thật → plan → execution → output → evaluator**, và baseline vẫn cần các gate ở các phase sau.
 
-**Nghiệm thu Phase 1 — 01/11/2026:** [contracts](docs/data-contracts.md), [observations](docs/data-observations.md), [capability matrix](docs/capability-matrix.md), [acceptance cases](docs/acceptance-cases.md), [validation manifest](config/validation_split.json), hai công cụ offline và 33 fixture synthetic đã có. Lint/format và **84 tests** (58 cũ + 26 mới) đạt trong `.venv` Python 3.11. Inventory **162 file / 340 bảng train** khớp hash/kích thước/tên bảng với EDA cũ, input giữ nguyên. Manifest seed 20261101 có hai protocol: business dev/validation/final = **16/7/7 shop, 1.658/671/671 câu**; structure = **27/2/1 shop, 2.645/237/118 câu**, tách toàn họ handwritten/mixed. Pilot và khảo sát sâu mới chỉ dùng giao hai dev.
+**Nghiệm thu Phase 1 — 01/11/2026:** [contracts](docs/data-contracts.md), [observations](roadmap.md), [capability matrix](docs/capability-matrix.md), [acceptance cases](tests/fixtures/data_acceptance_cases.json), [validation manifest](config/validation_split.json), hai công cụ offline và 33 fixture synthetic đã có. Lint/format và **84 tests** (58 cũ + 26 mới) đạt trong `.venv` Python 3.11. Inventory **162 file / 340 bảng train** khớp hash/kích thước/tên bảng với EDA cũ, input giữ nguyên. Manifest seed 20261101 có hai protocol: business dev/validation/final = **16/7/7 shop, 1.658/671/671 câu**; structure = **27/2/1 shop, 2.645/237/118 câu**, tách toàn họ handwritten/mixed. Pilot và khảo sát sâu mới chỉ dùng giao hai dev.
 
 **Annotation và bằng chứng:** taxonomy v1 bao phủ đúng **3.000 IDs**; **100 câu dev đã rà nghĩa câu**, **2.900 câu proposed**. Số unresolved theo chiều intent/metric/temporal/dependency/output lần lượt **43/212/48/212/2.331**; không coi proposal là gold annotation. Không trích gold types hoặc mở thêm giá trị đáp án; labels chỉ hash opaque bytes. Annotation chạy lại cho records giống từng byte; artifacts/reviews giữ cục bộ tại `.artifacts/data_preparation/`, không commit. Chi tiết hash/version và gates trong [reports/data_preparation.json](reports/data_preparation.json).
 
@@ -406,7 +521,7 @@ Annotations, gold types và thống kê theo câu chỉ phục vụ phân tích/
 | `biz_121/DonHang_ChiTiet.xlsx`, `DuLieuXuat.xlsx`, README | Header bán dòng 3; dòng 6–7 chỉ có E:I. File phụ có 6 sheet danh mục/nhập/lô/thuốc. | Giữ ô header trống để Phase 3 phục hồi nhóm có căn cứ; đọc cả workbook phụ, không chỉ sheet bán đầu tiên. |
 | `biz_123/pos.sqlite`, README | 17 bảng, không khai báo PK/FK qua `table_info`/`foreign_key_list`; README mô tả liên kết mã đơn, payments và stock balances. | Schema khai báo không đủ xác minh khóa; giữ declared type và storage class thực. Locator SQLite phải độc lập với mã nghiệp vụ và thứ tự event. |
 
-Mẫu XLSX trên **không chứng minh** toàn workbook không có formula/error/merged cells. Header nhiều dòng, encoding khác UTF-8, multiline CSV, 1904 date system, công thức thiếu cache, header trùng và file hỏng là **guardrails cần fixture synthetic**, chưa phải phát hiện đã xác nhận ở các nguồn vừa đọc. Quan sát Phase 1 tại [data observations](docs/data-observations.md) vẫn có giới hạn riêng; không nâng mọi quan hệ candidate thành verified.
+Mẫu XLSX trên **không chứng minh** toàn workbook không có formula/error/merged cells. Header nhiều dòng, encoding khác UTF-8, multiline CSV, 1904 date system, công thức thiếu cache, header trùng và file hỏng là **guardrails cần fixture synthetic**, chưa phải phát hiện đã xác nhận ở các nguồn vừa đọc. Quan sát Phase 1 tại [data observations](roadmap.md) vẫn có giới hạn riêng; không nâng mọi quan hệ candidate thành verified.
 
 **Ranh giới với các phase khác**
 
@@ -1245,7 +1360,7 @@ license Apache-2.0 đã đóng gói trong image. Không suy chứng nhận Black
 
 **Bản ghi quy định dự kiến trong Phase 0:** mỗi mục có `claim`, `value`, `status`, `source_url_or_file`, `section`, `retrieved_at`, `version_or_hash`, `verified_by`, `affected_config`, `open_question`. Khi chưa có nguồn, ghi `unverified`; không tự tạo trích dẫn. Giải quyết trước quyết định phụ thuộc vào thông số đó và trước nộp bài.
 
-**Còn cần kiểm tra trước nộp:** tài liệu Docker/base image/runner riêng, execution trên Blackwell/CUDA≥12.8, full-batch SLA và evaluator chính thức (list/table/alias). Các giới hạn chung đã đối chiếu ở mục 2.1 không tự chứng nhận image local. Công thức `PA_full` nội bộ suy ra từ +1/−1/0 chia tổng câu; phải đối chiếu cách BTC hiển thị/chấm khi evaluator chính thức có sẵn.
+**Cập nhật06/11:** Docker guide DataMate riêng đã được tìm và đọc; nguồn/hash và requirements matrix tại [submission requirements](docs/submission_guide.md). **Còn cần kiểm tra trước nộp:** execution trên Blackwell/CUDA≥12.8, full-batch SLA, addenda mới và evaluator chính thức (list/table/alias). Các giới hạn chung không tự chứng nhận image local. Công thức `PA_full` nội bộ suy ra từ +1/−1/0 chia tổng câu; phải đối chiếu cách BTC hiển thị/chấm khi evaluator chính thức có sẵn.
 
 **Ngoài phạm vi tài liệu này:** chọn model cụ thể, thiết kế prompt hoàn chỉnh, lựa chọn fine-tuning, mục tiêu PA dự đoán, điều chỉnh theo public/private test và kế hoạch tối ưu hậu baseline. Các quyết định này sẽ được đặt trong **Technical Blueprint** và **Experiment Log** sau khi có baseline và benchmark đầu tiên.
 

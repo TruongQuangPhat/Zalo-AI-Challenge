@@ -12,7 +12,4 @@ else
     echo "Project .venv is missing. Run uv sync --locked --python /usr/bin/python3.11 first." >&2
     exit 2
 fi
-if [ "$#" -eq 0 ]; then
-    set -- --data-dir /data --output-dir /result
-fi
 exec "${project_python}" -m src.cli predict "$@"

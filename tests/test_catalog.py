@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 
 import src.runtime as runtime
-from src.agent.mock import MockPlanner
 from src.data.cache import fingerprint
 from src.data.catalog import prepare_business
 from src.data.profiling import ProfileOptions
 from src.data.split import load_split
 from src.jsonio import ContractError, dumps, loads, read_jsonl
+from tests.helpers import StubPlanner
 
 
 def test_runtime_reuses_business_context_and_retains_future_raw_records(
@@ -26,7 +26,7 @@ def test_runtime_reuses_business_context_and_retains_future_raw_records(
         calls.append(business)
         return prepare(split, business, **kwargs)
 
-    class InspectingPlanner(MockPlanner):
+    class InspectingPlanner(StubPlanner):
         def decide(self, question, *, context=None):
             contexts.append(context)
             assert context.catalog["business_id"] == question.business_id
@@ -153,7 +153,7 @@ def test_failed_business_preparation_abstains_and_keeps_question_logs(
         raise ContractError("synthetic preparation failure")
 
     monkeypatch.setattr(runtime, "prepare_business", failed)
-    result = runtime.run_inference(synthetic_split, tmp_path / "run")
+    result = runtime.run_inference(synthetic_split, tmp_path / "run", planner=StubPlanner())
     assert calls == [1]
     assert result["question_errors"] == 2
     assert [r["type"] for _, r in read_jsonl(tmp_path / "run/submission.jsonl")] == ["abstain"] * 2
@@ -195,9 +195,13 @@ def test_question_order_and_as_of_dates_do_not_change_prepared_catalog(synthetic
     questions[0]["as_of_date"], questions[1]["as_of_date"] = "2026-01-01", "2026-01-03"
     path.write_text("".join(dumps(q) + "\n" for q in questions))
     cache = tmp_path / "cache"
-    first = runtime.run_inference(synthetic_split, tmp_path / "first", cache_dir=cache)
+    first = runtime.run_inference(
+        synthetic_split, tmp_path / "first", cache_dir=cache, planner=StubPlanner()
+    )
     path.write_text("".join(dumps(q) + "\n" for q in reversed(questions)))
-    second = runtime.run_inference(synthetic_split, tmp_path / "second", cache_dir=cache)
+    second = runtime.run_inference(
+        synthetic_split, tmp_path / "second", cache_dir=cache, planner=StubPlanner()
+    )
     assert not first["preparation"]["shop_a"]["cache_hit"]
     assert second["preparation"]["shop_a"]["cache_hit"]
     assert (tmp_path / "first/catalogs/shop_a.json").read_bytes() == (
@@ -219,7 +223,7 @@ def test_same_entity_key_in_two_businesses_keeps_separate_contexts(synthetic_spl
     path.write_text("".join(dumps(q) + "\n" for q in questions))
     seen = {}
 
-    class InspectingPlanner(MockPlanner):
+    class InspectingPlanner(StubPlanner):
         def decide(self, question, *, context=None):
             table = context.catalog["tables"][0]
             row = list(context.iter_rows(table["source_id"]))[1]

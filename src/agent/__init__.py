@@ -1,1 +1,1 @@
-"""Phase 0 contains a mock adapter only; no weights or real LLM inference."""
+"""Local LLM structured planning and deterministic business execution."""

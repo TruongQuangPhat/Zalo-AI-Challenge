@@ -26,6 +26,7 @@ from scripts.audit_dataset import (
 from src.data.split import Question, Split, load_split
 from src.jsonio import ContractError
 from src.runtime import run_inference
+from tests.helpers import StubPlanner
 
 
 def evaluation_fixture() -> tuple[Split, dict, dict]:
@@ -347,7 +348,7 @@ def test_inference_ignores_offline_metadata(synthetic_split, tmp_path, monkeypat
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", guarded_open)
-    result = run_inference(synthetic_split, tmp_path / "predictions")
+    result = run_inference(synthetic_split, tmp_path / "predictions", planner=StubPlanner())
     assert result["questions_written"] == 2
     assert result["question_errors"] == 0
 

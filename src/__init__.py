@@ -1,3 +1,3 @@
-"""DataMate: offline source ingestion and mock inference using the standard library."""
+"""DataMate: offline data preparation, local LLM planning and deterministic execution."""
 
 __version__ = "0.0.1"

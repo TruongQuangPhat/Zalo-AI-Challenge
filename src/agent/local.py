@@ -28,7 +28,7 @@ def backend_identity() -> dict:
 
 
 def _worker(pipe, model_path: str, n_ctx: int, threads: int, gpu_layers: int = 0) -> None:
-    # Import only inside the worker: mock/CPU tooling never requires the LLM group.
+    # Import only inside the worker: data/CPU tooling never requires the LLM group.
     try:
         from llama_cpp import (
             Llama,

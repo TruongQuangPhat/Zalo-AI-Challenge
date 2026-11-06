@@ -100,7 +100,6 @@ def run_identity(split: Split, questions: tuple[Question, ...], adapter: Any) ->
         "question_order": [q.id for q in questions],
         "adapter": {
             "name": adapter.name,
-            "is_mock": adapter.is_mock,
             "class": f"{type(adapter).__module__}.{type(adapter).__qualname__}",
             "metadata": metadata,
         },
@@ -111,7 +110,7 @@ def run_identity(split: Split, questions: tuple[Question, ...], adapter: Any) ->
     return {
         "sha256": fingerprint(dependencies),
         "dependencies": dependencies,
-        "resumable": adapter.is_mock or bool((metadata or {}).get("model", {}).get("sha256")),
+        "resumable": bool((metadata or {}).get("model", {}).get("sha256")),
     }
 
 

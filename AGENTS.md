@@ -16,13 +16,14 @@ Keep contributor practices here, setup in `README.md`, and plans, progress, and 
 Use the isolated Python 3.11 `.venv`, managed through `pyproject.toml` and `uv.lock`. Run from the repository root:
 
 ```bash
-uv sync --locked --python /usr/bin/python3.11
+uv sync --locked --python /usr/bin/python3.11 --group llm
 uv run --no-sync python -m scripts.verify_runtime --scope cpu
-uv run --no-sync python -m scripts.verify_runtime --scope all
+uv run --no-sync python -m scripts.verify_runtime --scope all \
+  --image zaic2026_datamate_team:review1 --data-dir dataset/train
 ./predict.sh --data-dir dataset/train --output-dir .artifacts/my-run
 ```
 
-The verifier runs lint, formatting checks, tests, and smoke checks. Full verification also builds/runs Docker offline and checks CUDA; it requires accessible hardware, a daemon, and a local base image. Use fresh output directories.
+CPU verification runs lint, formatting, tests, and deterministic source-context checks; it does not run a model or certify Docker/CUDA. Full verification uses an already built image through the shared submission smoke runner and checks CUDA. Build/export/reload belong to `scripts.submission`; all inference uses root `predict.sh`, copied to `/code/predict.sh` in Docker. Model weights are required; there is no production mock fallback. Use fresh output directories.
 
 ## Coding Style & Simplicity
 

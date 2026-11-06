@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from src.agent.mock import MockPlanner
 from src.cli import main
 from src.data.catalog import prepare_business
 from src.data.ingestion import Cell
@@ -26,6 +25,7 @@ from src.data.normalization.values import (
 from src.data.split import load_split
 from src.jsonio import ContractError, dumps, loads, read_jsonl
 from src.runtime import run_inference
+from tests.helpers import StubPlanner
 
 README = """One order line per row.
 - **order_id**: order id
@@ -344,7 +344,7 @@ def test_facts_keep_all_statuses_and_future_dates_with_question_independent_runt
     monkeypatch.setattr(Path, "open", guarded)
     contexts = []
 
-    class InspectingPlanner(MockPlanner):
+    class InspectingPlanner(StubPlanner):
         def decide(self, question, *, context=None):
             contexts.append(context)
             orders = list(context.prepared.iter_records("orders"))
@@ -503,9 +503,13 @@ def test_reordering_questions_and_dates_reuses_identical_uncut_facts(synthetic_s
         question["as_of_date"] = day
     questions_path.write_text("".join(dumps(row) + "\n" for row in questions))
     cache = tmp_path / "cache"
-    first = run_inference(synthetic_split, tmp_path / "first", cache_dir=cache)
+    first = run_inference(
+        synthetic_split, tmp_path / "first", cache_dir=cache, planner=StubPlanner()
+    )
     questions_path.write_text("".join(dumps(row) + "\n" for row in reversed(questions)))
-    second = run_inference(synthetic_split, tmp_path / "second", cache_dir=cache)
+    second = run_inference(
+        synthetic_split, tmp_path / "second", cache_dir=cache, planner=StubPlanner()
+    )
     assert not first["preparation"]["shop_a"]["facts_cache_hit"]
     assert second["preparation"]["shop_a"]["facts_cache_hit"]
     assert (tmp_path / "first/prepared/shop_a/facts.sqlite").read_bytes() == (

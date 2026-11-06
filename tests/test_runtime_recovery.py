@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 import src.runtime as runtime
-from src.agent.mock import MockPlanner
 from src.jsonio import ContractError, loads, write_json
+from tests.helpers import StubPlanner
 from tests.test_split_runtime import snapshot
 
 
-class InterruptingPlanner(MockPlanner):
+class InterruptingPlanner(StubPlanner):
     def __init__(self):
         self.interrupt = True
         self.calls = []
@@ -78,9 +78,11 @@ def test_interrupt_at_each_commit_boundary(synthetic_split, tmp_path, monkeypatc
 
     monkeypatch.setattr(runtime, "atomic_json", interrupt_write)
     with pytest.raises(KeyboardInterrupt):
-        runtime.run_inference(synthetic_split, parent)
+        runtime.run_inference(synthetic_split, parent, planner=StubPlanner())
     monkeypatch.setattr(runtime, "atomic_json", real_write)
-    result = runtime.run_inference(synthetic_split, tmp_path / "next", resume_from=parent)
+    result = runtime.run_inference(
+        synthetic_split, tmp_path / "next", resume_from=parent, planner=StubPlanner()
+    )
     assert result["status"] == "completed"
     assert result["questions_written"] == 2
     assert result["resume"]["records_recovered"] == (0 if boundary == "log_only" else 1)
@@ -117,7 +119,7 @@ def test_unterminated_tail_requires_explicit_discard_and_parent_is_immutable(
 )
 def test_reject_corrupt_complete_prefix(synthetic_split, tmp_path, corruption):
     parent = tmp_path / "parent"
-    runtime.run_inference(synthetic_split, parent)
+    runtime.run_inference(synthetic_split, parent, planner=StubPlanner())
     path = parent / "submission.jsonl"
     lines = path.read_text().splitlines(keepends=True)
     if corruption == "malformed":
@@ -137,41 +139,49 @@ def test_reject_corrupt_complete_prefix(synthetic_split, tmp_path, corruption):
         write_json(log, value)
     path.write_text("".join(lines))
     with pytest.raises(ContractError):
-        runtime.run_inference(synthetic_split, tmp_path / "reject", resume_from=parent)
+        runtime.run_inference(
+            synthetic_split, tmp_path / "reject", resume_from=parent, planner=StubPlanner()
+        )
     assert not (tmp_path / "reject").exists()
 
 
 @pytest.mark.parametrize("mismatch", ["source", "parser", "normalizer", "model", "config", "input"])
 def test_resume_requires_all_identity_components(synthetic_split, tmp_path, mismatch):
     parent = tmp_path / "parent"
-    runtime.run_inference(synthetic_split, parent)
+    runtime.run_inference(synthetic_split, parent, planner=StubPlanner())
     path = parent / "run_manifest.json"
     manifest = loads(path.read_text())
     manifest["identity"]["dependencies"][mismatch] = "another revision"
     write_json(path, manifest)
     with pytest.raises(ContractError, match="identity"):
-        runtime.run_inference(synthetic_split, tmp_path / "reject", resume_from=parent)
+        runtime.run_inference(
+            synthetic_split, tmp_path / "reject", resume_from=parent, planner=StubPlanner()
+        )
 
 
 def test_actual_source_change_and_missing_legacy_proof_fail_before_writing(
     synthetic_split, tmp_path
 ):
     parent = tmp_path / "parent"
-    runtime.run_inference(synthetic_split, parent)
+    runtime.run_inference(synthetic_split, parent, planner=StubPlanner())
     source = synthetic_split / "data/shop_a/sales.csv"
     source.write_text(source.read_text() + "order_2,9\n")
     with pytest.raises(ContractError, match="identity"):
-        runtime.run_inference(synthetic_split, tmp_path / "changed", resume_from=parent)
+        runtime.run_inference(
+            synthetic_split, tmp_path / "changed", resume_from=parent, planner=StubPlanner()
+        )
     manifest_path = parent / "run_manifest.json"
     manifest = loads(manifest_path.read_text())
     del manifest["identity"]
     write_json(manifest_path, manifest)
     with pytest.raises(ContractError, match="proof"):
-        runtime.run_inference(synthetic_split, tmp_path / "legacy", resume_from=parent)
+        runtime.run_inference(
+            synthetic_split, tmp_path / "legacy", resume_from=parent, planner=StubPlanner()
+        )
 
 
 def test_resume_preserves_errors_in_merged_output(synthetic_split, tmp_path):
-    class Failure(MockPlanner):
+    class Failure(StubPlanner):
         def decide(self, question, *, context=None):
             if question.id == "q_one":
                 raise RuntimeError("synthetic error")
@@ -207,7 +217,7 @@ def test_live_heartbeat_updates_atomic_manifest_and_uses_stderr(
             assert loads(path.read_text())["questions_written"] == 1
             observed.set()
 
-    class WaitForHeartbeat(MockPlanner):
+    class WaitForHeartbeat(StubPlanner):
         def decide(self, question, *, context=None):
             if question.id == "q_two":
                 assert observed.wait(3), "no heartbeat while planner was busy"
@@ -223,14 +233,16 @@ def test_live_heartbeat_updates_atomic_manifest_and_uses_stderr(
 
 def test_resume_rejects_live_parent(synthetic_split, tmp_path):
     parent = tmp_path / "parent"
-    runtime.run_inference(synthetic_split, parent)
+    runtime.run_inference(synthetic_split, parent, planner=StubPlanner())
     # Use a separate exclusive descriptor, as an active inference process does.
     import fcntl
 
     with (parent / "run.lock").open("rb") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         with pytest.raises(ContractError, match="still running"):
-            runtime.run_inference(synthetic_split, tmp_path / "reject", resume_from=parent)
+            runtime.run_inference(
+                synthetic_split, tmp_path / "reject", resume_from=parent, planner=StubPlanner()
+            )
     assert not (tmp_path / "reject").exists()
 
 
@@ -250,7 +262,7 @@ def test_stale_checkpoint_recovers_matching_complete_records(synthetic_split, tm
 
 @pytest.mark.parametrize("component", ["model", "timeout", "gpu_layers"])
 def test_changed_actual_adapter_metadata_refuses_resume(synthetic_split, tmp_path, component):
-    class ConfiguredMock(MockPlanner):
+    class ConfiguredPlanner(StubPlanner):
         def __init__(self, value):
             self.metadata = {"model": {"sha256": "0" * 64}, "timeout": 120, "gpu_layers": 0}
             if component == "model":
@@ -259,10 +271,10 @@ def test_changed_actual_adapter_metadata_refuses_resume(synthetic_split, tmp_pat
                 self.metadata[component] = int(value)
 
     parent = tmp_path / "parent"
-    runtime.run_inference(synthetic_split, parent, planner=ConfiguredMock("1"))
+    runtime.run_inference(synthetic_split, parent, planner=ConfiguredPlanner("1"))
     with pytest.raises(ContractError, match="identity"):
         runtime.run_inference(
-            synthetic_split, tmp_path / "reject", resume_from=parent, planner=ConfiguredMock("2")
+            synthetic_split, tmp_path / "reject", resume_from=parent, planner=ConfiguredPlanner("2")
         )
 
 
@@ -275,9 +287,9 @@ def test_sigterm_records_interrupted_state_without_claiming_completion(synthetic
 import signal
 import sys
 from pathlib import Path
-from src.agent.mock import MockPlanner
+from tests.helpers import StubPlanner
 from src.runtime import run_inference
-class Stop(MockPlanner):
+class Stop(StubPlanner):
     def decide(self, question, *, context=None):
         signal.raise_signal(signal.SIGTERM)
 try:

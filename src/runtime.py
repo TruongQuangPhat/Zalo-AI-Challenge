@@ -15,11 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from src import __version__
-from src.agent.mock import MockPlanner
 from src.contracts import validate_answer
 from src.data.catalog import prepare_business, require_output
 from src.data.normalization import prepare_facts
-from src.data.split import load_split
+from src.data.split import load_split, question_dict
 from src.jsonio import ContractError, dumps
 from src.runtime_checkpoint import (
     atomic_json,
@@ -90,7 +89,7 @@ def run_inference(
     data_dir: Path,
     output_dir: Path,
     *,
-    planner: Any = None,
+    planner: Any,
     cache_dir: Path | None = None,
     question_ids: list[str] | None = None,
     resume_from: Path | None = None,
@@ -118,7 +117,7 @@ def run_inference(
     ]:
         if (output / name).exists() or (output / name).is_symlink():
             raise ContractError(f"output already exists: {name}; use a fresh output directory")
-    adapter = planner if planner is not None else MockPlanner()
+    adapter = planner
     started = time.perf_counter()
     identity = run_identity(split, questions, adapter)
     prefix, lineage = [], None
@@ -136,7 +135,6 @@ def run_inference(
         "diagnostics_version": "runtime-diagnostics-v2",
         "status": "running",
         "adapter": adapter.name,
-        "is_mock": adapter.is_mock,
         "identity": identity,
         "resume": lineage,
         "planner_metadata": getattr(adapter, "metadata", None),
@@ -179,7 +177,8 @@ def run_inference(
             checkpoint()
             for index, question in enumerate(questions[len(prefix) :], len(prefix)):
                 question_start = time.perf_counter()
-                error, execution = None, "not_performed"
+                error, execution, decision = None, "not_performed", None
+                called_planner = False
                 timings = {}
                 with lock:
                     manifest.update(current_question=question.id, phase="preparation")
@@ -224,6 +223,7 @@ def run_inference(
                     context = contexts[question.business_id]
                     if context is None:
                         raise ContractError("business preparation failed; see catalog diagnostic")
+                    called_planner = True
                     decision = adapter.decide(question, context=context)
                     answer = decision["answer"]
                     validate_answer(answer)
@@ -232,7 +232,9 @@ def run_inference(
                     plan = decision["plan"]
                     execution = decision.get("execution", "not_performed")
                     dumps(plan)
+                    dumps(decision)
                 except Exception as exc:
+                    decision = None
                     answer = {"id": question.id, "type": "abstain"}
                     plan = {"status": "failed"}
                     error = {"class": type(exc).__name__, "message": str(exc)}
@@ -242,7 +244,6 @@ def run_inference(
                     "business_id": question.business_id,
                     "as_of_date": question.as_of_date,
                     "adapter": adapter.name,
-                    "is_mock": adapter.is_mock,
                     "identity": identity["sha256"],
                     "plan": plan,
                     "answer": answer,
@@ -252,6 +253,30 @@ def run_inference(
                     "catalog": f"catalogs/{question.business_id}.json",
                     "execution": execution,
                 }
+                # DataMate Docker guide §3.3: Qwen2.5 emits structured plans,
+                # not a separate reasoning trace. Preserve its raw calls in plan.
+                record.update(
+                    elapsed_ms=max(0, int(record["elapsed_seconds"] * 1000)),
+                    thinking=None,
+                    code=(
+                        f"{type(adapter).__module__.replace('.', '/')}.py::"
+                        f"{type(adapter).__qualname__}.decide"
+                    )
+                    if called_planner
+                    else None,
+                    inputs={
+                        "question": question_dict(question),
+                        "context": {
+                            "catalog": record["catalog"],
+                            "prepared_facts": manifest["preparation"]
+                            .get(question.business_id, {})
+                            .get("facts"),
+                            "rulebook": str(split.root / "rulebook.md"),
+                            "calendar": str(split.root / "calendar.csv"),
+                        },
+                    },
+                    output=decision,
+                )
                 with lock:
                     manifest["phase"] = "output_checkpoint"
                 phase_start = time.perf_counter()

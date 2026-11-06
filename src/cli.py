@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -18,23 +19,39 @@ from src.semantics.answerability import prepare_semantics
 
 def main(argv: list[str] | None = None) -> int:
     args_list = list(sys.argv[1:] if argv is None else argv)
-    if args_list and args_list[0].startswith("--data-dir"):
-        args_list.insert(0, "predict")
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    predict = commands.add_parser("predict", help="label-free mock or bounded local planner")
-    predict.add_argument("--data-dir", type=Path, required=True)
-    predict.add_argument("--output-dir", type=Path, required=True)
-    predict.add_argument("--cache-dir", type=Path)
+    predict = commands.add_parser("predict", help="offline local LLM planner and execution")
+    predict.add_argument("--data-dir", type=Path, default=Path("/data"))
+    predict.add_argument("--output-dir", type=Path, default=Path("/result"))
+    predict.add_argument("--cache-dir", type=Path, default=os.environ.get("DATAMATE_CACHE"))
     predict.add_argument(
         "--resume-from", type=Path, help="verify immutable prior run; output must be fresh"
     )
     predict.add_argument("--resume-tail", choices=["reject", "discard"], default="reject")
-    predict.add_argument("--model", type=Path, help="local Qwen2.5 Instruct GGUF; enables planner")
+    predict.add_argument(
+        "--model",
+        type=Path,
+        default=Path(
+            os.environ.get(
+                "DATAMATE_MODEL",
+                str(
+                    Path(__file__).resolve().parents[1]
+                    / ".artifacts/models/qwen2.5-1.5b-instruct/model.gguf"
+                ),
+            )
+        ),
+        help="existing local GGUF; missing weights fail before writing output",
+    )
     predict.add_argument("--question-timeout", type=float, default=120)
     predict.add_argument("--model-load-timeout", type=float, default=180)
     predict.add_argument("--model-threads", type=int, default=4)
-    predict.add_argument("--gpu-layers", type=int, default=0, help="0 CPU, -1 all layers on GPU")
+    predict.add_argument(
+        "--gpu-layers",
+        type=int,
+        default=os.environ.get("DATAMATE_GPU_LAYERS", "0"),
+        help="0 CPU, -1 all layers on GPU",
+    )
     predict.add_argument(
         "--question-id", action="append", help="explicit subset, input order retained"
     )
@@ -60,37 +77,27 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(args_list)
     try:
         if args.command == "predict":
-            if args.model:
-                from src.agent.local import LocalModel
-                from src.agent.planner import LocalPlanner
+            from src.agent.local import LocalModel
+            from src.agent.planner import LocalPlanner
 
-                model = LocalModel(
-                    args.model,
-                    load_timeout=args.model_load_timeout,
-                    threads=args.model_threads,
-                    gpu_layers=args.gpu_layers,
-                )
-                try:
-                    report = run_inference(
-                        args.data_dir,
-                        args.output_dir,
-                        cache_dir=args.cache_dir,
-                        planner=LocalPlanner(model, timeout=args.question_timeout),
-                        question_ids=args.question_id,
-                        resume_from=args.resume_from,
-                        resume_tail=args.resume_tail,
-                    )
-                finally:
-                    model.close()
-            else:
+            model = LocalModel(
+                args.model,
+                load_timeout=args.model_load_timeout,
+                threads=args.model_threads,
+                gpu_layers=args.gpu_layers,
+            )
+            try:
                 report = run_inference(
                     args.data_dir,
                     args.output_dir,
                     cache_dir=args.cache_dir,
+                    planner=LocalPlanner(model, timeout=args.question_timeout),
                     question_ids=args.question_id,
                     resume_from=args.resume_from,
                     resume_tail=args.resume_tail,
                 )
+            finally:
+                model.close()
         elif args.command in {"catalog", "prepare"}:
             split = load_split(args.data_dir)
             require_output(args.output_dir, split.root)

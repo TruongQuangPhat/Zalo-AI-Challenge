@@ -24,6 +24,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from scripts.annotate_questions import propose
+from scripts.input_data import input_files
 from src.contracts import validate_answer
 from src.data.cache import fingerprint
 from src.data.catalog import digest, require_output
@@ -143,20 +144,6 @@ def extract_train(archive: Path, destination: Path) -> Path:
     return candidates[0]
 
 
-def input_files(root: Path) -> dict[str, Path]:
-    files = {name: root / name for name in ("questions.jsonl", "rulebook.md", "calendar.csv")}
-    for path in sorted((root / "data").rglob("*")):
-        if path.is_symlink():
-            raise ContractError("input source symlink is forbidden")
-        if path.is_file():
-            if path.suffix.casefold() not in {".md", ".csv", ".xlsx", ".sqlite", ".db"}:
-                raise ContractError(f"unexpected raw data file: {path.name}")
-            files[path.relative_to(root).as_posix()] = path
-    if any(p.is_symlink() or not p.is_file() for p in files.values()):
-        raise ContractError("missing or symlinked inference input")
-    return files
-
-
 def stage_inputs(source: Path, destination: Path, *, expected_count: int = 3000) -> dict:
     split = load_split(source)
     if len(split.questions) != expected_count:
@@ -257,7 +244,7 @@ def validate_part(folder: Path, ids: list[str], identity: str) -> dict:
     manifest = loads((folder / "run_manifest.json").read_text())
     model = manifest["planner_metadata"]["model"]
     if (
-        manifest["is_mock"]
+        manifest["adapter"] != "local-planner"
         or manifest["question_errors"]
         or manifest["questions_written"] != len(ids)
         or model["layers_offloaded"] != 29

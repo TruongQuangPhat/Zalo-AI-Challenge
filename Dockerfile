@@ -1,42 +1,49 @@
-# Both targets build without network from the allowlisted context.
+# CPU/CUDA stages prepare assets; every image runs the root predict.sh.
 ARG BASE_IMAGE=python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb
 ARG CPU_IMAGE=datamate-llm-cpu:local
 FROM ${BASE_IMAGE} AS source
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATAMATE_CONTAINER=1
-WORKDIR /app
-COPY src/ /app/src/
-COPY --chmod=0555 predict.sh /app/
-COPY pyproject.toml uv.lock /app/
+USER 0:0
+# Remove legacy /app and stale source when refreshing a packaged parent.
+# Keep model weights and installed runtime under /opt and /usr/local.
+RUN rm -rf /app /code/src
+WORKDIR /code
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATAMATE_CONTAINER=1 \
+    DATAMATE_MODEL=/opt/model/model.gguf DATAMATE_GPU_LAYERS=0 DATAMATE_CACHE=/result/cache \
+    HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+COPY src/ /code/src/
+COPY --chmod=0555 predict.sh /code/predict.sh
+COPY pyproject.toml uv.lock /code/
 COPY docs/model-license.txt /opt/model/LICENSE
-USER 65532:65532
-ENTRYPOINT ["/app/predict.sh"]
+ENTRYPOINT ["bash", "/code/predict.sh"]
+CMD []
 
 FROM source AS llm
-USER 0:0
 COPY llm/python/ /usr/local/lib/python3.11/site-packages/
 COPY llm/lib/ /opt/llm/lib/
 COPY llm/licenses/ /opt/llm/licenses/
 COPY llm/model.gguf /opt/model/model.gguf
 ENV LD_LIBRARY_PATH=/opt/llm/lib
-USER 65532:65532
-CMD ["--data-dir", "/data", "--output-dir", "/result", "--model", "/opt/model/model.gguf"]
 
 FROM ${CPU_IMAGE} AS cuda
 USER 0:0
-# Replace the binding distribution completely, so old CPU-only libraries cannot remain.
-RUN rm -rf /usr/local/lib/python3.11/site-packages/llama_cpp \
+RUN rm -rf /app /code/src \
+    /usr/local/lib/python3.11/site-packages/llama_cpp \
     /usr/local/lib/python3.11/site-packages/llama_cpp_python-*.dist-info \
     /usr/local/lib/python3.11/site-packages/lib
+COPY --from=source /code/ /code/
 COPY llm/python/ /usr/local/lib/python3.11/site-packages/
 COPY llm/lib/ /opt/llm/lib/
 COPY llm/licenses/ /opt/llm/licenses/
-USER 65532:65532
-CMD ["--data-dir", "/data", "--output-dir", "/result", "--model", "/opt/model/model.gguf", "--gpu-layers", "-1"]
+WORKDIR /code
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATAMATE_CONTAINER=1 \
+    DATAMATE_MODEL=/opt/model/model.gguf DATAMATE_GPU_LAYERS=-1 DATAMATE_CACHE=/result/cache \
+    HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 LD_LIBRARY_PATH=/opt/llm/lib
+ENTRYPOINT ["bash", "/code/predict.sh"]
+CMD []
 
-# Refresh source over a locally verified model/runtime image without copying weights again.
-# BASE_IMAGE must be a packaged CUDA LLM image when building this target.
-FROM source AS baseline
-CMD ["--data-dir", "/data", "--output-dir", "/result", "--model", "/opt/model/model.gguf", "--gpu-layers", "-1"]
-
-# Preserve the lightweight default target used by source-only verification.
-FROM source AS runtime
+# Final source refresh from a local parent already containing model/runtime assets.
+# Generated metadata adds no second prediction script.
+FROM source AS submission
+ARG SUBMISSION_MODEL=/opt/model/model.gguf
+ENV DATAMATE_MODEL=${SUBMISSION_MODEL} DATAMATE_GPU_LAYERS=-1
+COPY submission/ /code/

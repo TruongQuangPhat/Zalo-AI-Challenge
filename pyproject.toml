@@ -1,7 +1,7 @@
 [project]
 name = "datamate-baseline"
 version = "0.0.1"
-description = "Offline DataMate baseline with an opt-in local S1 planner"
+description = "Offline DataMate local LLM planning and deterministic execution"
 requires-python = ">=3.11,<3.12"
 dependencies = []
 

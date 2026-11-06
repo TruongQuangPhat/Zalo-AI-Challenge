@@ -22,6 +22,7 @@ from src.data.split import Question
 from src.evaluation.scorer import evaluate
 from src.jsonio import ContractError, dumps, loads
 from src.runtime import run_inference
+from tests.helpers import StubPlanner
 
 
 def question(**changes):
@@ -372,7 +373,7 @@ def test_context_and_runtime_are_offline_label_free_immutable_and_scored_separat
         model = ScriptedModel(today, today)
         output = tmp_path / "end-to-end"
         manifest = run_inference(synthetic_split, output, planner=LocalPlanner(model))
-    assert manifest["is_mock"] is False and manifest["question_errors"] == 0
+    assert manifest["adapter"] == "local-planner" and manifest["question_errors"] == 0
     log = loads(next((output / "logs").glob("*.json")).read_text())
     assert log["execution"]["status"] == "verified"
     assert before == {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in before}
@@ -389,11 +390,13 @@ def test_context_and_runtime_are_offline_label_free_immutable_and_scored_separat
 
 def test_subset_keeps_input_order_and_rejects_unknown_before_writing(synthetic_split, tmp_path):
     output = tmp_path / "subset"
-    manifest = run_inference(synthetic_split, output, question_ids=["q_two"])
+    manifest = run_inference(synthetic_split, output, question_ids=["q_two"], planner=StubPlanner())
     assert manifest["questions_written"] == 1
     assert loads((output / "submission.jsonl").read_text())["id"] == "q_two"
     with pytest.raises(ContractError):
-        run_inference(synthetic_split, tmp_path / "bad", question_ids=["unknown"])
+        run_inference(
+            synthetic_split, tmp_path / "bad", question_ids=["unknown"], planner=StubPlanner()
+        )
     assert not (tmp_path / "bad").exists()
 
 

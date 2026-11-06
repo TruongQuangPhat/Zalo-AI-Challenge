@@ -87,7 +87,6 @@ Thiếu source/coverage không tự đoán dữ liệu; server preflight quyết
 
 class LocalPlanner:
     name = "local-planner"
-    is_mock = False
 
     def __init__(self, model, *, attempts: int = 2, timeout: float = 120):
         if not 1 <= attempts <= 2 or timeout <= 0:
