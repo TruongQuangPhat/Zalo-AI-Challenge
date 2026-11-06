@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import re
+import sqlite3
+from collections.abc import Iterator
+from contextlib import closing
 from copy import deepcopy
+from functools import lru_cache
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.data.catalog import BusinessContext
 from src.data.normalization.stock import _alias_pattern
@@ -11,22 +17,67 @@ from src.data.split import Question
 from src.jsonio import ContractError, loads
 from src.semantics.rulebook import plain
 
+if TYPE_CHECKING:
+    from src.data.normalization.store import PreparedBusiness
+
+
+@lru_cache(maxsize=4)
+def _candidate_catalog(path: Path, revision: tuple, kind: str) -> tuple | None:
+    """Cache identities/aliases only, at most 4096 rows and 1 MiB text per entry.
+
+    The path plus inode/size/mtime identify the immutable prepared revision. No
+    question, as-of, source rows, metrics or query answers enter this cache.
+    """
+    result, size = [], 0
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:
+        for key, code, name, unit, aliases in conn.execute(
+            "SELECT entity_key,source_code,name,base_unit,aliases FROM entities WHERE kind=?",
+            (kind,),
+        ):
+            size += sum(len(v.encode()) for v in [key, code, name, unit, aliases] if v)
+            if size > 1024 * 1024 or len(result) >= 4096:
+                return None
+            result.append((key, code, name, unit, tuple(loads(aliases))))
+    if _catalog_revision(path) != revision:
+        raise ContractError("entity catalog changed during read")
+    return tuple(result)
+
+
+def _catalog_revision(path: Path) -> tuple:
+    info = path.stat()
+    return info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def _candidate_rows(prepared: PreparedBusiness, kind: str) -> Iterator[tuple]:
+    path = prepared.path
+    if path is None or path.is_symlink():
+        raise ContractError("prepared entity catalog unavailable")
+    path = path.resolve()
+    rows = _candidate_catalog(path, _catalog_revision(path), kind)
+    if rows is not None:
+        yield from rows
+    else:
+        with closing(prepared.connect()) as conn:
+            for key, code, name, unit, aliases in conn.execute(
+                "SELECT entity_key,source_code,name,base_unit,aliases FROM entities WHERE kind=?",
+                (kind,),
+            ):
+                yield key, code, name, unit, tuple(loads(aliases))
+
 
 def entity_candidates(context: BusinessContext, question: str, kind: str = "product") -> list[dict]:
     if not context.prepared or not context.prepared.summary.get("extensions", {}).get("counts"):
         return []
     # Accent preserving only. Source aliases have provenance in entities.source_ref.
     result, coded = [], []
-    for row in context.prepared.iter_records("entities"):
-        if row["kind"] != kind:
-            continue
-        if row["source_code"] and re.search(
-            _alias_pattern(row["source_code"]), question.casefold()
+    for key, code, name, unit, aliases in _candidate_rows(context.prepared, kind):
+        row = {"entity_key": key, "source_code": code, "name": name, "base_unit": unit}
+        if code and re.search(_alias_pattern(code), question.casefold()):
+            coded.append(row)
+        if any(
+            re.search(_alias_pattern(a), question.casefold()) for a in (*aliases, code or "") if a
         ):
-            coded.append({k: row[k] for k in ["entity_key", "source_code", "name", "base_unit"]})
-        aliases = loads(row["aliases"]) + ([row["source_code"]] if row["source_code"] else [])
-        if any(re.search(_alias_pattern(a), question.casefold()) for a in aliases):
-            result.append({k: row[k] for k in ["entity_key", "source_code", "name", "base_unit"]})
+            result.append(row)
     return (coded or result)[:9]
 
 
@@ -37,6 +88,16 @@ def business_spec(question: Question) -> dict | None:
     text = plain(question.question)
     text = re.sub(r"\bthangs\b", "thang", text)
     text = re.sub(r"\bsoos\b", "so", text)
+    # A complete bounded paraphrase binds the same customer-money ranking intent.
+    # Requiring the full sentence prevents a new route from dropping qualifiers.
+    money_paraphrase = re.fullmatch(
+        r"(?P<prefix>(?:top [1-9]\d? )?khach(?: hang)?(?: nao)?(?: co)? )"
+        r"(?:chi tieu nhieu nhat|doanh thu cao nhat) "
+        r"(?P<period>thang nay|thang truoc|hom nay)\s*[?!.]*",
+        text,
+    )
+    if money_paraphrase:
+        text = money_paraphrase["prefix"] + "mua nhieu tien nhat " + money_paraphrase["period"]
     nearest_lot = bool(re.search(r"\blo\b.*\bgan het han nhat\b", text))
     if re.search(
         (

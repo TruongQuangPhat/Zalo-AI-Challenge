@@ -78,6 +78,55 @@ uv run --no-sync python -m src.cli evaluate \
 
 Output của lần chạy chủ động gồm `submission.jsonl`, `logs/`, một catalog mỗi business trong `catalogs/`, `run_manifest.json` và `prepared/<business>/facts.sqlite` cho nguồn được hỗ trợ. Context được chuẩn bị một lần/business và không cắt theo ngày của câu hỏi. Các file này được giữ để người dùng xem; chỉ output do verifier tạo mới tự xóa. Thêm `--cache-dir .artifacts/source-cache` để reuse catalog và prepared facts giữa các lượt; mặc định không sinh cache đĩa. Catalog nguồn giữ riêng metadata `prepared`; `BusinessContext.prepared` cho planner truy cập facts read-only.
 
+## Tiếp tục một run bị gián đoạn
+
+Runtime ghi `run_manifest.json` atomic sau mỗi câu đã fsync log/submission, heartbeat mỗi
+10 giây vào stderr khi đang xử lý; stdout CLI vẫn là một JSON report. `questions_written`
+đếm records đã commit, `updated_at` là heartbeat gần nhất, không tự chứng minh process
+còn sống. SIGINT/SIGTERM được ghi `interrupted` khi process còn có thể cleanup; kill -9
+hoặc mất điện có thể để lại `running`. Bảo đảm durability còn phụ thuộc filesystem/hardware.
+
+Giữ nguyên model, budgets, GPU/config và source/input revision của **run mới được tạo
+bằng code hiện tại**. Chạy vào thư mục output mới; parent được giữ nguyên:
+
+```bash
+./predict.sh --data-dir dataset/train --output-dir .artifacts/revision-new \
+  --model /path/to/model.gguf --gpu-layers -1 --question-timeout 120
+
+# Chỉ sau khi process trên đã dừng, cùng source/model/config/input:
+./predict.sh --data-dir dataset/train --output-dir .artifacts/revision-recovered \
+  --resume-from .artifacts/revision-new \
+  --model /path/to/model.gguf --gpu-layers -1 --question-timeout 120
+```
+
+Nếu run có `--question-id`, truyền lại cùng tập câu hỏi. Resume kiểm tra source/parser/
+normalizer, installed backend code/binaries, model/config, Python/SQLite version,
+namespace/input hashes, IDs/types/order, logs và checkpoint record chain. Parent đang
+chạy bị lock chặn. Thiếu identity proof hoặc khác revision thì dừng trước khi tạo output.
+Không dùng code này để nối 1.597 outputs baseline `5ac4903`/`d084d22`; phải tạo run mới.
+
+Records hoàn chỉnh có newline và log khớp là nguồn recovery; log-only được chạy lại.
+Malformed complete record, duplicate/unknown/out-of-order ID hoặc checksum lệch bị từ
+chối. Tail không có newline mặc định bị từ chối, kể cả JSON parse được. Chỉ khi chủ động
+chấp nhận bỏ **tail chưa commit** mới thêm `--resume-tail discard`; parent không bị sửa,
+manifest mới ghi số bytes/hash tail. Prefix được kiểm tra rồi chép vào output mới, chạy
+remaining IDs và kết thúc với đủ records của selection; errors cũ được giữ, không đổi
+`completed_with_errors` thành clean completion. `resume.records_recovered` phân biệt
+prefix kế thừa với phần vừa chạy.
+
+Benchmark executor chỉ dùng facts synthetic, không mở dataset/model/gold:
+
+```bash
+uv run --no-sync python -m scripts.benchmark_execution \
+  --output-dir .artifacts/benchmark-new
+# So cùng workload với source Git local đã khóa, dùng một thư mục mới khác:
+uv run --no-sync python -m scripts.benchmark_execution --baseline-ref d084d22 \
+  --output-dir .artifacts/benchmark-baseline-new
+```
+
+Chạy hai benchmark tuần tự, không chạy cùng tests/workload khác khi đo thời gian.
+`connection_cold` không có nghĩa OS cache cold; xem rows/bytes/VM work và giới hạn trong report.
+
 ## Kiểm tra deliverables Phase 1
 
 Chạy từ root với output mới nằm ngoài `dataset/`. Lệnh đầu đối chiếu inventory train,

@@ -110,6 +110,8 @@ def test_snapshot_quantity_exact_provenance_and_history_coverage_remains_unknown
     assert result["answer"] == {"id": "snapshot_test", "type": "number", "answer": Decimal("7.125")}
     assert result["execution"]["status"] == "verified"
     assert result["execution"]["rows_selected"] == 1
+    assert result["execution"]["scan"]["queries"] == 1
+    assert result["execution"]["scan"]["decimal_values_decoded"] == 1
     assert result["execution"]["source_ref_samples"][0]["row"] == 2
     assert result["plan"]["time_windows"][0]["time_axis"] == "snapshot_at"
     assert result["plan"]["aggregations"][0]["unit"] == "hộp"

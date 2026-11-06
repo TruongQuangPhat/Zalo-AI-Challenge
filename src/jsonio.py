@@ -13,6 +13,10 @@ from typing import Any
 class ContractError(ValueError):
     """An input or output does not meet the documented contract."""
 
+    def __init__(self, message: str, *, diagnostics: dict | None = None):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
+
 
 def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}

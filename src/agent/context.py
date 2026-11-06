@@ -6,7 +6,7 @@ from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.answerability import prepare_semantics
 
-VERSION = "planner-context-v11"
+VERSION = "planner-context-v12"
 
 
 def build_context(question: Question, context: BusinessContext) -> dict:

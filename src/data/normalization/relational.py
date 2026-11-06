@@ -108,6 +108,7 @@ class MappedSource:
     profile: dict
     fields: dict[str, int]
     role: str
+    auxiliary_family: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,13 +117,38 @@ class RelationalMapping:
     ledger: bool = False
 
 
+def _independent_delivery(profile: dict, definitions: dict, body: str) -> bool:
+    """Only a declared nonfinancial delivery grain can be isolated from sales.
+
+    Unknown/financial columns remain blocking; filenames never establish this family.
+    This does not map delivery facts or certify delivery keys/coverage/operators.
+    """
+    meanings = [definitions.get(normalized(c["display_name"]).strip()) for c in profile["columns"]]
+    required = {"order id", "delivery batch id", "delivery date", "delivered quantity"}
+    allowed = required | {"product id", "product name", "delivery status", "delivery unit"}
+    declarations = [
+        normalized(line).strip().rstrip(".")
+        for line in body.splitlines()
+        if line.strip() and not re.fullmatch(r"\s*-\s+\*\*.+?\*\*\s*:\s*.+", line)
+    ]
+    return (
+        declarations
+        in (
+            ["moi dong mot dot giao hang"],
+            ["moi dong mot dot giao hang, khong phai mot don ban moi"],
+        )
+        and required <= set(meanings)
+        and set(meanings) <= allowed
+    )
+
+
 def relational_mapping(context: BusinessContext) -> RelationalMapping:
     if not context.catalog["read_complete"]:
         raise ContractError("requires completely read sources")
     context.rules.require("dedup")
     readme = context.catalog["readme"]
     text = normalized(readme)
-    sections = {}
+    sections, section_bodies = {}, {}
     for filename, sheet, body in re.findall(
         r"^## Cột trong `([^`]+)`(?:, sheet `([^`]+)`)?\s*\n(.*?)(?=^## |\Z)", readme, re.M | re.S
     ):
@@ -136,6 +162,7 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
         if key in sections:
             raise ContractError("duplicate README source section")
         sections[key] = definitions
+        section_bodies[key] = body
     if "thong tin don chi ghi o dau" in text:
         raise ContractError("unrecognized inheritance declaration")
     ledger = "khong ghi ma don" in text or "khong co ma don" in text
@@ -193,7 +220,15 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
         ):
             raise ContractError("unclassified conversion source")
         role = None
-        if {"order_id", "ordered_at", "status"} <= fields.keys():
+        auxiliary_family = None
+        body = section_bodies.get((name, table), section_bodies.get((name, ""), ""))
+        if _independent_delivery(p, definitions, body):
+            role, auxiliary_family = "auxiliary", "delivery_batches"
+        elif "mot dot giao hang" in normalized(body):
+            # An explicit but unresolved declaration must not fall through to the
+            # older auxiliary filename vocabulary and hide financial overlap.
+            raise ContractError("delivery_family_mapping_or_authority_unsupported")
+        elif {"order_id", "ordered_at", "status"} <= fields.keys():
             role = "combined" if {"amount", "item"} <= fields.keys() else "header"
         elif {"order_id", "amount"} <= fields.keys() and ({"product_id", "item"} & fields.keys()):
             role = "detail"
@@ -218,7 +253,7 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
             role = "customer"
         if role is None:
             raise ContractError("unclassified source: " + name + "/" + table)
-        sources.append(MappedSource(p, fields, role))
+        sources.append(MappedSource(p, fields, role, auxiliary_family))
     roles = {s.role for s in sources}
     if "combined" in roles and ({"header", "detail"} & roles):
         raise ContractError("overlapping sales representations require reconciliation")
@@ -895,6 +930,17 @@ def build_relational(
         "shape": "sales_ledger" if mapping.ledger else "relational_orders",
         "source_id": primary[0].profile["source_id"],
         "source_ids": [s.profile["source_id"] for s in mapping.sources],
+        "isolated_source_families": [
+            {
+                "source_id": s.profile["source_id"],
+                "family": s.auxiliary_family,
+                "status": "unsupported_operator",
+                "authority": context.catalog["readme_hash"],
+                "sales_isolation": "explicit_nonfinancial_grain_and_all_column_meanings",
+            }
+            for s in mapping.sources
+            if s.auxiliary_family
+        ],
         "mapping": {
             "fields": {f: True for f in schema_fields},
             "date_systems": date_systems,

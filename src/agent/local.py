@@ -13,6 +13,20 @@ from src.data.catalog import digest
 from src.jsonio import ContractError
 
 
+def backend_identity() -> dict:
+    """Hash installed backend code/binaries without importing or loading a model."""
+    package = importlib.metadata.distribution("llama-cpp-python")
+    artifacts = {
+        str(file): digest(Path(package.locate_file(file)))
+        for file in sorted(package.files or [], key=str)
+        if Path(file).parts[0] not in {"lib", "include", "share"}
+        and Path(file).suffix in {".py", ".so", ".dll", ".dylib"}
+    }
+    if not artifacts:
+        raise ContractError("cannot establish local backend binary identity")
+    return {"version": package.version, "artifacts": artifacts}
+
+
 def _worker(pipe, model_path: str, n_ctx: int, threads: int, gpu_layers: int = 0) -> None:
     # Import only inside the worker: mock/CPU tooling never requires the LLM group.
     try:
@@ -140,6 +154,8 @@ class LocalModel:
             "sha256": digest(path),
             "bytes": path.stat().st_size,
             "backend": "llama-cpp-python",
+            "backend_identity": backend_identity(),
+            "load_timeout_seconds": load_timeout,
             "device": "gpu" if gpu_layers else "cpu",
             "requested_gpu_layers": gpu_layers,
             "n_ctx": 4096,

@@ -6,6 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATAMATE_CONTAINER=1
 WORKDIR /app
 COPY src/ /app/src/
 COPY --chmod=0555 predict.sh /app/
+COPY pyproject.toml uv.lock /app/
 COPY docs/model-license.txt /opt/model/LICENSE
 USER 65532:65532
 ENTRYPOINT ["/app/predict.sh"]

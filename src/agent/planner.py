@@ -7,12 +7,12 @@ import time
 
 from src.agent.context import build_context
 from src.agent.execution import execute_plan
-from src.agent.plan import generation_schema, validate_query_plan
+from src.agent.plan import generation_schema
 from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError, dumps, loads
 
-PROMPT_VERSION = "planner-v14"
+PROMPT_VERSION = "planner-v15"
 SYSTEM = """Lập QueryPlan JSON theo schema; không trả số đáp án, SQL hoặc code.
 Giữ mọi điều kiện. Ngoài scope/schema: uncertainties=["unsupported_scope_or_operator"].
 Trong scope thì uncertainties=[]; không ghi uncertainty chỉ vì không có raw rows.
@@ -104,6 +104,8 @@ class LocalPlanner:
         }
 
     def decide(self, question: Question, *, context: BusinessContext) -> dict:
+        started = time.monotonic()
+        deadline = started + self.timeout
         selected = build_context(question, context)
         from src.semantics.rulebook import plain
 
@@ -128,27 +130,42 @@ class LocalPlanner:
             {"role": "user", "content": dumps(selected)},
         ]
         attempts = []
-        deadline = time.monotonic() + self.timeout
+        context_seconds = time.monotonic() - started
         for _ in range(self.attempts):
             record = {}
+            stage = "generation"
+            phase_start = time.monotonic()
             try:
                 record = self.model.generate(messages, schema, deadline - time.monotonic())
+                record["generation_seconds"] = time.monotonic() - phase_start
                 attempts.append(record)
                 if record.get("finish_reason") != "stop":
                     raise ContractError("incomplete_generation")
+                stage = "json_parse"
                 draft = loads(record["text"])
-                validate_query_plan(draft, question, context)
+                stage = "semantic_validation"
                 decision = execute_plan(draft, question, context, deadline=deadline)
                 decision["plan"]["planning"] = {
                     "prompt_version": PROMPT_VERSION,
                     "attempts": attempts,
                     "context_version": selected["version"],
+                    "context_seconds": context_seconds,
                 }
                 return decision
             except (ContractError, OSError, ValueError) as exc:
                 if not record:
                     attempts.append(record)
+                record.setdefault("generation_seconds", time.monotonic() - phase_start)
                 record["error"] = str(exc)
+                record["error_stage"] = stage
+                record["diagnostics"] = getattr(exc, "diagnostics", {})
+                if stage == "semantic_validation" and isinstance(draft, dict):
+                    aggregations = draft.get("aggregations")
+                    record["intended_metrics"] = (
+                        [a.get("metric_id") for a in aggregations if isinstance(a, dict)]
+                        if isinstance(aggregations, list)
+                        else []
+                    )
                 # A valid but unsupported/uncertain intent must not be repaired into an
                 # executable total by dropping its conditions. Retry syntax only.
                 if record.get("text"):
@@ -168,6 +185,7 @@ class LocalPlanner:
             "plan": {
                 "status": "failed",
                 "reason": "planning_failed",
+                "context_seconds": context_seconds,
                 "prompt_version": PROMPT_VERSION,
                 "attempts": attempts,
             },

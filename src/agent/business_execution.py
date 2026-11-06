@@ -5,12 +5,11 @@ from __future__ import annotations
 import re
 import sqlite3
 import time
-from contextlib import closing
 from decimal import Decimal, localcontext
 
+from src.agent.scanning import failure, scanning
 from src.contracts import validate_answer
 from src.data.catalog import BusinessContext
-from src.data.normalization.values import exact_add
 from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.rulebook import plain
@@ -23,6 +22,7 @@ def execute_business_plan(
     from src.semantics.answerability import preflight
 
     answer = {"id": question.id, "type": "abstain"}
+    preflight_started = time.monotonic()
     checks = []
     spec = plan["business_spec"]
     try:
@@ -39,6 +39,7 @@ def execute_business_plan(
             check["aggregation_ref"] = aggregate["id"]
             checks.append(check)
         plan["preflight"] = checks
+        plan["timings_seconds"]["preflight"] = time.monotonic() - preflight_started
         stop = next((c for c in checks if c["decision"] == "abstain"), None) or next(
             (c for c in checks if c["decision"] == "unanswerable"), None
         )
@@ -51,6 +52,7 @@ def execute_business_plan(
                 "execution": {"status": "not_performed", "reason": stop["reason"]},
             }
         results = [_reduce(context, plan, c, deadline) for c in checks]
+        verifier_started = time.monotonic()
         value = results[0]["value"]
         if spec.get("trend"):
             values = [r["value"] for r in results]
@@ -67,6 +69,7 @@ def execute_business_plan(
             raise ContractError("question_timeout_after_execution")
         answer = {"id": question.id, "type": spec["type"], "answer": value}
         validate_answer(answer)
+        plan["timings_seconds"]["output_verifier"] = time.monotonic() - verifier_started
         return {
             "answer": answer,
             "plan": plan,
@@ -87,7 +90,7 @@ def execute_business_plan(
         return {
             "answer": answer,
             "plan": plan,
-            "execution": {"status": "failed", "reason": str(exc)},
+            "execution": failure(exc, "business_execution"),
         }
 
 
@@ -100,50 +103,50 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
         return {
             "metric_id": metric,
             "value": result["exact_value"],
+            "scan": result["scan"],
             "effective_window": check["effective_window"],
         }
     issues = context.prepared.summary.get("extensions", {}).get("issues", {})
     if not context.prepared.summary.get("extensions", {}).get("counts"):
         raise ContractError("business_facts_unsupported")
     start, end = check["effective_window"]["start"], check["effective_window"]["end"]
-    started = time.monotonic()
-
-    def budget():
-        if time.monotonic() - started > 15 or (
-            deadline is not None and time.monotonic() >= deadline
-        ):
-            raise ContractError("execution_timeout")
-
     group = spec["group"]
     selected = plan.get("resolved_entity", {}).get("entity_key")
     totals, total, matched = {}, Decimal(0), 0
-    with closing(context.prepared.connect()) as conn:
-        conn.set_progress_handler(
-            lambda: int(
-                time.monotonic() - started > 15
-                or (deadline is not None and time.monotonic() >= deadline)
-            ),
-            1000,
+    with scanning(context.prepared, deadline) as scan:
+        budget = scan.budget
+        family = (
+            "customer"
+            if group == "customer"
+            or metric in {"receivable", "receivable_customer_count", "debt_collection"}
+            else "product"
         )
-        entities = {r["entity_key"]: r for r in context.prepared.iter_records("entities")}
+        entities = {
+            key: {"entity_key": key, "source_code": code, "name": name}
+            for key, code, name in scan.rows(
+                "SELECT entity_key,source_code,name FROM entities WHERE kind=?", (family,)
+            )
+        }
         coded_customers = "customer_id" in context.prepared.summary.get("mapping", {}).get(
             "fields", {}
-        ) or any(e["kind"] == "customer" and e["source_code"] for e in entities.values())
+        ) or (family == "customer" and any(e["source_code"] for e in entities.values()))
 
         def customer_identity(key: str | None) -> str | None:
             # A name recorded on an anonymous order cannot become a customer in
             # a shop that identifies customers by code. It still contributes to
             # whole-shop revenue/debt under those metrics' own policies.
+            if family != "customer":
+                return key
             return None if key and coded_customers and not entities[key]["source_code"] else key
 
         def add(key, amount):
             nonlocal total, matched
             if not amount.is_finite():
                 raise ContractError("nonfinite_business_value")
-            total = exact_add(total, amount)
+            total = scan.add(total, amount)
             matched += 1
             if key:
-                totals[key] = exact_add(totals.get(key, Decimal(0)), amount)
+                totals[key] = scan.add(totals.get(key, Decimal(0)), amount)
 
         if metric in {"receivable", "receivable_customer_count", "debt_collection"}:
             if not re.search(
@@ -154,17 +157,24 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
             if any(k in issues for k in ["debt", "payments"]):
                 raise ContractError("debt_payment_mapping_unsupported_or_conflict")
             paid, collections = {}, {}
-            for order, at, raw in conn.execute("SELECT order_key,paid_at,amount FROM payments"):
+            for order, at, raw in scan.rows(
+                "SELECT order_key,paid_at,amount FROM payments WHERE substr(paid_at,1,10)<=?",
+                (end,),
+            ):
                 budget()
                 day = at[:10]
+                amount = scan.number(raw)
                 if day <= end:
-                    paid[order] = exact_add(paid.get(order, Decimal(0)), Decimal(raw))
-                collections.setdefault(order, []).append((day, Decimal(raw)))
-            for order, created, status, customer, payable, method, channel in conn.execute(
+                    paid[order] = scan.add(paid.get(order, Decimal(0)), amount)
+                if metric == "debt_collection":
+                    collections.setdefault(order, []).append((day, amount))
+            for order, created, status, customer, payable, method, channel in scan.rows(
                 "SELECT "
                 "o.order_key,o.ordered_at,o.status,p.customer_key,p.payable,p.payment_method,"
                 "s.channel FROM orders o LEFT JOIN order_parties p USING(order_key) "
-                "LEFT JOIN order_scopes s USING(order_key)"
+                "LEFT JOIN order_scopes s USING(order_key) "
+                "WHERE substr(o.ordered_at,1,10)<=? AND o.status!='cancelled'",
+                (end,),
             ):
                 budget()
                 if created[:10] > end or status == "cancelled":
@@ -204,7 +214,9 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                 else:
                     if payable is None:
                         raise ContractError("payable_missing")
-                    balance = exact_add(Decimal(payable), paid.get(order, Decimal(0)).copy_negate())
+                    balance = scan.add(
+                        scan.number(payable), paid.get(order, Decimal(0)).copy_negate()
+                    )
                     if balance > 0:
                         add(customer, balance)
             if metric == "receivable_customer_count":
@@ -212,12 +224,14 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
         elif metric == "purchase_amount":
             if "purchases" in issues:
                 raise ContractError("purchase_mapping_unsupported")
-            for day, status, amount in conn.execute(
-                "SELECT purchased_at,status,amount FROM purchases"
+            for day, status, amount in scan.rows(
+                "SELECT purchased_at,status,amount FROM purchases "
+                "WHERE substr(purchased_at,1,10) BETWEEN ? AND ?",
+                (start, end),
             ):
                 budget()
                 if start <= day[:10] <= end and plain(status) in {"received", "da nhap"}:
-                    add(None, Decimal(amount))
+                    add(None, scan.number(amount))
         elif metric == "lot_expiry":
             if "lots" in issues:
                 raise ContractError("lot_keys_allocations_or_authority_unsupported")
@@ -229,7 +243,7 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
             ):
                 raise ContractError("lot_allocation_return_authority_unsupported")
             balances = {}
-            for lot, expiry, quantity, purchased, status in conn.execute(
+            for lot, expiry, quantity, purchased, status in scan.rows(
                 (
                     "SELECT l.lot_id,l.expiry,l.received_quantity,p.purchased_at,p.status"
                     " FROM lots l JOIN purchases p ON l.purchase_id=p.purchase_key WHERE "
@@ -239,17 +253,20 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
             ):
                 budget()
                 if purchased[:10] <= end and plain(status) in {"received", "da nhap"}:
-                    balances[lot] = [expiry, Decimal(quantity)]
-            for lot, sold, returned, returned_at, created, status in conn.execute(
+                    balances[lot] = [expiry, scan.number(quantity)]
+            for lot, sold, returned, returned_at, created, status in scan.rows(
                 "SELECT "
                 "a.lot_id,a.quantity,a.returned_quantity,a.returned_at,o.ordered_at,o.status"
-                " FROM lot_allocations a JOIN orders o USING(order_key)"
+                " FROM lot_allocations a JOIN orders o USING(order_key) "
+                "JOIN lots l USING(lot_id) WHERE l.product_key=? "
+                "AND substr(o.ordered_at,1,10)<=? AND o.status!='cancelled'",
+                (selected, end),
             ):
                 budget()
                 if lot in balances and created[:10] <= end and status != "cancelled":
-                    balances[lot][1] = exact_add(balances[lot][1], Decimal(sold).copy_negate())
+                    balances[lot][1] = scan.add(balances[lot][1], scan.number(sold).copy_negate())
                     if returned_at and returned_at[:10] <= end:
-                        balances[lot][1] = exact_add(balances[lot][1], Decimal(returned))
+                        balances[lot][1] = scan.add(balances[lot][1], Decimal(returned))
             if any(amount < 0 for _, amount in balances.values()):
                 raise ContractError("negative_lot_balance_conflict")
             expiries = [
@@ -260,6 +277,7 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
             return {
                 "metric_id": metric,
                 "value": min(expiries),
+                "scan": scan.summary(),
                 "matched_records": len(expiries),
                 "effective_window": check["effective_window"],
             }
@@ -274,23 +292,23 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                 context.catalog["readme"]
             ):
                 raise ContractError("stock_balance_authority_unsupported")
-            rows = conn.execute(
+            rows = scan.rows(
                 (
                     "SELECT occurred_at,balance FROM stock_balances WHERE product_key=? AND "
                     "substr(occurred_at,1,10)<=? ORDER BY occurred_at DESC"
                 ),
                 (selected, end),
             )
-            latest = rows.fetchone()
+            latest = next(rows, None)
             if not latest:
                 raise ContractError("no_prior_stock_balance")
             for at, amount in rows:
                 budget()
                 if at != latest[0]:
                     break
-                if Decimal(amount) != Decimal(latest[1]):
+                if scan.number(amount) != scan.number(latest[1]):
                     raise ContractError("simultaneous_stock_balances_ambiguous")
-            add(selected, Decimal(latest[1]))
+            add(selected, scan.number(latest[1]))
         else:
             if context.prepared.summary.get("shape") in {"order_headers", "sales_ledger"}:
                 raise ContractError("entity_sales_grain_unsupported")
@@ -306,7 +324,9 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                 "SELECT o.order_key,o.ordered_at,o.status,l.line_key,l.net_amount,l.row_role,"
                 "i.product_key,i.base_quantity,i.sold_quantity,i.unit_cost,p.customer_key"
                 " FROM orders o JOIN order_lines l USING(order_key) LEFT JOIN line_items "
-                "i USING(line_key) LEFT JOIN order_parties p USING(order_key)"
+                "i USING(line_key) LEFT JOIN order_parties p USING(order_key) "
+                f"WHERE o.status IN ({','.join('?' for _ in check['contract']['status_policy'])}) "
+                "AND substr(o.ordered_at,1,10) BETWEEN ? AND ?"
             )
             for (
                 order,
@@ -320,7 +340,7 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                 sold,
                 cost,
                 customer,
-            ) in conn.execute(sql):
+            ) in scan.rows(sql, [*check["contract"]["status_policy"], start, end]):
                 budget()
                 if (
                     not start <= created[:10] <= end
@@ -342,7 +362,7 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                 if metric == "quantity":
                     if quantity is None:
                         raise ContractError("base_quantity_missing")
-                    value = Decimal(quantity)
+                    value = scan.number(quantity)
                 elif metric == "order_count":
                     if order in seen_orders:
                         continue
@@ -353,18 +373,19 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                         continue
                     if amount is None:
                         raise ContractError("line_amount_missing")
-                    value = Decimal(amount)
+                    value = scan.number(amount)
                     if metric == "gross_profit":
                         if cost is None or sold is None:
                             raise ContractError("line_cost_or_selling_quantity_missing")
+                        sold_value, cost_value = scan.number(sold), scan.number(cost)
                         with localcontext() as arithmetic:
                             arithmetic.prec = (
-                                len(Decimal(sold).as_tuple().digits)
-                                + len(Decimal(cost).as_tuple().digits)
+                                len(sold_value.as_tuple().digits)
+                                + len(cost_value.as_tuple().digits)
                                 + 4
                             )
-                            line_cost = Decimal(sold) * Decimal(cost)
-                        value = exact_add(value, line_cost.copy_negate())
+                            line_cost = sold_value * cost_value
+                        value = scan.add(value, line_cost.copy_negate())
                 add(customer if group == "customer" else product, value)
         if group:
             ranked = sorted(
@@ -401,6 +422,7 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
     return {
         "metric_id": metric,
         "value": value,
+        "scan": scan.summary(),
         "matched_records": matched,
         "effective_window": check["effective_window"],
     }

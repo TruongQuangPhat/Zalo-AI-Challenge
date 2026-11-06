@@ -15,7 +15,7 @@ from src.semantics.metric_registry import metric_contract
 from src.semantics.rulebook import plain
 from src.temporal.resolver import TimeWindow, resolve_window
 
-VERSION = "query-plan-v13"
+VERSION = "query-plan-v14"
 
 
 def _object(properties: dict, *, optional: tuple[str, ...] = ()) -> dict:
@@ -766,13 +766,13 @@ def _check_question_scope(
     It does not infer a replacement intent or authorize execution.
     """
     text = plain(question.question)
-    if re.search(
+    if match := re.search(
         r"\b(no|nowj|cong no|gia von|lai gop|lai rong|phieu nhap|han dung|het han)\b", text
     ):
         raise ContractError("business_metric_or_scope_unsupported")
     if _metric_cues(question) == {"cancelled_order_count"}:
         text = re.sub(r"\b(?:da huy|bi huy|trang thai huy|don huy)\b", "", text)
-    if re.search(r"\b\d{1,2}(?::\d{2}|h)\b", text):
+    if match := re.search(r"\b\d{1,2}(?::\d{2}|h)\b", text):
         raise ContractError("explicit_clock_range_unsupported")
     # A polite trailing question is not a negated business condition.
     text = re.sub(r"\b(duoc\s+)?khong(?:\s+(a|nhi|nhe))?\s*[?!.]*$", "", text)
@@ -781,19 +781,28 @@ def _check_question_scope(
     if percent_change:
         text = re.sub(r"%|\b(phan tram|tang truong)\b", "", text)
         text = re.sub(r"\bso vs\b", "so voi", text)
-    if re.search(
+    if match := re.search(
         r"%|\b(phan tram|ty le|ti le|ti trong|ty trong|tang truong|trung binh|"
         r"binh quan|aov|growth|ratio|average|tuyet doi)\b",
         text,
     ):
-        raise ContractError("question_scope_or_operator_unsupported")
+        raise ContractError(
+            "question_scope_or_operator_unsupported",
+            diagnostics={
+                "guard": "_check_question_scope",
+                "branch": "derived_operator_not_bound",
+                "condition_status": "unresolved",
+                "unresolved_conditions": [match[0]],
+                "capability": "requires_explicit_binding",
+            },
+        )
     if not difference and re.search(
         r"%|\b(chenh|chenh lech|hon|kem|tang|giam|thay doi|so voi|so vs|so sanh)\b", text
     ):
         raise ContractError("question_comparison_operator_unsupported")
     if difference:
         text = re.sub(r"\bso voi\b", "", text)
-    if re.search(
+    if match := re.search(
         r"\b(rieng|san pham|mat hang|khach|nhan vien|ty le|trung binh|so voi|"
         r"nhieu nhat|cao nhat|thap nhat|top|kg|don huy|don tra|khong|chi tinh|"
         r"ngoai tru|loai tru|tru don|tien mat|chuyen khoan|cod|theo kenh|tung nhom|"
@@ -802,15 +811,33 @@ def _check_question_scope(
         r"may ngay|bao nhieu ngay|doanh thu dat|dthu dat|tro len|tro xuong)\b",
         text,
     ):
-        raise ContractError("question_scope_or_operator_unsupported")
+        raise ContractError(
+            "question_scope_or_operator_unsupported",
+            diagnostics={
+                "guard": "_check_question_scope",
+                "branch": "filter_entity_or_qualifier_not_bound",
+                "condition_status": "unresolved",
+                "unresolved_conditions": [match[0]],
+                "capability": "requires_explicit_binding",
+            },
+        )
     scope_text = re.sub(r"\b(cua hang|ban hang|don hang|tien hang)\b", "", text)
     scope_text = re.sub(r"\b\d+ ngay gan nhat\b", "", scope_text)
-    if re.search(
+    if match := re.search(
         r"\b(hang|mon)\s+\w|\b(nhat|nhap|nhom|ngay nao|lien nhau|moi thang)\b", scope_text
     ):
-        raise ContractError("question_scope_or_operator_unsupported")
+        raise ContractError(
+            "question_scope_or_operator_unsupported",
+            diagnostics={
+                "guard": "_check_question_scope",
+                "branch": "group_ranking_or_history_not_bound",
+                "condition_status": "unresolved",
+                "unresolved_conditions": [match[0]],
+                "capability": "requires_explicit_binding",
+            },
+        )
     owners_removed = re.sub(r"\b(cua\s+)?(cua hang|shop|tiem|doanh nghiep)\b", "", text)
-    if re.search(r"\b(cua|cuar)\s+\w", owners_removed):
+    if match := re.search(r"\b(cua|cuar)\s+\w", owners_removed):
         raise ContractError("question_owner_filter_unsupported")
 
 
