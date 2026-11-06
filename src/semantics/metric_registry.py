@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, replace
 
 from src.semantics.rulebook import RuleProfile, SemanticError
 
-VERSION = "metric-contracts-v5"
+VERSION = "metric-contracts-v6"
 METRICS = (
     "revenue",
     "order_count",
@@ -37,6 +37,7 @@ BUSINESS_METRICS = {
                 "returned_quantity",
                 "returned_at",
             ],
+            "purchases": ["purchase_key", "purchased_at", "status"],
         },
         ["lot_expiry"],
         "snapshot_at",
@@ -132,9 +133,30 @@ def metric_contract(
     """A contract authorizes no output until requirements/execution are verified."""
     if metric_id not in METRICS:
         raise SemanticError("metric_unsupported", f"metric is not implemented: {metric_id}")
+    # These catalogue clauses qualify existing contracts when present. Older
+    # minimal authorities still need the original mandatory core clauses below.
+    qualifiers = {
+        "revenue": ["revenue_terms"],
+        "quantity": ["base_unit_total", "unit_conversion"],
+        "cancelled_order_count": ["cancelled_status"],
+        "receivable": ["end_day_state"],
+        "receivable_customer_count": ["end_day_state"],
+        "stock_balance": ["end_day_state", "unit_conversion"],
+    }.get(metric_id, [])
+    qualifiers = [key for key in qualifiers if key in rules.rules]
+    for key in qualifiers:
+        rules.require(key)
     if metric_id in BUSINESS_METRICS:
+        # Only sold-line measures inherit the sales contract. Debt has a different
+        # return/status policy; purchase, payment and stock have their own axes.
         base = metric_contract(
-            rules, "revenue" if metric_id == "gross_profit" else "order_count", shape=shape
+            rules,
+            "revenue"
+            if metric_id == "gross_profit"
+            else "order_count"
+            if metric_id == "quantity"
+            else "inventory_on_hand",
+            shape=shape,
         )
         fields, refs, axis, unit = BUSINESS_METRICS[metric_id]
         if metric_id not in {"purchase_amount", "stock_balance"}:
@@ -161,10 +183,27 @@ def metric_contract(
             base,
             metric_id=metric_id,
             required_fields=fields,
-            rule_refs=list(dict.fromkeys(base.rule_refs + refs)),
+            rule_refs=list(dict.fromkeys(base.rule_refs + refs + qualifiers)),
             time_axis=axis,
             unit=unit,
             input_grain=grain,
+            empty_policy="abstain"
+            if metric_id in {"stock_balance", "lot_expiry"}
+            else "zero_if_complete",
+            output={
+                "type": "date" if metric_id == "lot_expiry" else "number",
+                "ordering": "not_applicable",
+            },
+            acceptance_refs={
+                "quantity": ["C13", "C18", "C21"],
+                "gross_profit": ["C13", "C18", "C21"],
+                "receivable": ["C09", "C12", "C15", "C18"],
+                "receivable_customer_count": ["C09", "C15", "C18"],
+                "debt_collection": ["C09", "C15", "C18"],
+                "purchase_amount": ["C09", "C18"],
+                "stock_balance": ["C10", "C11", "C12", "C18"],
+                "lot_expiry": ["C12", "C14", "C18"],
+            }[metric_id],
             count_unit="customer" if metric_id == "receivable_customer_count" else None,
             formula=metric_id,
             status_policy=["completed", "shipping", "returned"]
@@ -218,7 +257,7 @@ def metric_contract(
             metric_id=metric_id,
             time_axis="occurred_at" if shape == "sales_ledger" else base.time_axis,
             status_policy=statuses,
-            rule_refs=refs,
+            rule_refs=refs + qualifiers,
             unit="day" if metric_id == "calendar_day_count" else "order",
             count_unit="day" if metric_id == "calendar_day_count" else "order",
             formula="count_calendar_days_in_effective_window"
@@ -307,7 +346,7 @@ def metric_contract(
         if revenue
         else {"decimal_places": 0, "mode": "exact_integer"},
         output={"type": "number", "ordering": "not_applicable"},
-        rule_refs=refs,
+        rule_refs=refs + qualifiers,
         acceptance_refs=["C03", "C04", "C06", "C12", "C17", "C18", "C27", "C30"],
     )
 

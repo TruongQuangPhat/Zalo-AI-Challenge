@@ -6,7 +6,7 @@ from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.answerability import prepare_semantics
 
-VERSION = "planner-context-v10"
+VERSION = "planner-context-v11"
 
 
 def build_context(question: Question, context: BusinessContext) -> dict:
@@ -27,6 +27,21 @@ def build_context(question: Question, context: BusinessContext) -> dict:
             },
             "operation": spec,
             "metric": semantics["metrics"].get(spec["metric"]),
+            "policies": {
+                key: {
+                    "status": rule.status,
+                    "understood": rule.understood,
+                    "parameters": rule.parameters,
+                    "requirements": rule.requirements,
+                    "execution": rule.execution,
+                }
+                for key, rule in context.rules.rules.items()
+                if key
+                in semantics["metrics"]
+                .get(spec["metric"], {})
+                .get("contract", {})
+                .get("rule_refs", [])
+            },
             "entity_candidates": entity_candidates(context, question.question),
             "as_of_date": question.as_of_date,
             "question": question.question,
@@ -107,7 +122,10 @@ def build_context(question: Question, context: BusinessContext) -> dict:
             {
                 "id": key,
                 "status": rule.status,
+                "operator": rule.operator,
                 "parameters": rule.parameters,
+                "requirements": rule.requirements,
+                "execution": rule.execution,
                 "source_lines": sorted({ref["line"] for ref in rule.source_refs}),
             }
             for key, rule in context.rules.rules.items()

@@ -322,7 +322,10 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                 customer,
             ) in conn.execute(sql):
                 budget()
-                if not start <= created[:10] <= end or status not in {"completed", "shipping"}:
+                if (
+                    not start <= created[:10] <= end
+                    or status not in check["contract"]["status_policy"]
+                ):
                     continue
                 if role not in {"sale_item", "service_fee", "return_item", "order_adjustment"}:
                     raise ContractError("row_role_unknown")

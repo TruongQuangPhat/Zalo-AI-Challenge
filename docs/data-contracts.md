@@ -8,7 +8,8 @@ Readers, profile và business catalog đã có implementation theo Phase 2;
 Prepared facts cho CSV/XLSX/SQLite đã có trong `src/data/normalization/`, gồm checked
 header/detail/master joins, continuation và sổ bán không mã đơn. QueryPlan, metric
 contracts, temporal resolver, preflight và Decimal execution dùng chung S1/S2.
-Entity mapping rộng/ranking vẫn chưa bật; bảng capability ghi đúng giới hạn thực tế.
+Entity/ranking hữu hạn đã bật theo capability matrix; các domain extensions vẫn có gap.
+Catalogue có nguồn và giới hạn: [rulebook authority](rulebook-authority.md).
 
 ## Kiểu chung và phạm vi S1
 
@@ -200,9 +201,15 @@ có filter kênh phải lọc order_scopes trước reduction; missing channel k
 ## Semantic metadata S1 — implementation boundary
 
 `Split.rules` giữ rule profile, `Split.calendar` là tuple `CalendarDay` đã được loader
-kiểm tra; contexts cùng split chia sẻ chúng. Industry override chỉ chọn từ khai báo
-`Ngành: ...` trong README; scope chưa xác định khi có override liên quan giữ ambiguous.
+kiểm tra; contexts cùng split chia sẻ chúng. Industry override chọn từ khai báo
+`Ngành: ...` hoặc mô tả thuốc/lô tường minh trong README; scope chưa xác định giữ ambiguous,
+ngành khác giữ not_applicable. Không suy ngành từ IDs hoặc tên hàng.
 Rule parser là tập clause/operator hữu hạn, không phải bộ hiểu rulebook tự nhiên tổng quát. Có aliases hữu hạn cho labels và guard paragraph/section nêu ngoại lệ rõ ràng; qualifier chưa hỗ trợ chặn policy liên quan với source refs. Không chứng nhận phát hiện mọi mâu thuẫn/paraphrase trong tài liệu.
+`Rule.understood` độc lập scope và `execution`/requirements; `resolved` không cấp quyền
+chạy metric. `RuleProfile.clauses` giữ từng unit gồm toàn quote/line/line_end/section/scope và cả
+unmapped/unknown. Markdown soft-wrap giữ nguyên nghĩa và physical span; recognized
+anchor/output fragment không được che qualifier khác trong cùng đoạn. Catalogue có 116 rule IDs trong hợp hai split; source refs đầy đủ và
+cách đếm 87/109 units ở tài liệu authority, không phải phần trăm metric coverage.
 Dedup/header inheritance/whole-order return ở preparation dùng cùng profile này.
 
 `prepare_semantics(context)` tạo `.semantics`, lưu cùng payload catalog hiện có, ngoài
@@ -293,14 +300,20 @@ lookup chỉ bật tại declared export end, còn tồn và chưa quá hạn; a
 phải đối soát được. Không chứng nhận generic movement/history, đổi đơn vị lớn, giá trị
 kho/lô, FIFO, weighted purchase price hoặc net-profit/expense workflow.
 
-Planner v14/context v10 và QueryPlan v13 mở rộng cùng grammar hiện có bằng grouped
+Planner v14/context v11 và QueryPlan v13 mở rộng cùng grammar hiện có bằng grouped
 aggregations/limit và các metric trên; scalar decoder cũ không nhận nhầm business
 operators. Server giữ identity, rule refs, unit/status/axis và required fields; LLM
-không được xuất số đáp án, SQL hay code. Metric contracts v5 và semantics v6 đọc cùng
-rulebook parser v8; parser hash tính cả finite business-rule clauses. Mỗi row/fact còn
+không được xuất số đáp án, SQL hay code. Metric contracts v6 và semantics v7 đọc cùng
+rulebook parser v9; parser hash tính cả finite business-rule clauses. Mỗi row/fact còn
 source ref; cache checksum và toàn bộ normalizer dependencies vẫn được kiểm tra.
 
-Phạm vi time coverage cho metrics mới còn bảo thủ: ngoài purchase dùng extent riêng,
-một số preflight payment/balance vẫn phụ thuộc span sales của export. Chưa chứng nhận
-payment-only/stock-only packages hoặc các kỳ tách khỏi span đó. Không dùng kết quả trên
-subset hiện tại để tuyên bố đã tái lập đầy đủ lịch sử kho/công nợ trên mọi nguồn.
+Preflight purchase/payment/state dùng đúng fact family và time axis, không kế thừa sales
+policy/span. Chỉ quantity và gross profit dùng sales contract. Purchase ưu tiên README full
+span, fallback extent phiếu nhập là policy có sẵn (metadata không gọi là luật BTC). Payment
+period cần declared full span; chưa đủ giữ abstain. State giữ ngày hỏi, cần declared end và
+history/snapshot tương ứng; không đổi thành state tại ngày bán cuối. Parse/conflict, required
+fields/keys/grain và quality gates vẫn chặn. Lot contract khai báo purchase dependency và
+output date; không lấy expiry min/max làm coverage. Standalone payment-only/stock-only
+packages chưa có generic preparation. Đây là synthetic behavior evidence, chưa native
+acceptance cho revision mới. Parser/helper hash thay prepared fingerprint; registry/preflight/
+resolver software hashes thay semantic revision; không sửa cache/manifest bằng tay.

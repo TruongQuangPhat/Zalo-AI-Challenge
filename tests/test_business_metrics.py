@@ -518,12 +518,12 @@ Tồn kho: tồn tại một thời điểm là tồn ở dòng cuối của s�
         == "unanswerable"
     )
     assert context.prepared.summary["extensions"]["counts"]["stock_balances"] == 1
-    for text in [
-        "Top 3 mặt hàng bán chạy nhất tháng này?",
-        "Cuối ngày hôm nay Trà còn bao nhiêu cái?",
-    ]:
-        q = question(question=text)
-        assert execute_plan(business_draft(q, context), q, context)["answer"]["type"] == "abstain"
+    q = question(question="Top 3 mặt hàng bán chạy nhất tháng này?")
+    assert execute_plan(business_draft(q, context), q, context)["answer"]["type"] == "abstain"
+    # Independent stock has an explicit balance rule and full README coverage;
+    # missing sales order identity does not invalidate that different fact grain.
+    q = question(question="Cuối ngày hôm nay Trà còn bao nhiêu cái?")
+    assert execute_plan(business_draft(q, context), q, context)["answer"]["answer"] == 7
 
 
 def test_business_parse_failure_blocks_even_outside_sales_span(business_source, tmp_path):
@@ -583,3 +583,129 @@ def test_debt_ranking_never_falls_back_to_shop_balance(business_source):
     qualified = question(question="Khách nào đang nợ nhiều nhất tính đến hôm nay?")
     with pytest.raises(ContractError):
         execute_plan(draft, qualified, business_source)
+
+
+def test_independent_facts_do_not_inherit_unrecognized_sales_axis(business_source, tmp_path):
+    path = business_source.root / "rulebook.md"
+    path.write_text(
+        path.read_text().replace("theo ngày đặt, không theo", "theo ngày giao, không theo")
+    )
+    context = prepare_business(load_split(business_source.root), "shop_a")
+    prepare_facts(context, tmp_path / "independent-facts")
+    prepare_semantics(context)
+    assert context.semantics["metrics"]["revenue"]["status"] == "unsupported"
+    assert (
+        run(context, "Tổng tiền nhập hàng tháng 1/2026 là bao nhiêu?")["answer"]["answer"]
+        == 9007199254741000
+    )
+    assert (
+        run(context, "Khách còn nợ tổng cộng bao nhiêu tính đến hôm nay?")["answer"]["answer"]
+        == 140
+    )
+    assert run(context, "Cuối ngày hôm nay Bánh còn bao nhiêu cái?")["answer"]["answer"] == 7
+
+
+def test_state_after_last_sale_and_payment_period_keep_their_own_dates(business_source, tmp_path):
+    from src.semantics.answerability import preflight
+
+    context = business_source
+    # Last placed order is Jan 2, but later payments and stock balances are recorded.
+    for text, date, expected in [
+        ("Khách còn nợ tổng cộng bao nhiêu tính đến hôm nay?", "2026-01-05", 90),
+        ("Cuối ngày hôm nay Bánh còn bao nhiêu cái?", "2026-01-04", 9),
+    ]:
+        q = question(question=text, as_of_date=date)
+        assert execute_plan(business_draft(q, context), q, context)["answer"]["answer"] == expected
+    check = preflight(
+        context,
+        "debt_collection",
+        {"kind": "day", "date": "2026-01-03"},
+        as_of_date="2026-01-06",
+    )
+    assert check["decision"] == "eligible_to_execute"
+    assert check["effective_window"]["start"] == "2026-01-03"
+    assert check["coverage"]["time_axis"] == "paid_at"
+    assert check["coverage"]["fact_type"] == "payments"
+    # README full span includes a day with no payment; no observed-day denominator.
+    check = preflight(
+        context,
+        "debt_collection",
+        {"kind": "day", "date": "2026-01-20"},
+        as_of_date="2026-01-20",
+    )
+    assert check["decision"] == "eligible_to_execute"
+    # A state beyond the declared end does not become the last available state.
+    check = preflight(context, "stock_balance", {"kind": "today"}, as_of_date="2026-02-01")
+    assert check["decision"] == "abstain"
+
+
+@pytest.mark.parametrize("mutation", ["missing_declaration", "conflict", "bad_payment"])
+def test_independent_coverage_does_not_bypass_authority_or_quality(
+    business_source, tmp_path, mutation
+):
+    from src.semantics.answerability import preflight
+
+    readme = business_source.root / "data/shop_a/README.md"
+    if mutation == "missing_declaration":
+        readme.write_text(readme.read_text().replace("Dữ liệu đầy đủ", "Export được ghi"))
+    elif mutation == "conflict":
+        readme.write_text(readme.read_text() + "\nDữ liệu có đến hết 01/01/2026.")
+    else:
+        with sqlite3.connect(readme.parent / "pos.sqlite") as conn:
+            conn.execute("UPDATE thanh_toan SET NgayGioThu='broken' WHERE MaPhieuThu='pa1'")
+    context = prepare_business(load_split(business_source.root), "shop_a")
+    prepare_facts(context, tmp_path / "invalid-own-coverage")
+    prepare_semantics(context)
+    check = preflight(
+        context, "debt_collection", {"kind": "current_month"}, as_of_date="2026-01-10"
+    )
+    assert check["decision"] == "abstain"
+
+
+def test_gross_profit_executor_uses_resolved_sales_status_policy(business_source, tmp_path):
+    path = business_source.root / "rulebook.md"
+    path.write_text(path.read_text().replace("Đơn đang giao vẫn tính", "Đơn đang giao không tính"))
+    with sqlite3.connect(business_source.root / "data/shop_a/pos.sqlite") as conn:
+        conn.execute("UPDATE don_hang SET TinhTrang='shipping' WHERE MaHoaDon='d'")
+        conn.execute("UPDATE chi_tiet_don SET TriGia=900 WHERE MaHoaDon='d'")
+    context = prepare_business(load_split(business_source.root), "shop_a")
+    prepare_facts(context, tmp_path / "profit-status")
+    prepare_semantics(context)
+    assert run(context, "Hàng lời nhất tháng này là gì?")["answer"]["answer"] == "Cà phê"
+
+
+def test_new_namespace_business_codes_file_and_row_order_preserve_ranking(
+    business_source, tmp_path
+):
+    import shutil
+
+    from src.jsonio import dumps
+
+    root = business_source.root
+    folder = root / "data/shop_a"
+    with sqlite3.connect(folder / "pos.sqlite") as conn:
+        rows = conn.execute("SELECT * FROM chi_tiet_don").fetchall()
+        conn.execute("DELETE FROM chi_tiet_don")
+        conn.executemany("INSERT INTO chi_tiet_don VALUES (?,?,?,?,?,?,?)", reversed(rows))
+        for before, after in [("p1", "sku-a"), ("p2", "sku-b"), ("p3", "sku-c")]:
+            conn.execute("UPDATE san_pham SET MaHangHoa=? WHERE MaHangHoa=?", (after, before))
+            conn.execute("UPDATE chi_tiet_don SET MaHangHoa=? WHERE MaHangHoa=?", (after, before))
+            conn.execute("UPDATE the_kho SET MaHangHoa=? WHERE MaHangHoa=?", (after, before))
+    conn.close()
+    q = question(question="Top 3 mặt hàng bán chạy nhất tháng này?", business_id="new_merchant")
+    renamed = tmp_path / "another_split"
+    new_folder = renamed / "data/new_merchant"
+    new_folder.mkdir(parents=True)
+    shutil.copyfile(folder / "pos.sqlite", new_folder / "register.sqlite")
+    shutil.copyfile(folder / "README.md", new_folder / "README.md")
+    for name in ["rulebook.md", "calendar.csv"]:
+        shutil.copyfile(root / name, renamed / name)
+    (renamed / "questions.jsonl").write_text(dumps(q.__dict__) + "\n")
+    context = prepare_business(load_split(renamed), "new_merchant")
+    prepare_facts(context, tmp_path / "permuted-facts")
+    prepare_semantics(context)
+    assert execute_plan(business_draft(q, context), q, context)["answer"]["answer"] == [
+        "Trà",
+        "Cà phê",
+        "Bánh",
+    ]

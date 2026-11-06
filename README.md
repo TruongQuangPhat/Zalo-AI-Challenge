@@ -184,6 +184,19 @@ Bằng chứng đối chiếu raw độc lập, hai cold runs và warm cache tr�
 [reports/normalization_verification.json](reports/normalization_verification.json).
 Preparation không tự cấp quyền trả số; đường local planner phải qua QueryPlan validator và preflight theo từng câu.
 
+## Kiểm kê authority S1–S5
+
+Chỉ đọc rulebook, calendar và README; thêm `--include-sources` để hash raw inputs cho
+kiểm tra bất biến. Không đọc câu hỏi/nhãn, tạo facts hoặc gọi model:
+
+```bash
+uv run --no-sync python -m scripts.audit_rulebook \
+  --data-dirs dataset/train dataset/public_test --include-sources \
+  --output .artifacts/rulebook-s1-s5/authority.json
+```
+
+Diễn giải, scope, requirements và operator gaps: [authority catalogue](docs/rulebook-authority.md).
+
 ## Ngữ nghĩa và thời gian
 
 `BusinessContext.rules` và `.calendar` dùng authority đúng split; `.semantics` được tạo

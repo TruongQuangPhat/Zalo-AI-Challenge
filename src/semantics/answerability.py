@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.data.cache import fingerprint
@@ -20,7 +21,7 @@ from src.temporal.resolver import iso_day, resolve_window
 if TYPE_CHECKING:
     from src.data.catalog import BusinessContext
 
-VERSION = "business-semantics-v6"
+VERSION = "business-semantics-v7"
 
 
 def _coverage(context: BusinessContext) -> dict:
@@ -208,6 +209,16 @@ def prepare_semantics(context: BusinessContext) -> dict:
         "business_id": context.catalog["business_id"],
         "metric_version": METRIC_VERSION,
         "temporal_version": TEMPORAL_VERSION,
+        "software_sha256": fingerprint(
+            {
+                path.name: digest(path)
+                for path in [
+                    Path(__file__),
+                    Path(__file__).with_name("metric_registry.py"),
+                    Path(__file__).parent.parent / "temporal" / "resolver.py",
+                ]
+            }
+        ),
         "rules": rules.summary(),
         "coverage": _coverage(context),
         "snapshot": prepared.summary.get("snapshot") if prepared else None,
@@ -433,15 +444,39 @@ def preflight(
 
 
 def _business_preflight(context, metric_id, expression, *, as_of_date, filters=None):
-    """Sales coverage gates remain in force; independent facts are checked separately."""
-    result = preflight(
-        context,
-        "revenue" if metric_id == "gross_profit" else "order_count",
-        expression,
-        as_of_date=as_of_date,
+    """Check each fact family on its own axis; sales flow uses sales coverage."""
+    sales = metric_id in {"quantity", "gross_profit"}
+    result = (
+        preflight(
+            context,
+            "revenue" if metric_id == "gross_profit" else "order_count",
+            expression,
+            as_of_date=as_of_date,
+        )
+        if sales
+        else {
+            "decision": "abstain",
+            "reason": None,
+            "window": None,
+            "effective_window": None,
+            "contract": None,
+            "evidence_refs": [],
+            "issue_refs": [],
+        }
     )
     result["metric_id"] = metric_id
     try:
+        if not context.semantics:
+            prepare_semantics(context)
+        prepared = context.prepared
+        if prepared is None or prepared.path is None:
+            raise ContractError("preparation_unsupported")
+        if (
+            context.semantics["prepared_revision"] != fingerprint(prepared.summary)
+            or context.rules.summary() != context.semantics["rules"]
+            or any(context.semantics[k] != context.catalog[k] for k in ["split", "business_id"])
+        ):
+            raise ContractError("stale_context")
         contract = metric_contract(context.rules, metric_id)
         result["contract"] = contract.summary()
         if result["window"]:
@@ -480,44 +515,142 @@ def _business_preflight(context, metric_id, expression, *, as_of_date, filters=N
             "sales_ledger",
         }:
             raise ContractError("entity_sales_grain_unsupported")
-        if metric_id == "stock_balance" and result["reason"] == "order_identity_not_recorded":
-            raise ContractError("independent_stock_coverage_unsupported")
+        if not sales:
+            _business_window(context, metric_id, expression, as_of_date, result)
+    except (ContractError, ValueError, OSError, sqlite3.Error) as exc:
+        result.update(decision="abstain", reason=str(exc))
+    return result
+
+
+def _business_window(context, metric_id, expression, as_of_date, result):
+    """Released export bounds are checked against the relevant fully read facts.
+
+    Explicit README spans take priority. Observed purchase bounds retain the
+    existing finite-export policy, named as such rather than BTC completeness.
+    A state at D never silently becomes a state at the last sales date.
+    """
+    prepared = context.prepared
+    extension = prepared.summary.get("extensions", {})
+    if not context.catalog["read_complete"]:
+        raise ContractError("coverage_conflict_or_incomplete_read")
+    window = resolve_window(expression, as_of_date, context.rules, context.calendar)
+    result["window"] = {
+        **window.summary(),
+        "expression": expression,
+        "time_axis": result["contract"]["time_axis"],
+    }
+    result["evidence_refs"] += [
+        ref for key in window.rule_refs for ref in context.rules.require(key).source_refs
+    ]
+    text = plain(context.catalog["readme"])
+    full = re.findall(
+        r"du lieu day du tu (\d{1,2}/\d{1,2}/\d{4}) den het (\d{1,2}/\d{1,2}/\d{4})", text
+    )
+    spans = {(parse_date(a).isoformat(), parse_date(b).isoformat()) for a, b in full}
+    ends = {
+        parse_date(d).isoformat()
+        for d in re.findall(r"du lieu co den het (\d{1,2}/\d{1,2}/\d{4})", text)
+    } | {b for _, b in spans}
+    if len(spans) > 1 or len(ends) > 1 or any(a > b for a, b in spans):
+        raise ContractError("contradictory_readme_metric_coverage")
+    declared_end = next(iter(ends), None)
+    declared_span = next(iter(spans), None)
+    result["evidence_refs"].append(
+        {
+            "split": context.catalog["split"],
+            "file": f"data/{context.catalog['business_id']}/README.md",
+            "sha256": context.catalog["readme_hash"],
+        }
+    )
+    table, axis = {
+        "purchase_amount": ("purchases", "purchased_at"),
+        "debt_collection": ("payments", "paid_at"),
+        "receivable": ("orders", "ordered_at"),
+        "receivable_customer_count": ("orders", "ordered_at"),
+        "stock_balance": ("stock_balances", "occurred_at"),
+        "lot_expiry": ("lots", "expiry"),
+    }[metric_id]
+    # These identifiers come only from the fixed map above, never a model/query.
+    with closing(prepared.connect()) as connection:
+        if metric_id == "lot_expiry":
+            observed = None  # Expiry dates do not describe export coverage.
+        else:
+            observed = connection.execute(
+                f"SELECT min(substr({axis},1,10)),max(substr({axis},1,10)) FROM {table}"
+            ).fetchone()
+        if metric_id in {"receivable", "receivable_customer_count", "debt_collection"}:
+            payment_span = connection.execute(
+                "SELECT min(substr(paid_at,1,10)),max(substr(paid_at,1,10)) FROM payments"
+            ).fetchone()
+            if payment_span[0] and (
+                (declared_end and payment_span[1] > declared_end)
+                or (declared_span and payment_span[0] < declared_span[0])
+            ):
+                raise ContractError("payment_dates_conflict_readme")
+    if observed and observed[0] is not None:
+        if (declared_end and observed[1] > declared_end) or (
+            declared_span and observed[0] < declared_span[0]
+        ):
+            raise ContractError("metric_dates_conflict_readme")
+    state = metric_id in {"receivable", "receivable_customer_count", "stock_balance", "lot_expiry"}
+    end = min(window.end, window.cutoff or window.end).isoformat()
+    if state:
+        if window.start != window.end or window.start.isoformat() != end:
+            raise ContractError("business_state_point_required")
+        snapshot_at = declared_end if metric_id == "lot_expiry" else extension.get("snapshot_at")
         if metric_id == "lot_expiry" or (
             metric_id == "stock_balance" and extension.get("stock_mode") == "snapshot"
         ):
-            point = resolve_window(expression, as_of_date, context.rules, context.calendar)
-            snapshot_at = (
-                context.semantics["coverage"]["confirmed_end"]
-                if metric_id == "lot_expiry"
-                else extension.get("snapshot_at")
-            )
-            if point.start != point.end or point.end.isoformat() != snapshot_at:
+            if end != snapshot_at:
                 raise ContractError("business_snapshot_date_unsupported")
-        if metric_id == "purchase_amount":
-            if "purchases" in prepared.summary.get("extensions", {}).get("issues", {}):
-                raise ContractError("purchase_mapping_unsupported")
-            with closing(prepared.connect()) as connection:
-                span = connection.execute(
-                    "SELECT min(substr(purchased_at,1,10)),max(substr(purchased_at,1,10)) "
-                    "FROM purchases"
-                ).fetchone()
-            if span[0] is None:
-                raise ContractError("empty_purchase_coverage_unknown")
-            if not context.catalog["read_complete"] or context.semantics["coverage"]["conflicts"]:
-                raise ContractError("coverage_conflict_or_incomplete_read")
-            confirmed_end = context.semantics["coverage"].get("confirmed_end")
-            if confirmed_end and span[1] > confirmed_end:
-                raise ContractError("purchase_dates_conflict_readme")
-            window = resolve_window(expression, as_of_date, context.rules, context.calendar)
-            start, end = (
-                max(span[0], window.start.isoformat()),
-                min(span[1], min(window.end, window.cutoff or window.end).isoformat()),
-            )
-            result.update(
-                decision="eligible_to_execute" if start <= end else "unanswerable",
-                reason="business_export_dates" if start <= end else "outside_coverage",
-                effective_window={"start": start, "end": end} if start <= end else None,
-            )
-    except (ContractError, ValueError) as exc:
-        result.update(decision="abstain", reason=str(exc))
-    return result
+        elif not observed or observed[0] is None or end < observed[0] or not declared_end:
+            raise ContractError("business_history_coverage_unknown")
+        if declared_end and end > declared_end:
+            raise ContractError("business_history_after_declared_end")
+        if metric_id in {"receivable", "receivable_customer_count"}:
+            if prepared.summary.get("coverage", {}).get("parse_status") != "complete":
+                raise ContractError("order_history_incomplete")
+            if "order_count" in prepared.summary.get("blocking_metrics", []):
+                raise ContractError("dependent_order_quality_issue")
+        start = window.start.isoformat()
+        basis = (
+            "exact_declared_snapshot" if snapshot_at else "recorded_history_through_declared_end"
+        )
+    else:
+        if not observed or observed[0] is None:
+            raise ContractError("empty_business_coverage_unknown")
+        if metric_id == "debt_collection":
+            if prepared.summary.get("coverage", {}).get("parse_status") != "complete":
+                raise ContractError("order_history_incomplete")
+            if "order_count" in prepared.summary.get("blocking_metrics", []):
+                raise ContractError("dependent_order_quality_issue")
+            # A payment-event extent is not a complete period. Require the
+            # declared full export span to include zero-payment days safely.
+            if not declared_span:
+                raise ContractError("payment_period_coverage_unknown")
+        lower, upper = declared_span or observed
+        start, end = max(window.start.isoformat(), lower), min(end, upper)
+        basis = "README_full_span" if declared_span else "observed_purchase_export_dates_policy"
+        if start > end:
+            context.rules.require("outside_coverage")
+            result.update(decision="unanswerable", reason="outside_metric_coverage")
+            return
+        if (
+            start != window.start.isoformat()
+            or end != min(window.end, window.cutoff or window.end).isoformat()
+        ):
+            context.rules.require("coverage")
+    result.update(
+        decision="eligible_to_execute",
+        reason="metric_dependencies_and_coverage_verified",
+        effective_window={"start": start, "end": end, "inclusive": True},
+        coverage={
+            "fact_type": table,
+            "time_axis": axis,
+            "basis": basis,
+            "provenance": "source_declaration"
+            if "declared" in basis or basis == "README_full_span"
+            else "policy",
+        },
+    )
+    result["evidence_refs"] += [table["source_ref"] for table in context.catalog["tables"]]

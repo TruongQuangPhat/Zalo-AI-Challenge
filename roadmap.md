@@ -3,17 +3,72 @@
 
 > **Dự án:** Zalo AI Challenge 2026 — *DataMate: Talking To Your Data Through Agentic AI*  
 > **Ngày lập:** 01/11/2026  
-> **Lần rà soát:** 05/11/2026 — source S3–S5 đạt 446 tests; S6 đang chạy nghiệm thu CUDA/CPU/Docker trên tập khóa. Số liệu S1/S2 ngày 04/11 bên dưới giữ đúng revision lịch sử.
+> **Lần rà soát:** 05/11/2026 — phiên rulebook S1–S5 có nguồn; chưa chạy model/native evaluation. Bằng chứng S1/S2 và các phần nghiệm thu cũ bên dưới giữ đúng revision lịch sử.
 > **Mục tiêu:** Xây dựng **một baseline chạy được từ đầu đến cuối**, tự động trả lời câu hỏi tiếng Việt trên CSV/XLSX/SQLite, hoạt động hoàn toàn offline, có thể đánh giá bằng đáp án train và đóng gói Docker để nộp thi.  
 > **Phạm vi:** Tập trung vào một giải pháp **đúng quy định, tổng quát hóa được, có thể tái lập và đo lường được**. Các kỹ thuật tối ưu PA nâng cao, fine-tuning, ensemble hay multi-agent **để sau khi baseline hoàn chỉnh**.  
-> **Trạng thái:** `S3_S6_ACCEPTANCE_PENDING_COLAB` — S1/S2 có baseline lịch sử đã kiểm chứng; code S3–S5 đã nối execution và đạt tests, đang nghiệm thu source cuối. Chưa đóng baseline hoặc tuyên bố submission-ready. [JSON kết quả](reports/stage_results.json) dùng chung cấu trúc cho S1–S6; evidence kỹ thuật chi tiết giữ local trong `.artifacts/s1-s2-full/verification-evidence.json`, section `s1_s2_final_baseline`. Các checkpoint khác giữ đúng revision lịch sử.
+> **Trạng thái:** `RULEBOOK_S1_S5_REVIEW` — catalogue/semantics có nguồn và code/tests trong phạm vi operator đã bật; evidence hiện tại ở mục rulebook ngay dưới. S6 chưa nghiệm thu; số liệu model/image/S1–S5 cũ giữ đúng revision lịch sử. [JSON kết quả](reports/stage_results.json) không được cập nhật trong phiên này.
 > **Thiết lập hiện có (theo xác nhận của người thực hiện):** dự án đang có thư mục `dataset/` và đã đưa `dataset/` vào `.gitignore`; **không tạo lại bước gitignore dataset**. Mã nguồn dùng trực tiếp `src/`, **không có lớp thư mục `src/datamate/`**. Cần kiểm tra trạng thái Git thực tế trước khi kết luận dữ liệu chưa từng được track.
 
 **Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu lại sau cleanup; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
 
 ---
 
-## Cập nhật S3–S6 ngày 05/11/2026 — nghiệm thu đang chạy
+## Rulebook S1–S5 authority — 05/11/2026
+
+Branch `feature/rulebook-s1-s5-authority`, base/main `ab3f6aabf5c9429d51f2766715739de6a5525f31`.
+Nguồn immutable: toàn văn 2 rulebooks, 30 train +14 public README, calendar đúng split.
+[Catalogue tập trung](docs/rulebook-authority.md) ánh xạ 87 train +109 public units thành
+116 rule IDs trong hợp hai split, giữ source hash/line/quote/scope, canonical parameters,
+operator boundary/requirements, code/tests và gaps. Mỗi unit là hàng bảng hoặc đoạn/bullet
+ngoài bảng (bỏ heading/header/separator); 2.119 README units là descriptive declarations,
+không biến tên cột/file/value thành luật nghiệp vụ hoặc capability supported.
+
+Đã tái hiện red: public time_axis và purchase/stock contract bị sales dependency chặn
+(3 failed/1 passed trước sửa). Parser v9 nhận cả return-after-period/after-asof, không
+cắt câu hoặc bỏ phủ định; ghép Markdown soft-wrap với physical source span. Red tests
+bổ sung đã tái hiện và sửa việc recognized anchor/output fragment che qualifier khác
+trong cùng đoạn. `understood` tách khỏi scope (`ambiguous`/`not_applicable`),
+`execution`/requirements và eligible_to_execute. Luật ngành, split-only và delivery cutoff
+khác nhau giữ riêng; clause lạ vẫn hiện trong inventory. Public authority không thành
+train default. Vocabulary/signatures hữu hạn; không chứng nhận mọi paraphrase tự nhiên.
+
+Contracts v6/preflight v7 bỏ sales coupling của purchase/payment/state, giữ own axis,
+quality/required fields và README authority; payment period thiếu full span giữ abstain.
+State giữ cutoff hỏi sau ngày bán cuối nếu history/declared end đủ; snapshot sai ngày chặn.
+Purchase policy extent cũ giữ provenance policy; không mạo nhận là BTC/user override mới.
+Lot contract khai báo purchase dependency/output date. Gross-profit execution theo resolved
+status policy thay hard-coded statuses. Planner context v11 truyền structured policy và
+requirements. Parser/helper, normalizer/mapping và semantic registry/preflight/resolver có
+fingerprints thật; không sửa cache/manifest hoặc reuse evidence model/image cũ như mới.
+
+Ba user overrides coverage sales, money grouping, unique unaccented name join giữ nguyên
+provenance và giới hạn. Không đổi membership validation split (dev biz_105/biz_124), model,
+dependencies, entrypoint hoặc QueryPlan. Không đọc gold/questions phát hành/predictions/EDA
+answers để triển khai; không chạy inference, scoring, verify_runtime hay Docker/CUDA.
+Không sửa `reports/stage_results.json`; không commit/push.
+
+Validation: regression trước các sửa paragraph cuối đạt **486 passed /399,92 giây**.
+Sau sửa cuối, focused normalization/authority/semantics đạt **92 passed /51,08 giây**;
+full suite source cuối đạt **489 passed /391,89 giây**. Ruff lint/format 69 files,
+uv lock offline, local documentation links và whitespace đạt.
+Hash đối chiếu giữ nguyên 208 raw files, 44 README, 2 rulebooks, 2 calendars; authority
+khớp cả bootstrap audit. Evidence ngắn tại
+`/mnt/d/DataMate-Zalo-AI-Challenge-20261105/.artifacts/rulebook-s1-s5/`.
+
+Còn operator gaps được catalogue hóa: qualified customer metrics, staff/hour/day/supplier,
+weighted import/large units/valuation/stockout/dead stock/price effects, net profit, generic
+lot horizon/value/list, topping/complex adjustments, mother/baby/repair/phone/installments/
+warranty. Ngành thiếu/conflict authority giữ block; không gọi domain supported nhờ abstain.
+Standalone payment-only/stock-only ingestion chưa triển khai; không tuyên bố S3–S5 native
+accuracy hay S6 hoàn tất. Chưa có owner decision mới cần chốt trong phạm vi này.
+
+Phiên đánh giá sau chỉ khi người dùng yêu cầu: freeze source/config/model/input → full
+3.000 inference → score toàn train theo quyết định đã có → regression/repeatability → S6.
+Không thực hiện các bước đó trong phiên rulebook.
+
+---
+
+## Lịch sử S3–S6 ngày 05/11/2026 — trạng thái lúc ghi nhận
 
 
 ### Phương án Colab được yêu cầu bổ sung
