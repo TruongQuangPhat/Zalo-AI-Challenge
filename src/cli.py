@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -24,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     predict = commands.add_parser("predict", help="offline local LLM planner and execution")
     predict.add_argument("--data-dir", type=Path, default=Path("/data"))
     predict.add_argument("--output-dir", type=Path, default=Path("/result"))
-    predict.add_argument("--cache-dir", type=Path, default=os.environ.get("DATAMATE_CACHE"))
+    predict.add_argument("--cache-dir", type=Path)
     predict.add_argument(
         "--resume-from", type=Path, help="verify immutable prior run; output must be fresh"
     )
@@ -32,26 +31,11 @@ def main(argv: list[str] | None = None) -> int:
     predict.add_argument(
         "--model",
         type=Path,
-        default=Path(
-            os.environ.get(
-                "DATAMATE_MODEL",
-                str(
-                    Path(__file__).resolve().parents[1]
-                    / ".artifacts/models/qwen2.5-1.5b-instruct/model.gguf"
-                ),
-            )
-        ),
-        help="existing local GGUF; missing weights fail before writing output",
+        default=Path(__file__).resolve().parents[1] / "models/qwen2.5-1.5b-instruct",
+        help="packaged local model directory; missing weights fail before writing output",
     )
     predict.add_argument("--question-timeout", type=float, default=120)
-    predict.add_argument("--model-load-timeout", type=float, default=180)
-    predict.add_argument("--model-threads", type=int, default=4)
-    predict.add_argument(
-        "--gpu-layers",
-        type=int,
-        default=os.environ.get("DATAMATE_GPU_LAYERS", "0"),
-        help="0 CPU, -1 all layers on GPU",
-    )
+    predict.add_argument("--model-load-timeout", type=float, default=900)
     predict.add_argument(
         "--question-id", action="append", help="explicit subset, input order retained"
     )
@@ -80,12 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             from src.agent.local import LocalModel
             from src.agent.planner import LocalPlanner
 
-            model = LocalModel(
-                args.model,
-                load_timeout=args.model_load_timeout,
-                threads=args.model_threads,
-                gpu_layers=args.gpu_layers,
-            )
+            model = LocalModel(args.model, load_timeout=args.model_load_timeout)
             try:
                 report = run_inference(
                     args.data_dir,

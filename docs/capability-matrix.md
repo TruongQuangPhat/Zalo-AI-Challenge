@@ -1,5 +1,8 @@
 # Capability matrix — baseline hữu hạn
 
+> Ghi chú 07/11/2026: `reports/*.json` và các audit script nhắc trong tài liệu này đã được gỡ khỏi
+> source tree khi dọn theo Docker guide; bản lịch sử nằm trong git history trước commit dọn dẹp.
+
 Mỗi dòng là cấu trúc + metric, không phải allowlist business IDs.
 Authority phải lấy từ rulebook/README/calendar runtime, có hash.
 `planned` là đặc tả; runtime chưa hỗ trợ thì **abstain**, không tự kết luận unanswerable.
@@ -16,7 +19,7 @@ Baseline S1/S2 hữu hạn đã chốt ngày 04/11/2026: 411 tests; 17 business/
 ready, 0 issues. Native cuối **166 correct / 0 wrong / 8 abstain** /174 là unchanged-draft
 replay có byte-context proof; hai fresh CUDA batches 44 native + 3 fixtures cho
 predictions giống nhau và khớp replay. CPU smoke **3 correct / 0 wrong / 0 abstain** /3; chưa full CPU.
-Kết quả: [stage_results.json](../reports/stage_results.json); evidence chi tiết local:
+Kết quả: `reports/stage_results.json`; evidence chi tiết local:
 `.artifacts/s1-s2-full/verification-evidence.json`, section `s1_s2_final_baseline`.
 Các số M1/checkpoint trong bảng dưới giữ scope/revision lịch sử, không thay cho bằng
 chứng source cuối. Supported chỉ áp dụng mapping và câu hỏi nằm trong capability.
@@ -54,7 +57,7 @@ required fields đủ, coverage/units/grain đúng, kết quả thực thi đạ
 Một metric cấp shop có thể dùng header độc lập khi kiểm chứng đúng nghĩa, dù item parser chưa có;
 phải ghi chính xác giới hạn, không nâng cả ngành thành supported.
 
-Kết quả mới nhất đọc tại [JSON chung](../reports/stage_results.json): mỗi stage cùng
+Kết quả mới nhất đọc tại JSON chung `reports/stage_results.json`: mỗi stage cùng
 cấu trúc, nguyên văn câu hỏi, đáp án kỳ vọng/thực tế, verdict và điểm theo lượt đánh giá.
 Summaries tách native/synthetic và behavior checks; repetitions không thành mẫu mới.
 Drafts, windows, operands, verifier và source/model/image hashes giữ trong evidence local.

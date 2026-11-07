@@ -129,7 +129,7 @@ def test_cli_from_different_directory_and_separate_evaluation(synthetic_split, t
             "--output-dir",
             str(output),
             "--model",
-            str(tmp_path / "missing.gguf"),
+            str(tmp_path / "missing-model"),
         ],
         cwd=tmp_path,
         capture_output=True,
@@ -159,25 +159,6 @@ def test_inference_module_does_not_import_evaluator_in_fresh_process():
     subprocess.run([sys.executable, "-c", code], cwd=ROOT, check=True)
 
 
-@pytest.mark.parametrize("tensor_status", ["passed", "unavailable"])
-def test_cuda_gate_uses_tensor_evidence_independently_of_docker_info(monkeypatch, tensor_status):
-    from scripts.verify_runtime import check_gpu
-
-    monkeypatch.setattr(
-        "scripts.verify_runtime.probe",
-        lambda: {
-            "docker": {"status": "unavailable", "reason": "timeout"},
-            "gpu": {"status": "passed", "stdout": "Synthetic GPU"},
-            "torch_cuda": {"status": tensor_status, "stdout": '{"tensor_device":"cuda:0"}'},
-        },
-    )
-    if tensor_status == "passed":
-        assert check_gpu()["torch_cuda"]["tensor_device"] == "cuda:0"
-    else:
-        with pytest.raises(ContractError, match="unavailable"):
-            check_gpu()
-
-
 def test_missing_weights_fail_without_creating_predictions(synthetic_split, tmp_path):
     output = tmp_path / "missing-model-run"
     assert (
@@ -189,7 +170,7 @@ def test_missing_weights_fail_without_creating_predictions(synthetic_split, tmp_
                 "--output-dir",
                 str(output),
                 "--model",
-                str(tmp_path / "missing.gguf"),
+                str(tmp_path / "missing-model"),
             ]
         )
         == 2

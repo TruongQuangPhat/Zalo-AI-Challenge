@@ -74,8 +74,8 @@ def build_context(question: Question, context: BusinessContext) -> dict:
     ]:
         if field in mapping and table in semantics["facts_schema"]:
             fields.setdefault(table, set()).update(columns)
-    # Stable metadata comes before per-question values so llama.cpp can reuse its
-    # native token-prefix cache. Full quotes/hashes remain in BusinessContext/logs.
+    # Stable metadata comes before per-question values so vLLM can reuse its
+    # prefix cache. Full quotes/hashes remain in BusinessContext/logs.
     return {
         "version": VERSION,
         "authority": {

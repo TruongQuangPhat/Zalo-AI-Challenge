@@ -145,21 +145,3 @@ def test_valid_json_with_invalid_aggregate_shape_keeps_planning_diagnostic(seman
     assert result["plan"]["reason"] == "planning_failed"
     assert result["plan"]["attempts"][0]["error_stage"] == "semantic_validation"
     assert result["plan"]["attempts"][0]["intended_metrics"] == []
-
-
-def test_backend_identity_changes_when_installed_binary_changes(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    from src.agent.local import backend_identity
-
-    binary = tmp_path / "engine.so"
-    binary.write_bytes(b"synthetic binary revision one")
-    distribution = SimpleNamespace(
-        version="synthetic",
-        files=["engine.so", "lib/unused_duplicate.so"],
-        locate_file=lambda p: tmp_path / p,
-    )
-    monkeypatch.setattr("src.agent.local.importlib.metadata.distribution", lambda _: distribution)
-    before = backend_identity()
-    binary.write_bytes(b"synthetic binary revision two")
-    assert backend_identity() != before

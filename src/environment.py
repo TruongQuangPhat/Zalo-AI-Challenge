@@ -11,19 +11,10 @@ from src.jsonio import ContractError
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def project_python() -> str:
-    executable = ROOT / ".venv" / "bin" / "python"
-    if not executable.is_file():
-        raise ContractError("Project .venv is missing. Run uv sync --locked first.")
-    return str(executable)
-
-
 def require_project_environment() -> dict:
     expected = ROOT / ".venv"
     if Path(sys.prefix).resolve() != expected.resolve() or sys.prefix == sys.base_prefix:
-        raise ContractError(
-            "Use the project's .venv: uv run --no-sync python -m scripts.verify_runtime"
-        )
+        raise ContractError("Use the project .venv: .venv/bin/python -m scripts.verify_runtime")
     if site.ENABLE_USER_SITE:
         raise ContractError("Project environment must not enable user site-packages")
     config = expected / "pyvenv.cfg"

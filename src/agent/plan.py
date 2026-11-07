@@ -597,7 +597,7 @@ def _bind_dependencies(
 ) -> None:
     """Constrain symbolic operand roles before generation, never repair a draft.
 
-    Tuple items are supported by the pinned llama.cpp JSON-schema converter.
+    Tuple items are converted to ``prefixItems`` for the vLLM grammar backend.
     These names bind dependencies only; no source values or numeric answers enter
     the grammar. The general QueryPlan validator still accepts arbitrary valid IDs.
     """
