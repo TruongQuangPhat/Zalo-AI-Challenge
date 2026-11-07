@@ -85,6 +85,22 @@ Thiếu source/coverage không tự đoán dữ liệu; server preflight quyết
 """
 
 
+# Intents whose rulebook definition has no executor operator yet. Without one, a plan
+# silently falls back to a whole-business metric, so abstain before planning.
+UNSUPPORTED_INTENTS = {
+    "unit_price": r"\b(don gia|gia ban)\b|\bgia (mot|1) ",
+    "size_quantity": r"\bsize (m|l)\b",
+    "delivery_batches": r"\bdot (giao|hang)\b|\b(may|bao nhieu|bao nhiu|bn|bnhiu|nhieu|so) dot\b",
+}
+
+
+def unsupported_intent(question: Question) -> str | None:
+    from src.semantics.rulebook import plain
+
+    text = plain(question.question)
+    return next((k for k, p in UNSUPPORTED_INTENTS.items() if re.search(p, text)), None)
+
+
 class LocalPlanner:
     name = "local-planner"
 
@@ -103,6 +119,13 @@ class LocalPlanner:
         }
 
     def decide(self, question: Question, *, context: BusinessContext) -> dict:
+        if intent := unsupported_intent(question):
+            reason = f"guard:unsupported_intent:{intent}"
+            return {
+                "answer": {"id": question.id, "type": "abstain"},
+                "plan": {"status": "skipped", "reason": reason, "prompt_version": PROMPT_VERSION},
+                "execution": {"status": "not_performed", "reason": reason},
+            }
         started = time.monotonic()
         deadline = started + self.timeout
         selected = build_context(question, context)

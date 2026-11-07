@@ -1363,3 +1363,30 @@ def test_generation_preserves_distinct_comparison_periods_before_model_output():
     p["time_windows"][1]["expression"] = deepcopy(p["time_windows"][0]["expression"])
     with pytest.raises(ContractError):
         _schema(p, schema)
+
+
+@pytest.mark.parametrize(
+    "text,intent",
+    [
+        ("Ngày 03/01/2026 bán Trà đào với đơn giá bao nhiêu một ly?", "unit_price"),
+        ("gia ban mot chai nuoc suoi ngay 02/01/2026 la bn", "unit_price"),
+        ("Tháng này quán bán được bao nhiêu ly size M, cộng mọi món?", "size_quantity"),
+        ("thang 12/2025 xe giao tong cong may dot hang", "delivery_batches"),
+    ],
+)
+def test_intents_without_operator_abstain_before_calling_the_model(semantic_source, text, intent):
+    model = ScriptedModel()
+    result = LocalPlanner(model).decide(question(question=text), context=semantic_source())
+    assert result["answer"] == {"id": "synthetic", "type": "abstain"}
+    assert result["plan"]["reason"] == f"guard:unsupported_intent:{intent}"
+    assert model.calls == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Doanh thu tháng này?", "Giá vốn hàng bán tháng này?", "Số đơn đột xuất tăng tháng này?"],
+)
+def test_unsupported_intent_guard_ignores_nearby_supported_wording(text):
+    from src.agent.planner import unsupported_intent
+
+    assert unsupported_intent(question(question=text)) is None

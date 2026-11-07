@@ -13,6 +13,24 @@
 
 ---
 
+## Guard A: abstain cho intent chưa có operator — 07/11/2026
+
+Phân tích lỗi baseline-v1 trên full train (1.235 đúng / 272 sai / 1.493 abstain, PA 0,321).
+Ba nhóm câu luôn trả lời sai: đơn giá / giá bán ngày D (0/29), size M/L (0/33), số đợt giao
+(0/4). Nguyên nhân là chưa có operator đúng luật, nên plan rơi về metric toàn shop.
+`src/agent/planner.py::unsupported_intent` trả `abstain` trước khi gọi LLM, với lý do
+`guard:unsupported_intent:<intent>` ghi trong log của câu.
+
+- Replay guard trên dự đoán đã lưu của baseline-v1 train (không chạy lại model), chấm bằng
+  `src.cli evaluate`: 66 câu sai chuyển thành abstain, 0 câu đúng bị chặn. Kết quả 1.235 / 206 /
+  1.559, **PA 0,343**, precision khi trả lời 85,7%. Trên public, 2 câu đã trả lời bị chặn
+  (chỉ đếm, không có nhãn).
+- `verify_runtime`: lint và format đạt, 492 tests đạt.
+- Giới hạn: số liệu là replay trên run GGUF Q4 cũ. Chưa chạy lại vLLM/GPU trên source mới.
+  Gỡ guard cho từng intent khi executor có operator đúng và có test.
+
+---
+
 ## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026
 
 Theo yêu cầu người dùng: đọc Docker Submission Guide DataMate, dọn project theo đúng pipeline
