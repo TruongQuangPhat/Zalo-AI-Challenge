@@ -12,7 +12,7 @@ from src.data.normalization.stock import resolve_stock_entity
 from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.metric_registry import metric_contract
-from src.semantics.rulebook import plain
+from src.semantics.rulebook import question_plain
 from src.temporal.resolver import TimeWindow, resolve_window
 
 VERSION = "query-plan-v14"
@@ -201,7 +201,7 @@ RELATIVE_CUES = {
 
 def _metric_cues(question: Question) -> set[str]:
     """Literal intent cross-check, independent of model output; no numeric answers."""
-    text = plain(question.question)
+    text = question_plain(question.question)
     cues = {
         r"\b(doanh thu|doanh so|dthu|revenue|tien ban|tien hang|"
         r"ban duoc (?:tong cong )?bao nhieu tien|"
@@ -247,7 +247,7 @@ def _period(prefix: str, max_value: int):
 
 def _time_text(question: Question) -> str:
     """Canonical time wording: common abbreviations become 'thang M/YYYY' or 'quy Q/YYYY'."""
-    text = re.sub(r"\bthangs\b", "thang", plain(question.question))
+    text = re.sub(r"\bthangs\b", "thang", question_plain(question.question))
     text = re.sub(r"\bnawm\b", "nam", text)
     text = re.sub(r"\bquys\b", "quy", text)
     year = r"(\d{4}|\d{2})(?![/-]?\d)"
@@ -319,7 +319,7 @@ def _literal_windows(question: Question) -> list[dict]:
 
 def _multiple_results(question: Question) -> dict | None:
     """Bounded ordered scalar results in the existing QueryPlan, without a DAG."""
-    text = plain(question.question)
+    text = question_plain(question.question)
     metrics = _metric_cues(question)
     expressions = _literal_windows(question)
     series = re.search(
@@ -432,7 +432,7 @@ def _multiple_schema(schema: dict, spec: dict) -> dict:
 
 
 def _shift_text(question: Question) -> str:
-    text = re.sub(r"\bca sangs\b", "ca sang", plain(question.question))
+    text = re.sub(r"\bca sangs\b", "ca sang", question_plain(question.question))
     return re.sub(r"\bso vs\b", "so voi", text)
 
 
@@ -463,7 +463,7 @@ def _single_scope(question: Question) -> dict | None:
     shift = _single_shift(question)
     if shift:
         return {**shift, "rule_refs": ["shift"]}
-    text = plain(question.question)
+    text = question_plain(question.question)
     if re.search(r"%|phan tram|ti trong|ty trong|trung binh|binh quan|chenh|so voi", text):
         return None
     metrics = _metric_cues(question)
@@ -599,7 +599,7 @@ def _difference_windows(question: Question, *, percent_change: bool = False) -> 
     Both operands need one literal period. Current-month comparisons use prior MTD
     per runtime authority, checked during validation, never a whole prior month.
     """
-    text = plain(question.question)
+    text = question_plain(question.question)
     percentage_cue = bool(re.search(r"%|\bphan tram\b", text))
     if percent_change:
         text = re.sub(r"^(?:cho (?:minh|toi) hoi|xem giup|coi gium)\s+", "", text)
@@ -823,7 +823,7 @@ def _check_question_scope(
     This finite guard cannot certify all entity aliases, negations or paraphrases.
     It does not infer a replacement intent or authorize execution.
     """
-    text = plain(question.question)
+    text = question_plain(question.question)
     if match := re.search(
         r"\b(no|nowj|cong no|gia von|lai gop|lai rong|phieu nhap|han dung|het han)\b", text
     ):
@@ -1032,7 +1032,7 @@ def validate_query_plan(draft: dict, question: Question, context: BusinessContex
         raise ContractError("output must reference its scalar result")
     entity = None
     if stock:
-        text = plain(question.question)
+        text = question_plain(question.question)
         if (
             len(draft["entities"]) != 1
             or window["expression"] != {"kind": "today"}

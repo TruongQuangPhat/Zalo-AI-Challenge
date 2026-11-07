@@ -91,13 +91,23 @@ UNSUPPORTED_INTENTS = {
     "unit_price": r"\b(don gia|gia ban)\b|\bgia (mot|1) ",
     "size_quantity": r"\bsize (m|l)\b",
     "delivery_batches": r"\bdot (giao|hang)\b|\b(may|bao nhieu|bao nhiu|bn|bnhiu|nhieu|so) dot\b",
+    "prescription": r"\bke don\b",
+    "day_count_threshold": (
+        r"\b(so ngay|may ngay|bao nhieu ngay|bao nhiu ngay|bn ngay|bnhiu ngay|nhieu ngay)\b"
+    ),
+    # Shop-wide profit; product rankings by gross profit have their own operator.
+    "whole_shop_profit": (
+        r"^(?!.*\b(nhat|top|nao)\b).*\b(loi gop|lai gop|loi nhuan|lai rong|loi rong)\b"
+    ),
+    "purchase_minus_sales": r"\bnhap tru (so )?ban\b|\bchenh lech nhap\b",
+    "unsupported_channel": r"\b(zalo|shopee|lazada|tiktok|grab|online)\b",
 }
 
 
 def unsupported_intent(question: Question) -> str | None:
-    from src.semantics.rulebook import plain
+    from src.semantics.rulebook import question_plain
 
-    text = plain(question.question)
+    text = question_plain(question.question)
     intent = next((k for k, p in UNSUPPORTED_INTENTS.items() if re.search(p, text)), None)
     # A date-like token no finite cue understands leaves the period to the model, which
     # then copies the prompt template's period instead of the one asked.
@@ -123,9 +133,9 @@ _ADVICE_CUE = r"\b(?:duoc khong|co nen|nen dung|co sao khong)\s*[?!.]*$"
 
 def shape_mismatch(question: Question, answer_type: str) -> str | None:
     """Shape the question asks for when the answer cannot have it, else None."""
-    from src.semantics.rulebook import plain
+    from src.semantics.rulebook import question_plain
 
-    text = plain(question.question)
+    text = question_plain(question.question)
     if answer_type in {"abstain", "unanswerable"}:
         return None
     if any(re.search(p, text) for p in _LIST_CUES):
@@ -173,7 +183,8 @@ def _guard_unbound_entity(decision: dict, question: Question, context: BusinessC
         or plan.get("entities")
         or any(a.get("filters") or a.get("group_by") for a in plan.get("aggregations", []))
     )
-    if decision["answer"]["type"] == "abstain" or bound:
+    # An evidence-backed unanswerable does not depend on which entity a plan binds.
+    if decision["answer"]["type"] in {"abstain", "unanswerable"} or bound:
         return decision
     if not (name := mentioned_entity(context, question)):
         return decision
@@ -208,10 +219,10 @@ class LocalPlanner:
         started = time.monotonic()
         deadline = started + self.timeout
         selected = build_context(question, context)
-        from src.semantics.rulebook import plain
+        from src.semantics.rulebook import question_plain
 
         stock = bool(selected.get("snapshot")) and bool(
-            re.search(r"\b(ton|kho)\b", plain(question.question))
+            re.search(r"\b(ton|kho)\b", question_plain(question.question))
         )
         schema = generation_schema(
             question,

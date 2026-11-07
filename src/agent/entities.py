@@ -15,7 +15,7 @@ from src.data.catalog import BusinessContext
 from src.data.normalization.stock import _alias_pattern
 from src.data.split import Question
 from src.jsonio import ContractError, loads
-from src.semantics.rulebook import plain
+from src.semantics.rulebook import plain, question_plain
 
 if TYPE_CHECKING:
     from src.data.normalization.store import PreparedBusiness
@@ -92,7 +92,7 @@ def mentioned_entity(context: BusinessContext, question: Question) -> str | None
     if not context.prepared or context.prepared.path is None or context.prepared.path.is_symlink():
         return None
     path = context.prepared.path.resolve()
-    text = plain(question.question)
+    text = question_plain(question.question)
     return next(
         (
             name
@@ -123,7 +123,7 @@ def business_spec(question: Question) -> dict | None:
     """Finite intent guards, only question text/capability; no answers or IDs."""
     from src.agent.plan import _literal_windows
 
-    text = plain(question.question)
+    text = question_plain(question.question)
     text = re.sub(r"\bthangs\b", "thang", text)
     text = re.sub(r"\bsoos\b", "so", text)
     # A complete bounded paraphrase binds the same customer-money ranking intent.
@@ -336,7 +336,7 @@ def business_schema(schema: dict, spec: dict, candidates: list[dict]) -> dict:
 
 
 def _check_business_scope(question: Question, spec: dict, entity: dict | None) -> None:
-    text = plain(question.question)
+    text = question_plain(question.question)
     if entity:
         names = [entity["name"], entity["source_code"] or ""]
         for name in sorted((n for n in names if n), key=len, reverse=True):

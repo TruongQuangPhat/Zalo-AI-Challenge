@@ -1590,3 +1590,47 @@ def test_local_model_rejects_a_non_positive_tensor_parallel_size(tmp_path):
         (tmp_path / name).write_text("{}")
     with pytest.raises(ContractError, match="tensor parallel"):
         LocalModel(tmp_path, tensor_parallel=0)
+
+
+def test_unanswerable_is_not_suppressed_by_the_entity_guard(tmp_path):
+    from src.agent.planner import _guard_unbound_entity
+
+    decision = _decision()
+    decision["answer"] = {"id": "synthetic", "type": "unanswerable", "reason": "outside"}
+    text = "thang 8/2025 ban sua chua yakult 65ml duoc bao nhieu tien"
+    result = _guard_unbound_entity(decision, question(question=text), _entity_context(tmp_path))
+    assert result["answer"]["type"] == "unanswerable"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("soos ddown hoom nay", "so don hom nay"),
+        (
+            "ngayf naof trong thangs 6/2025 dthu cao nhaats",
+            "ngay nao trong thang 6/2025 dthu cao nhat",
+        ),
+        ("tieenf bans Bia Tiger 330ml", "tien ban bia tiger 330ml"),
+    ],
+)
+def test_question_typos_are_fixed_without_touching_product_names(text, expected):
+    from src.semantics.rulebook import question_plain
+
+    assert question_plain(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text,intent",
+    [
+        ("Tháng 7/2025 tiền bán thuốc kê đơn là bao nhiêu?", "prescription"),
+        ("Tháng 3/2026 có bao nhiêu ngày doanh thu từ 50.000.000 trở lên?", "day_count_threshold"),
+        ("Lợi nhuận gộp tháng 9/2025 là bao nhiêu?", "whole_shop_profit"),
+        ("Tháng 3/2025, số nhập trừ số bán của Smecta là bao nhiêu?", "purchase_minus_sales"),
+        ("Doanh thu đơn bán qua Zalo OA tháng 1/2026?", "unsupported_channel"),
+        ("Hàng nào có tổng lãi gộp cao nhất tháng 1/2026?", None),
+    ],
+)
+def test_intents_without_an_operator_are_recognized(text, intent):
+    from src.agent.planner import unsupported_intent
+
+    assert unsupported_intent(question(question=text)) == intent

@@ -85,6 +85,25 @@ vẫn được giữ trong `plan.guard` của log.
 - Phần kiểu đáp án là replay đo được. Phần nhãn nhóm và khách lẻ đổi dữ liệu và plan, nên
   cần lượt chạy GPU (A–D) để xác nhận.
 
+**Lượt GPU A–D, Qwen2.5-1.5B BF16 qua vLLM (molab), full train.** Chấm bằng `src.cli evaluate`:
+1.259 đúng / 54 sai / 1.687 abstain, **PA 0,402** (baseline 0,321), precision khi trả lời 95,9%.
+So từng câu với baseline: 174 câu sai thành abstain, 45 câu sai thành đúng ("bữa qua", nhãn nhóm,
+khách lẻ, "quys"), 26 câu đúng thành abstain, 5 câu abstain thành đúng. Trong 26 câu đúng bị mất,
+1 câu do Guard C chặn câu trả `unanswerable` (đã sửa). 24 câu không trùng guard nào; nhiều khả năng
+do khác backend (baseline GGUF Q4 qua llama.cpp, lượt này BF16 qua vLLM). Không có `logs/` nên
+chưa xác nhận được.
+
+**Sửa sau lượt GPU:**
+- Guard C bỏ qua đáp án `unanswerable`.
+- `question_plain` (`src/semantics/rulebook.py`) sửa 87 lỗi gõ Telex của từ chức năng
+  ("soos" → "so", "ddown" → "don", "ngayf naof" → "ngay nao"). Từ điển lấy từ câu hỏi train,
+  đã loại các từ có trong tên catalog. Chỉ áp dụng cho câu hỏi; rulebook vẫn dùng `plain`.
+- Thêm intent chưa có operator vào `unsupported_intent`: thuốc kê đơn, số ngày đạt ngưỡng,
+  lãi gộp/lợi nhuận cả shop (trừ câu xếp hạng), nhập trừ bán, kênh Zalo/sàn. Replay trên lượt
+  GPU: **18 câu sai, 0 câu đúng** bị chặn, PA 0,402 → **0,408**. Phần sửa lỗi gõ đổi plan nên
+  cần lượt GPU tiếp theo để đo.
+- `verify_runtime`: lint và format đạt, 547 tests đạt.
+
 ---
 
 ## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026
