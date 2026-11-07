@@ -46,6 +46,23 @@ trước khi gọi LLM (`guard:unsupported_intent:unparsed_time`).
   khi chưa đo được.
 - `verify_runtime`: lint và format đạt, 509 tests đạt.
 
+**Guard C (cùng ngày): plan không gắn thực thể mà câu hỏi lại nêu tên.** Sau khi
+`execute_plan` trả đáp án, `_guard_unbound_entity` (`src/agent/planner.py`) kiểm tra plan:
+nếu plan không có `resolved_entity`, `entities`, `filters` hay `group_by`, trong khi câu hỏi
+nêu một tên có trong dữ liệu shop thì abstain (`guard:unbound_entity`). Tên lấy từ
+`mentioned_entity` (`src/agent/entities.py`): tên/alias của product và customer, cùng nhãn
+nhóm hàng và nhóm khách; so khớp không dấu, chỉ dùng tên từ 2 từ trở lên. Đáp án bị chặn
+vẫn được giữ trong `plan.guard` của log.
+
+- Đo bằng facts đã prepare cho 29/30 shop train (biz_117 vốn đã abstain toàn bộ). Không có
+  log plan nên chỉ ước lượng được. Không tính các câu Guard A/B đã chặn, có **72 câu sai**
+  vừa nêu tên thực thể vừa có đáp án lớn hơn 20 lần đáp án đúng; plan của các câu này chắc
+  chắn không gắn thực thể nên chắc chắn bị chặn. Thêm tối đa 29 câu sai khác có thể bị chặn.
+- Câu đúng bị chặn ước tính ≈ 0: có 63 câu đúng nêu tên thực thể, nhưng đúng đáp án thì plan
+  phải đã gắn thực thể (plan không gắn sẽ trả số toàn shop), mà guard bỏ qua plan đã gắn.
+- PA train ước tính 0,343 → **≥ 0,367**. Cần một lượt chạy GPU để xác nhận.
+- `verify_runtime`: lint và format đạt, 515 tests đạt.
+
 ---
 
 ## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026

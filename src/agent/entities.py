@@ -65,6 +65,44 @@ def _candidate_rows(prepared: PreparedBusiness, kind: str) -> Iterator[tuple]:
                 yield key, code, name, unit, tuple(loads(aliases))
 
 
+@lru_cache(maxsize=4)
+def _mention_names(path: Path, revision: tuple) -> tuple[str, ...]:
+    """Accentless multi-word product/customer names and item/customer group labels."""
+    names = set()
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:
+        for name, aliases in conn.execute("SELECT name, aliases FROM entities"):
+            names.update(plain(n) for n in (name, *loads(aliases)))
+        for table, column in (
+            ("line_groups", "item_group"),
+            ("event_groups", "item_group"),
+            ("order_groups", "customer_group"),
+        ):
+            try:
+                names.update(
+                    plain(v) for (v,) in conn.execute(f"SELECT DISTINCT {column} FROM {table}")
+                )
+            except sqlite3.OperationalError:
+                continue
+    # Single words ("le", "ca phe") collide with ordinary wording; require two tokens.
+    return tuple(sorted(n for n in names if len(n.split()) >= 2))
+
+
+def mentioned_entity(context: BusinessContext, question: Question) -> str | None:
+    """First source entity or group name the question names, accent-insensitively."""
+    if not context.prepared or context.prepared.path is None or context.prepared.path.is_symlink():
+        return None
+    path = context.prepared.path.resolve()
+    text = plain(question.question)
+    return next(
+        (
+            name
+            for name in _mention_names(path, _catalog_revision(path))
+            if re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", text)
+        ),
+        None,
+    )
+
+
 def entity_candidates(context: BusinessContext, question: str, kind: str = "product") -> list[dict]:
     if not context.prepared or not context.prepared.summary.get("extensions", {}).get("counts"):
         return []

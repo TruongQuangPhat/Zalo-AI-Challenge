@@ -1438,3 +1438,63 @@ def test_unparsed_period_abstains_before_calling_the_model(semantic_source):
     )
     assert result["answer"]["type"] == "abstain" and model.calls == 0
     assert result["plan"]["reason"].endswith(":unparsed_time")
+
+
+def _entity_context(tmp_path):
+    from types import SimpleNamespace
+
+    db = tmp_path / "facts.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.executescript("""
+        CREATE TABLE entities (entity_key TEXT, kind TEXT, source_code TEXT, name TEXT,
+          aliases TEXT, base_unit TEXT, source_ref TEXT);
+        INSERT INTO entities VALUES
+          ('k1','product',NULL,'Sữa chua Yakult 65ml','["Sữa chua Yakult 65ml"]',NULL,'r'),
+          ('k2','product',NULL,'Trà','["Trà"]',NULL,'r');
+        CREATE TABLE line_groups (line_key TEXT, item_group TEXT);
+        INSERT INTO line_groups VALUES ('l1','Giảm đau hạ sốt');
+        """)
+    return SimpleNamespace(prepared=SimpleNamespace(path=db))
+
+
+def _decision(**plan):
+    return {
+        "answer": {"id": "synthetic", "type": "number", "answer": 999},
+        "plan": {"aggregations": [{"filters": [], "group_by": []}], **plan},
+        "execution": {"status": "performed"},
+    }
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "thang 8/2025 ban sua chua yakult 65ml duoc bao nhieu tien",
+        "Doanh thu nhóm hàng giảm đau hạ sốt tháng 12/2025?",
+    ],
+)
+def test_named_entity_with_unbound_plan_abstains_and_keeps_the_suppressed_answer(tmp_path, text):
+    from src.agent.planner import _guard_unbound_entity
+
+    result = _guard_unbound_entity(_decision(), question(question=text), _entity_context(tmp_path))
+    assert result["answer"] == {"id": "synthetic", "type": "abstain"}
+    assert result["plan"]["guard"]["suppressed"]["answer"] == 999
+
+
+@pytest.mark.parametrize(
+    "plan,text",
+    [
+        ({"resolved_entity": {"entity_key": "k1"}}, "Tháng 8/2025 bán Sữa chua Yakult 65ml?"),
+        (
+            {"aggregations": [{"filters": ["item_group=x"], "group_by": []}]},
+            "Nhóm giảm đau hạ sốt?",
+        ),
+        ({}, "Doanh thu trà sữa tháng này?"),
+        ({}, "Doanh thu tháng này?"),
+    ],
+)
+def test_bound_plans_and_single_word_names_are_left_alone(tmp_path, plan, text):
+    from src.agent.planner import _guard_unbound_entity
+
+    decision = _decision(**plan)
+    result = _guard_unbound_entity(decision, question(question=text), _entity_context(tmp_path))
+    assert result["answer"]["answer"] == 999

@@ -104,6 +104,33 @@ def unsupported_intent(question: Question) -> str | None:
     return intent or ("unparsed_time" if unparsed_time(question) else None)
 
 
+def _guard_unbound_entity(decision: dict, question: Question, context: BusinessContext) -> dict:
+    """Abstain when the question names a source entity but the plan binds none.
+
+    Such plans silently answer with a whole-business metric (e.g. shop revenue for a
+    product question), which costs a point; abstaining costs nothing.
+    """
+    from src.agent.entities import mentioned_entity
+
+    plan = decision["plan"]
+    bound = (
+        plan.get("resolved_entity")
+        or plan.get("entities")
+        or any(a.get("filters") or a.get("group_by") for a in plan.get("aggregations", []))
+    )
+    if decision["answer"]["type"] == "abstain" or bound:
+        return decision
+    if not (name := mentioned_entity(context, question)):
+        return decision
+    reason = "guard:unbound_entity"
+    plan["guard"] = {"reason": reason, "mentioned": name, "suppressed": decision["answer"]}
+    return {
+        "answer": {"id": question.id, "type": "abstain"},
+        "plan": plan,
+        "execution": {"status": "suppressed", "reason": reason},
+    }
+
+
 class LocalPlanner:
     name = "local-planner"
 
@@ -176,7 +203,7 @@ class LocalPlanner:
                     "context_version": selected["version"],
                     "context_seconds": context_seconds,
                 }
-                return decision
+                return _guard_unbound_entity(decision, question, context)
             except (ContractError, OSError, ValueError) as exc:
                 if not record:
                     attempts.append(record)
