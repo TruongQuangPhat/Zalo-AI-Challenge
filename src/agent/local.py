@@ -8,6 +8,7 @@ import time
 from copy import deepcopy
 from pathlib import Path
 
+from src.data.cache import fingerprint
 from src.data.catalog import digest
 from src.jsonio import ContractError
 
@@ -109,23 +110,29 @@ def _worker(pipe, model_dir: str, max_model_len: int, gpu_memory_utilization: fl
         pipe.close()
 
 
+def model_identity(path: Path) -> dict:
+    """Hash every packaged model file; ``sha256`` makes runs on these weights resumable."""
+    if (
+        not path.is_dir()
+        or path.is_symlink()
+        or not all((path / name).is_file() for name in REQUIRED_FILES)
+        or not list(path.glob("*.safetensors"))
+    ):
+        raise ContractError("provide an existing local model directory with safetensors")
+    files = {p.name: digest(p) for p in sorted(path.iterdir()) if p.is_file()}
+    return {"directory": path.name, "files": files, "sha256": fingerprint(files)}
+
+
 class LocalModel:
     """Packaged weights only: no model ID, downloader, HTTP client or remote code."""
 
     def __init__(self, path: Path, *, load_timeout: float = 900):
         started = time.monotonic()
-        if (
-            not path.is_dir()
-            or path.is_symlink()
-            or not all((path / name).is_file() for name in REQUIRED_FILES)
-            or not list(path.glob("*.safetensors"))
-        ):
-            raise ContractError("provide an existing local model directory with safetensors")
+        identity = model_identity(path)
         if load_timeout <= 0:
             raise ContractError("model load timeout must be positive")
         self.metadata = {
-            "directory": path.name,
-            "files": {p.name: digest(p) for p in sorted(path.iterdir()) if p.is_file()},
+            **identity,
             "backend": "vllm",
             "load_timeout_seconds": load_timeout,
             "max_model_len": MAX_MODEL_LEN,

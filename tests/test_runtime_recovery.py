@@ -307,3 +307,36 @@ except BaseException:
     assert manifest["status"] == "interrupted"
     assert manifest["questions_written"] == 0
     assert "signal" in manifest["interruption"]["message"]
+
+
+def test_vllm_model_identity_makes_runs_resumable_and_binds_weights(synthetic_split, tmp_path):
+    from src.agent.local import model_identity
+
+    weights = tmp_path / "model"
+    weights.mkdir()
+    for name in ["config.json", "tokenizer.json", "tokenizer_config.json"]:
+        (weights / name).write_text("{}")
+    (weights / "model.safetensors").write_bytes(b"synthetic weights")
+
+    class WeightsPlanner(InterruptingPlanner):
+        def __init__(self):
+            super().__init__()
+            self.metadata = {"model": model_identity(weights)}
+
+    parent = tmp_path / "parent"
+    planner = WeightsPlanner()
+    with pytest.raises(KeyboardInterrupt):
+        runtime.run_inference(synthetic_split, parent, planner=planner)
+    planner.interrupt = False
+    (weights / "model.safetensors").write_bytes(b"changed weights")
+    with pytest.raises(ContractError, match="identity"):
+        runtime.run_inference(
+            synthetic_split, tmp_path / "changed", planner=WeightsPlanner(), resume_from=parent
+        )
+    (weights / "model.safetensors").write_bytes(b"synthetic weights")
+    planner.metadata = {"model": model_identity(weights)}
+    result = runtime.run_inference(
+        synthetic_split, tmp_path / "recovered", planner=planner, resume_from=parent
+    )
+    assert result["status"] == "completed"
+    assert result["resume"]["records_recovered"] == 1

@@ -72,6 +72,11 @@ cài bằng `python3.11 -m venv` + `pip`. `pyproject.toml` chỉ giữ cấu hì
 `pip check`/`pip freeze` trùng với base image. `.venv` tạo lại từ đầu thì gate pass 484 tests;
 image build lại và import được.
 
+**Lỗi resume (tìm ra khi thử cell molab):** `run_identity` chỉ cho resume khi metadata model
+có `sha256`, nhưng `LocalModel` của vLLM chỉ ghi `files`, nên mọi run thật đều không resume
+được. `model_identity()` giờ thêm `sha256` là fingerprint của toàn bộ file model; có test cho
+cả trường hợp resume được và trường hợp weights bị đổi thì bị từ chối.
+
 **Trạng thái đáp án:** backend đổi từ GGUF Q4_K_M sang BF16 vLLM nên kết quả train100 cũ không
 còn áp dụng cho revision này. Cần chạy lại train trên GPU ≥ CUDA 12.8 để đo PA và thời gian.
 
