@@ -34,6 +34,12 @@ def main(argv: list[str] | None = None) -> int:
         default=Path(__file__).resolve().parents[1] / "models/qwen2.5-1.5b-instruct",
         help="packaged local model directory; missing weights fail before writing output",
     )
+    predict.add_argument(
+        "--tensor-parallel-size",
+        type=int,
+        default=1,
+        help="GPUs to split the model across; a 14B BF16 model needs 2 x 32 GB",
+    )
     predict.add_argument("--question-timeout", type=float, default=120)
     predict.add_argument("--model-load-timeout", type=float, default=900)
     predict.add_argument(
@@ -64,7 +70,11 @@ def main(argv: list[str] | None = None) -> int:
             from src.agent.local import LocalModel
             from src.agent.planner import LocalPlanner
 
-            model = LocalModel(args.model, load_timeout=args.model_load_timeout)
+            model = LocalModel(
+                args.model,
+                load_timeout=args.model_load_timeout,
+                tensor_parallel=args.tensor_parallel_size,
+            )
             try:
                 report = run_inference(
                     args.data_dir,

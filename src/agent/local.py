@@ -40,7 +40,9 @@ def guided_schema(schema: dict) -> dict:
     return convert(deepcopy(schema))
 
 
-def _worker(pipe, model_dir: str, max_model_len: int, gpu_memory_utilization: float) -> None:
+def _worker(
+    pipe, model_dir: str, max_model_len: int, gpu_memory_utilization: float, tensor_parallel: int
+) -> None:
     # Keep the engine in this process so terminating the worker releases the GPU.
     os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
     os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
@@ -57,7 +59,7 @@ def _worker(pipe, model_dir: str, max_model_len: int, gpu_memory_utilization: fl
             dtype="auto",
             seed=0,
             max_model_len=max_model_len,
-            tensor_parallel_size=1,
+            tensor_parallel_size=tensor_parallel,
             gpu_memory_utilization=gpu_memory_utilization,
             generation_config="vllm",
             trust_remote_code=False,
@@ -88,7 +90,14 @@ def _worker(pipe, model_dir: str, max_model_len: int, gpu_memory_utilization: fl
                 max_tokens=token_budget,
                 guided_decoding=GuidedDecodingParams(json=guided_schema(request["schema"])),
             )
-            result = model.chat(request["messages"], params, use_tqdm=False)[0]
+            # Qwen3 templates think by default, which the JSON grammar forbids; other
+            # templates ignore the unknown variable.
+            result = model.chat(
+                request["messages"],
+                params,
+                use_tqdm=False,
+                chat_template_kwargs={"enable_thinking": False},
+            )[0]
             completion = result.outputs[0]
             prompt_tokens = len(result.prompt_token_ids or [])
             pipe.send(
@@ -126,11 +135,11 @@ def model_identity(path: Path) -> dict:
 class LocalModel:
     """Packaged weights only: no model ID, downloader, HTTP client or remote code."""
 
-    def __init__(self, path: Path, *, load_timeout: float = 900):
+    def __init__(self, path: Path, *, load_timeout: float = 900, tensor_parallel: int = 1):
         started = time.monotonic()
         identity = model_identity(path)
-        if load_timeout <= 0:
-            raise ContractError("model load timeout must be positive")
+        if load_timeout <= 0 or tensor_parallel < 1:
+            raise ContractError("model load timeout and tensor parallel size must be positive")
         self.metadata = {
             **identity,
             "backend": "vllm",
@@ -142,12 +151,20 @@ class LocalModel:
             "seed": 0,
             "temperature": 0,
             "guided_decoding": "json_schema",
+            "tensor_parallel_size": tensor_parallel,
+            "enable_thinking": False,
         }
         mp = multiprocessing.get_context("spawn")
         self.pipe, child = mp.Pipe()
         self.process = mp.Process(
             target=_worker,
-            args=(child, str(path.resolve()), MAX_MODEL_LEN, GPU_MEMORY_UTILIZATION),
+            args=(
+                child,
+                str(path.resolve()),
+                MAX_MODEL_LEN,
+                GPU_MEMORY_UTILIZATION,
+                tensor_parallel,
+            ),
         )
         self.process.start()
         child.close()

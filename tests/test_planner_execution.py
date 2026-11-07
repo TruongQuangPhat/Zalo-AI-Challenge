@@ -1583,3 +1583,10 @@ def test_abbreviated_walk_in_names_are_not_customers(name, walk_in):
     from src.data.normalization.sales import is_walk_in
 
     assert is_walk_in(name) is walk_in
+
+
+def test_local_model_rejects_a_non_positive_tensor_parallel_size(tmp_path):
+    for name in ("config.json", "tokenizer.json", "tokenizer_config.json", "model.safetensors"):
+        (tmp_path / name).write_text("{}")
+    with pytest.raises(ContractError, match="tensor parallel"):
+        LocalModel(tmp_path, tensor_parallel=0)
