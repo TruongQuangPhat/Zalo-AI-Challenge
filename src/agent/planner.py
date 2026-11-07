@@ -7,7 +7,7 @@ import time
 
 from src.agent.context import build_context
 from src.agent.execution import execute_plan
-from src.agent.plan import generation_schema
+from src.agent.plan import generation_schema, unparsed_time
 from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError, dumps, loads
@@ -98,7 +98,10 @@ def unsupported_intent(question: Question) -> str | None:
     from src.semantics.rulebook import plain
 
     text = plain(question.question)
-    return next((k for k, p in UNSUPPORTED_INTENTS.items() if re.search(p, text)), None)
+    intent = next((k for k, p in UNSUPPORTED_INTENTS.items() if re.search(p, text)), None)
+    # A date-like token no finite cue understands leaves the period to the model, which
+    # then copies the prompt template's period instead of the one asked.
+    return intent or ("unparsed_time" if unparsed_time(question) else None)
 
 
 class LocalPlanner:

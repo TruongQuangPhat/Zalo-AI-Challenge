@@ -1390,3 +1390,51 @@ def test_unsupported_intent_guard_ignores_nearby_supported_wording(text):
     from src.agent.planner import unsupported_intent
 
     assert unsupported_intent(question(question=text)) is None
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Doanh thu T5/2025?", {"kind": "month", "year": 2025, "month": 5}),
+        ("Số đơn th 11/25?", {"kind": "month", "year": 2025, "month": 11}),
+        ("Doanh thu 5-2026 được bao nhiêu?", {"kind": "month", "year": 2026, "month": 5}),
+        ("07/2025 doanh thu bao nhiêu?", {"kind": "month", "year": 2025, "month": 7}),
+        ("10/25 doanh thu bao nhiêu?", {"kind": "month", "year": 2025, "month": 10}),
+        ("Số đơn quý 2/26?", {"kind": "quarter", "year": 2026, "quarter": 2}),
+        ("so don quys 3/2025 la nhieu", {"kind": "quarter", "year": 2025, "quarter": 3}),
+        ("Doanh thu bữa qua?", {"kind": "yesterday"}),
+        ("Doanh thu hôm 26/12/2025?", {"kind": "day", "date": "2025-12-26"}),
+        ("Doanh thu ngày 01/12/2025?", {"kind": "day", "date": "2025-12-01"}),
+    ],
+)
+def test_abbreviated_periods_become_one_explicit_window(text, expected):
+    from src.agent.plan import _literal_windows, unparsed_time
+
+    assert _literal_windows(question(question=text)) == [expected]
+    assert not unparsed_time(question(question=text))
+
+
+@pytest.mark.parametrize(
+    "text,unparsed",
+    [
+        ("Doanh thu th3 được bao nhiêu?", True),
+        ("Trong tháng 6 bán được bao nhiêu tiền?", True),
+        ("Doanh thu ngày 27/04 là bao nhiêu?", True),
+        ("Tính từ ngày 1/1 đến hết hôm nay, doanh thu năm nay?", False),
+        ("Doanh thu từ ngày 01/12/2025 đến ngày 02/01/2026?", False),
+        ("Top 3 khách mua nhiều tiền nhất tháng này?", False),
+    ],
+)
+def test_unparsed_period_is_detected_without_flagging_supported_wording(text, unparsed):
+    from src.agent.plan import unparsed_time
+
+    assert unparsed_time(question(question=text)) is unparsed
+
+
+def test_unparsed_period_abstains_before_calling_the_model(semantic_source):
+    model = ScriptedModel()
+    result = LocalPlanner(model).decide(
+        question(question="Doanh thu th3 được bao nhiêu?"), context=semantic_source()
+    )
+    assert result["answer"]["type"] == "abstain" and model.calls == 0
+    assert result["plan"]["reason"].endswith(":unparsed_time")

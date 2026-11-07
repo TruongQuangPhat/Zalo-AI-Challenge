@@ -194,7 +194,7 @@ RELATIVE_CUES = {
     r"\b(thang (truoc|trc|roi|vua roi))\b": "previous_month",
     r"\b(tuan nay|tuan hien tai)\b": "current_week",
     r"\b(tuan (truoc|trc|roi|vua roi))\b": "previous_week",
-    r"\b(hom qua|hqua|ngay hom qua)\b": "yesterday",
+    r"\b(hom qua|hqua|ngay hom qua|bua qua)\b": "yesterday",
     r"\b(hom nay|bua nay|hnay)\b": "today",
 }
 
@@ -219,11 +219,66 @@ def _metric_cues(question: Question) -> set[str]:
     return metrics
 
 
-def _literal_windows(question: Question) -> list[dict]:
-    """Finite time cues in question order; endpoints do not become extra windows."""
+DATES = r"(\d{1,2})/(\d{1,2})/(\d{4})"
+# Spans _literal_windows turns into windows; anything date-like left over is unparsed.
+_PARSED_TIME = (
+    r"\btu (?:ngay )?" + DATES + r" (?:den|toi)(?: het)? (?:ngay )?" + DATES,
+    r"\b(?:thang|quy) \d{1,2}(?:/| nam )\d{4}\b",
+    r"\b(?:ngay|hom|bua) " + DATES + r"\b",
+    r"\btu (?:ngay )?1/1\b",  # year-to-date wording, read with "nam nay"/"dau nam"
+    r"\b\d+ ngay gan nhat\b",
+    r"\b(?:truoc tet|tet)(?: nam)? \d{4}\b",
+    r"\bnam \d{4}\b",
+)
+_UNPARSED_TIME = r"\b\d{1,2} ?[/-] ?\d{1,4}\b|\b(?:thang|thg|th|t|quy|q) ?\d{1,2}\b"
+
+
+def _period(prefix: str, max_value: int):
+    """Rewrite '<period>/<year>' to the canonical cue; leave impossible values untouched."""
+
+    def rewrite(m: re.Match) -> str:
+        value, year = int(m[1]), int(m[2])
+        if not 1 <= value <= max_value:
+            return m[0]
+        return f"{prefix} {value}/{year + 2000 if year < 100 else year}"
+
+    return rewrite
+
+
+def _time_text(question: Question) -> str:
+    """Canonical time wording: common abbreviations become 'thang M/YYYY' or 'quy Q/YYYY'."""
     text = re.sub(r"\bthangs\b", "thang", plain(question.question))
     text = re.sub(r"\bnawm\b", "nam", text)
-    dates = r"(\d{1,2})/(\d{1,2})/(\d{4})"
+    text = re.sub(r"\bquys\b", "quy", text)
+    year = r"(\d{4}|\d{2})(?![/-]?\d)"
+    # T5/2025, Th 11/25, thg7-2026, thang 5-2026, thang 11/25
+    month = _period("thang", 12)
+    text = re.sub(r"\b(?:thang|thg|th|t) ?(\d{1,2}) ?[/-] ?" + year, month, text)
+    text = re.sub(r"\b(?:quy|q) ?(\d) ?[/-] ?" + year, _period("quy", 4), text)
+    # Bare 07/2025 or 5-2026; never part of a day date or an existing cue.
+    bare = r"(?<![\d/-])(?<!ngay )(?<!thang )(?<!quy )"
+    text = re.sub(bare + r"(\d{1,2}) ?[/-] ?(\d{4})(?![/-]?\d)", month, text)
+    # Bare 10/25 only when the second number cannot be a month (two-digit year > 12).
+    text = re.sub(
+        bare + r"(\d{1,2})/(\d{2})(?![/-]?\d)",
+        lambda m: month(m) if int(m[2]) > 12 else m[0],
+        text,
+    )
+    return text
+
+
+def unparsed_time(question: Question) -> bool:
+    """Whether a date-like token remains that no finite cue turns into a window."""
+    text = _time_text(question)
+    for pattern in _PARSED_TIME:
+        text = re.sub(pattern, " ", text)
+    return bool(re.search(_UNPARSED_TIME, text))
+
+
+def _literal_windows(question: Question) -> list[dict]:
+    """Finite time cues in question order; endpoints do not become extra windows."""
+    text = _time_text(question)
+    dates = DATES
 
     def iso(parts) -> str:
         day, month, year = map(int, parts)
@@ -246,7 +301,7 @@ def _literal_windows(question: Question) -> list[dict]:
     for label, kind, field in [("thang", "month", "month"), ("quy", "quarter", "quarter")]:
         for m in re.finditer(r"\b" + label + r" (\d{1,2})(?:/| nam )(\d{4})\b", text):
             events.append((m.start(), {"kind": kind, "year": int(m[2]), field: int(m[1])}))
-    for m in re.finditer(r"\bngay " + dates + r"\b", text):
+    for m in re.finditer(r"\b(?:ngay|hom|bua) " + dates + r"\b", text):
         events.append((m.start(), {"kind": "day", "date": iso(m.groups())}))
     for m in re.finditer(r"\b(\d+) ngay gan nhat\b", text):
         events.append((m.start(), {"kind": "last_n_days", "days": int(m[1])}))

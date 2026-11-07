@@ -29,6 +29,23 @@ Ba nhóm câu luôn trả lời sai: đơn giá / giá bán ngày D (0/29), size
 - Giới hạn: số liệu là replay trên run GGUF Q4 cũ. Chưa chạy lại vLLM/GPU trên source mới.
   Gỡ guard cho từng intent khi executor có operator đúng và có test.
 
+**Guard B (cùng ngày): kỳ viết tắt và kỳ chưa parse được.** `_time_text` trong
+`src/agent/plan.py` chuẩn hoá các dạng sau trước khi `_literal_windows` đọc, nên kỳ được ép
+thành `const` trong grammar khi sinh và được kiểm tra lại khi validate:
+`T5/2025`, `th 11/25`, `5-2026`, `07/2025`, `10/25` (chỉ khi năm 2 chữ số > 12),
+`quý 2/26`, `quys`, `bữa qua`, và `hôm/bữa DD/MM/YYYY`. Nếu sau đó câu vẫn còn token có dạng
+ngày/tháng chưa thành kỳ (ví dụ `th3`, `tháng 6` không ghi năm, `27/04`), planner abstain
+trước khi gọi LLM (`guard:unsupported_intent:unparsed_time`).
+
+- Đo trên train bằng hàm hiện tại so với `HEAD`: 0 câu đúng bị đổi kỳ hoặc bị chặn. 37 câu
+  đang sai có kỳ mới, trong đó 28 câu "bữa qua" giờ bị ép đúng kỳ `yesterday`.
+- Trên public: 40/88 câu đã trả lời có kỳ mới. Đây chính là các câu trước đó trả cùng
+  một đáp án cho nhiều tháng khác nhau. 26 câu (đều đang abstain) có kỳ chưa parse được.
+- Không thể replay vì kỳ ảnh hưởng tới bước sinh plan. Tác động thật cần một lượt chạy
+  GPU mới. Chưa đổi ví dụ `current_month` trong prompt, để tránh thay đổi các câu đang đúng
+  khi chưa đo được.
+- `verify_runtime`: lint và format đạt, 509 tests đạt.
+
 ---
 
 ## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026
