@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from src.data.cache import fingerprint
 from src.data.normalization.relational import LABELS, MEANINGS, MappedSource, data_rows, token
-from src.data.normalization.sales import SalesMapping
+from src.data.normalization.sales import SalesMapping, is_walk_in
 from src.data.normalization.stock import identity_text
 from src.data.normalization.values import (
     cell_value,
@@ -188,7 +188,9 @@ def build_entities(
         code, name = str(code or "").strip(), str(name or "").strip()
         if not code and not name:
             raise ContractError("missing_entity_identity")
-        if not code and kind == "customer" and plain(name) in {"khach le", "khach vang lai"}:
+        # Walk-in sales (README: "Khách lẻ nếu không lưu") are often abbreviated in the
+        # source; rulebook §3 never counts or ranks them as customers.
+        if not code and kind == "customer" and is_walk_in(name):
             return None
         raw = code or identity_text(name)
         key = fingerprint(

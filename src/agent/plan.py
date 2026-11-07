@@ -483,7 +483,10 @@ def _single_scope(question: Question) -> dict | None:
     if metrics != {"revenue"}:
         return None
     match = re.search(
-        r"\b(khach (?:hang )?nhom|nhom) (.+?) (?=ban\b|trong\b|thang\b|quy\b|nam\b)", text
+        # "nhom hang X" names group X; "khach nhom X mua" names customer group X.
+        r"\b(khach (?:hang )?nhom|nhom(?: hang)?) (.+?) (?:da )?(?:mua )?"
+        r"(?=ban\b|trong\b|thang\b|quy\b|nam\b)",
+        text,
     )
     if match and not re.search(r"\b(va|nhom|ngoai tru|so voi)\b", match[2]):
         customer = match[1].startswith("khach")

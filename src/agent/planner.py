@@ -104,6 +104,61 @@ def unsupported_intent(question: Question) -> str | None:
     return intent or ("unparsed_time" if unparsed_time(question) else None)
 
 
+_ASK = r"(?:bao nhieu|bao nhiu|bnhiu|bnhieu|bn|nhieu)"
+# Question wording that fixes the answer shape regardless of the plan.
+_LIST_CUES = (
+    r"\b(lan luot|moi loai|moi ben|tung thang|moi thang)\b",
+    _ASK + r"\b.*\b" + _ASK + r"\b",
+    r"\bva (?:doanh thu |dthu |so don )?(?:cac )?don\b",
+    r"\b(?:top )?(?:[2-9]|10|hai|ba|bon|nam) (?:mat hang|mon|san pham|khach|nhan vien)\b",
+    r"\bnhung (?:mat hang|mon|san pham|khach)\b",
+)
+_DATE_CUE = r"\b(?:ngay|thang) nao\b"
+_WHO_CUE = (
+    r"\b(?:ai la|la ai|nguoi nao|nhan vien nao|khach nao|khach hang nao|mat hang nao|"
+    r"mon nao|san pham nao)\b"
+)
+_ADVICE_CUE = r"\b(?:duoc khong|co nen|nen dung|co sao khong)\s*[?!.]*$"
+
+
+def shape_mismatch(question: Question, answer_type: str) -> str | None:
+    """Shape the question asks for when the answer cannot have it, else None."""
+    from src.semantics.rulebook import plain
+
+    text = plain(question.question)
+    if answer_type in {"abstain", "unanswerable"}:
+        return None
+    if any(re.search(p, text) for p in _LIST_CUES):
+        return None if answer_type in {"list", "table"} else "list"
+    if re.search(_DATE_CUE, text) and answer_type in {"number", "percent"}:
+        return "date"
+    if re.search(_WHO_CUE, text) and answer_type in {"number", "percent", "date", "boolean"}:
+        return "string"
+    if (
+        re.search(_ADVICE_CUE, text)
+        and not re.search(r"\b" + _ASK + r"\b|\bmay\b", text)
+        and answer_type != "boolean"
+    ):
+        return "advice"
+    return None
+
+
+def _suppress(decision: dict, question: Question, reason: str, **details) -> dict:
+    plan = decision["plan"]
+    plan["guard"] = {"reason": reason, **details, "suppressed": decision["answer"]}
+    return {
+        "answer": {"id": question.id, "type": "abstain"},
+        "plan": plan,
+        "execution": {"status": "suppressed", "reason": reason},
+    }
+
+
+def _guard_answer(decision: dict, question: Question, context: BusinessContext) -> dict:
+    if expected := shape_mismatch(question, decision["answer"]["type"]):
+        return _suppress(decision, question, "guard:answer_shape", expected=expected)
+    return _guard_unbound_entity(decision, question, context)
+
+
 def _guard_unbound_entity(decision: dict, question: Question, context: BusinessContext) -> dict:
     """Abstain when the question names a source entity but the plan binds none.
 
@@ -122,13 +177,7 @@ def _guard_unbound_entity(decision: dict, question: Question, context: BusinessC
         return decision
     if not (name := mentioned_entity(context, question)):
         return decision
-    reason = "guard:unbound_entity"
-    plan["guard"] = {"reason": reason, "mentioned": name, "suppressed": decision["answer"]}
-    return {
-        "answer": {"id": question.id, "type": "abstain"},
-        "plan": plan,
-        "execution": {"status": "suppressed", "reason": reason},
-    }
+    return _suppress(decision, question, "guard:unbound_entity", mentioned=name)
 
 
 class LocalPlanner:
@@ -203,7 +252,7 @@ class LocalPlanner:
                     "context_version": selected["version"],
                     "context_seconds": context_seconds,
                 }
-                return _guard_unbound_entity(decision, question, context)
+                return _guard_answer(decision, question, context)
             except (ContractError, OSError, ValueError) as exc:
                 if not record:
                     attempts.append(record)

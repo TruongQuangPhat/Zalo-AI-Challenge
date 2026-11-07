@@ -1498,3 +1498,88 @@ def test_bound_plans_and_single_word_names_are_left_alone(tmp_path, plan, text):
     decision = _decision(**plan)
     result = _guard_unbound_entity(decision, question(question=text), _entity_context(tmp_path))
     assert result["answer"]["answer"] == 999
+
+
+@pytest.mark.parametrize(
+    "text,answer_type,expected",
+    [
+        (
+            "Doanh thu đơn bán qua Zalo OA và doanh thu đơn bán tại quầy tháng này?",
+            "number",
+            "list",
+        ),
+        ("Dthu th5/2026, th6/2026 lần lượt bnhiu?", "number", "list"),
+        ("Dthu th5/2026, th6/2026 lần lượt bnhiu?", "list", None),
+        ("Ngày nào trong tháng 6/2025 doanh thu cao nhất?", "number", "date"),
+        ("Nhà cung cấp chính tháng 11/2025 là ai?", "number", "string"),
+        ("Bà bầu dùng thuốc này được không?", "number", "advice"),
+        ("Hôm nay bán được bao nhiêu tiền?", "number", None),
+        ("Doanh thu hôm nay bao nhiêu, được không?", "number", None),
+    ],
+)
+def test_answer_shape_follows_the_question_wording(text, answer_type, expected):
+    from src.agent.planner import shape_mismatch
+
+    assert shape_mismatch(question(question=text), answer_type) == expected
+
+
+def test_shape_mismatch_abstains_and_keeps_the_suppressed_answer(tmp_path):
+    from src.agent.planner import _guard_answer
+
+    text = "Ngày nào trong tháng 6/2025 doanh thu cao nhất?"
+    result = _guard_answer(_decision(), question(question=text), _entity_context(tmp_path))
+    assert result["answer"]["type"] == "abstain"
+    assert result["plan"]["guard"] == {
+        "reason": "guard:answer_shape",
+        "expected": "date",
+        "suppressed": {"id": "synthetic", "type": "number", "answer": 999},
+    }
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Doanh thu nhóm hàng giảm đau hạ sốt tháng 12/2025?", "item_group=giam dau ha sot"),
+        ("Doanh thu nhóm cà phê tháng 10/2025?", "item_group=ca phe"),
+        (
+            "Tính doanh thu các đơn do khách nhóm thân thiết mua tháng 11/2025.",
+            "customer_group=than thiet",
+        ),
+    ],
+)
+def test_group_filter_takes_only_the_group_label(text, expected):
+    from src.agent.plan import _single_scope
+
+    assert _single_scope(question(question=text))["filters"] == [expected]
+
+
+def test_unknown_group_label_abstains_instead_of_reporting_zero(semantic_source):
+    context = semantic_source(
+        extra_columns=["group"],
+        readme_extra="- **group**: product group\n",
+        rows=[["1", "01/01/2026", "Xong", "20", "A", "Trà sữa"]],
+    )
+    p = period_draft("share", ["revenue", "revenue"], filters=["item_group=hang tra sua"])
+    q = question(question="Tỉ trọng của nhóm hàng trà sữa trong doanh thu tháng này bao nhiêu %?")
+    result = execute_plan(p, q, context)
+    assert result["answer"]["type"] == "abstain"
+    assert result["execution"]["reason"] == "group_name_unmatched"
+
+
+@pytest.mark.parametrize(
+    "name,walk_in",
+    [
+        ("kl", True),
+        ("lẻ", True),
+        ("Khách lẻ", True),
+        ("khach vang lai", True),
+        ("", True),
+        ("Lê", False),
+        ("le", False),
+        ("Chung Huy Sơn", False),
+    ],
+)
+def test_abbreviated_walk_in_names_are_not_customers(name, walk_in):
+    from src.data.normalization.sales import is_walk_in
+
+    assert is_walk_in(name) is walk_in

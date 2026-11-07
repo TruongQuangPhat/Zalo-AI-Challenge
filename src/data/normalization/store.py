@@ -21,7 +21,7 @@ from src.data.normalization.sales import build_sales, sales_mapping
 from src.data.normalization.stock import build_stock, stock_mapping
 from src.jsonio import ContractError, dumps, loads
 
-VERSION = "prepared-facts-v7"
+VERSION = "prepared-facts-v8"
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;

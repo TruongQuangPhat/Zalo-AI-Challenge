@@ -124,8 +124,12 @@ def _compute(
                     for (v,) in scan.rows(f"SELECT DISTINCT {field} FROM {table}")
                     if plain(v) == filters[field]
                 }
-                if len(matches) > 1:
-                    raise ContractError("group_name_ambiguous")
+                # No matching label means the filter names an unknown group: abstain
+                # rather than report 0 for a group the source never records.
+                if len(matches) != 1:
+                    raise ContractError(
+                        "group_name_ambiguous" if matches else "group_name_unmatched"
+                    )
         for key, ordered_at, status, mapping, customer_group, clock, channel in scan.rows(
             sql, parameters
         ):
@@ -493,8 +497,12 @@ def _compute_non_line(
                     for (v,) in scan.rows(f"SELECT DISTINCT {group_field} FROM {table}")
                     if plain(v) == filters[group_field]
                 }
-                if len(matches) > 1:
-                    raise ContractError("group_name_ambiguous")
+                # No matching label means the filter names an unknown group: abstain
+                # rather than report 0 for a group the source never records.
+                if len(matches) != 1:
+                    raise ContractError(
+                        "group_name_ambiguous" if matches else "group_name_unmatched"
+                    )
             for _key, when, _status, money, role, group_value, channel in scan.rows(
                 sql, parameters
             ):

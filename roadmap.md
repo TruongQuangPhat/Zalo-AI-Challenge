@@ -63,6 +63,28 @@ vẫn được giữ trong `plan.guard` của log.
 - PA train ước tính 0,343 → **≥ 0,367**. Cần một lượt chạy GPU để xác nhận.
 - `verify_runtime`: lint và format đạt, 515 tests đạt.
 
+**Guard D (cùng ngày): kiểu đáp án, nhãn nhóm và khách lẻ.**
+
+- **Kiểu đáp án** (`shape_mismatch` trong `src/agent/planner.py`). Abstain khi câu hỏi đòi
+  list (lần lượt, mỗi loại, "A và B", hai lần "bao nhiêu", top k) nhưng đáp án không phải list;
+  hỏi "ngày nào/tháng nào" nhưng trả số; hỏi "ai/khách nào/mặt hàng nào" nhưng trả số; câu
+  tư vấn "… được không?" nhưng không trả boolean. Replay trên train: **18 câu sai, 0 câu đúng**
+  bị chặn. Trên public: 8 câu sai rõ ràng bị chặn.
+- **Nhãn nhóm.** Regex lấy tên nhóm trong `_single_scope` lấy thừa chữ: "nhóm **hàng** X" →
+  `hang X`, "khách nhóm X **mua**" → `X mua`. Filter không khớp nhãn nào nên doanh thu ra 0,
+  đây là 17 câu sai trả 0. Đã sửa regex. Đo bằng facts train: 16 câu có filter mới khớp đúng nhãn
+  trong dữ liệu, 1 câu không khớp; 0 câu đúng bị đổi filter. Executor giờ abstain
+  (`group_name_unmatched`) khi filter nhóm không khớp nhãn nào, thay vì trả 0.
+- **Khách lẻ.** README ghi "Khách lẻ nếu không lưu", nhưng dữ liệu viết tắt thành "kl" hoặc
+  "lẻ", nên các tên này từng bị tính là khách và được xếp hạng (6 câu sai). `is_walk_in` (trong
+  `src/data/normalization/sales.py`) nhận thêm các dạng này, so khớp giữ dấu để tên "Lê" không
+  bị coi là "lẻ". Prepare lại biz_102 và biz_118: không còn entity "kl" hay "lẻ"; hai shop này
+  không có nhóm khách nên không ảnh hưởng doanh thu theo nhóm. Bump `prepared-facts-v8` để
+  cache cũ không được dùng lại.
+- `verify_runtime`: lint và format đạt, 536 tests đạt.
+- Phần kiểu đáp án là replay đo được. Phần nhãn nhóm và khách lẻ đổi dữ liệu và plan, nên
+  cần lượt chạy GPU (A–D) để xác nhận.
+
 ---
 
 ## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026

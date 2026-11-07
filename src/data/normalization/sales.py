@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -30,6 +31,18 @@ from src.jsonio import ContractError, dumps
 
 if TYPE_CHECKING:
     from src.data.catalog import BusinessContext
+
+# Walk-in sales (README: "Khách lẻ nếu không lưu"), often abbreviated in the source;
+# rulebook §1/§3 never count, rank or group them as customers.
+_WALK_IN = frozenset({"khách lẻ", "khách vãng lai", "vãng lai", "lẻ", "kl"})
+
+
+def is_walk_in(name: object) -> bool:
+    """Accent-preserving, so a customer named "Lê" is never read as "lẻ"."""
+    text = unicodedata.normalize("NFC", str(name or "")).casefold().strip()
+    return (
+        not text or text in _WALK_IN or normalized(text).strip() in {"khach le", "khach vang lai"}
+    )
 
 
 @dataclass(frozen=True)
@@ -518,11 +531,7 @@ def _build_sales_source(
                                 if customer and customer.raw_value not in {None, ""}
                                 else ""
                             )
-                            if normalized(str(customer_value)).strip() in {
-                                "",
-                                "khach le",
-                                "khach vang lai",
-                            }:
+                            if is_walk_in(customer_value):
                                 group_value = ""
                         old_group = connection.execute(
                             "SELECT customer_group FROM order_groups WHERE order_key=?",
