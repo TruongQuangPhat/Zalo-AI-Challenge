@@ -9,21 +9,25 @@ Keep contributor practices here, setup in `README.md`, and plans, progress, and 
 - `src/`: application modules, including `data/`, `agent/`, and `evaluation/`; use this layout directly without another package layer.
 - `scripts/`: reusable development and verification tools.
 - `tests/`: pytest modules with shared synthetic fixtures in `conftest.py`.
-- `dataset/`: ignored local inputs; `.artifacts/`: ignored working outputs; `reports/`: concise verification summaries.
+- `models/`: ignored packaged inference weights; `training_code/`: no-training README and data manifest copied into the image.
+- `dataset/`: ignored local inputs; `.artifacts/`: ignored working outputs.
 
 ## Development Commands
 
 Use the isolated Python 3.11 `.venv`, managed through `pyproject.toml` and `uv.lock`. Run from the repository root:
 
 ```bash
-uv sync --locked --python /usr/bin/python3.11 --group llm
-uv run --no-sync python -m scripts.verify_runtime --scope cpu
-uv run --no-sync python -m scripts.verify_runtime --scope all \
-  --image zaic2026_datamate_team:review1 --data-dir dataset/train
-./predict.sh --data-dir dataset/train --output-dir .artifacts/my-run
+uv sync --locked --python /usr/bin/python3.11
+uv run --no-sync python -m scripts.verify_runtime
+docker build --platform linux/amd64 -t zaic2026_datamate_datamate:final .
+docker run --rm --gpus '"device=0,1"' --network none --shm-size=16g --entrypoint bash \
+  -v "$PWD/dataset/public_test:/data:ro" -v "$PWD/.artifacts/my-run:/result" \
+  zaic2026_datamate_datamate:final /code/predict.sh
+uv run --no-sync python -m scripts.check_submission \
+  --data-dir dataset/public_test --output-dir .artifacts/my-run
 ```
 
-CPU verification runs lint, formatting, tests, and deterministic source-context checks; it does not run a model or certify Docker/CUDA. Full verification uses an already built image through the shared submission smoke runner and checks CUDA. Build/export/reload belong to `scripts.submission`; all inference uses root `predict.sh`, copied to `/code/predict.sh` in Docker. Model weights are required; there is no production mock fallback. Use fresh output directories.
+Packaging follows the organizers' Docker guide; README.md holds the build/run/export commands. `verify_runtime` runs the lockfile check, Ruff lint/format and pytest; it does not run a model or certify Docker/CUDA. The `.venv` has no vLLM: inference runs in the `vllm/vllm-openai` image through root `predict.sh`, copied to `/code/predict.sh`. Model weights are required; there is no production mock fallback. Use fresh output directories.
 
 ## Coding Style & Simplicity
 
@@ -35,7 +39,7 @@ Keep changes scoped to the requested work. Prefer existing entrypoints and direc
 
 Name pytest files `test_*.py` and functions `test_*`. Add focused behavioral tests for meaningful changes; avoid implementation-mirroring or redundant tests. Prioritize scoring, precision, input immutability, and label isolation. No numeric coverage threshold is configured.
 
-Run relevant checks once; repeat when changes or failures justify it. Documentation-only edits need content/link/whitespace checks, not inference runs. Clean temporary verification outputs and avoid accumulating reports. Record completion only when relevant gates pass; CPU checks cannot certify Docker/CUDA. State environmental limitations explicitly.
+Run relevant checks once; repeat when changes or failures justify it. Documentation-only edits need content/link/whitespace checks, not inference runs. Clean temporary verification outputs; record results in `roadmap.md`, not separate report files. Record completion only when relevant gates pass; CPU checks cannot certify Docker/CUDA. State environmental limitations explicitly.
 
 ## Data & Runtime Boundaries
 

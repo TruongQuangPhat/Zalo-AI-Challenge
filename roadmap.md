@@ -3,17 +3,71 @@
 
 > **Dự án:** Zalo AI Challenge 2026 — *DataMate: Talking To Your Data Through Agentic AI*  
 > **Ngày lập:** 01/11/2026  
-> **Lần rà soát:** 06/11/2026 — đã chạy và chấm mẫu train100 phủ 30 businesses trên Docker/CUDA. Bằng chứng S1/S2 và các phần nghiệm thu cũ bên dưới giữ đúng revision lịch sử.
+> **Lần rà soát:** 07/11/2026 — dọn project theo Docker guide DataMate, chuyển runtime sang vLLM; 06/11/2026 đã chạy và chấm mẫu train100 phủ 30 businesses trên Docker/CUDA (llama.cpp). Bằng chứng S1/S2 và các phần nghiệm thu cũ bên dưới giữ đúng revision lịch sử.
 > **Mục tiêu:** Xây dựng **một baseline chạy được từ đầu đến cuối**, tự động trả lời câu hỏi tiếng Việt trên CSV/XLSX/SQLite, hoạt động hoàn toàn offline, có thể đánh giá bằng đáp án train và đóng gói Docker để nộp thi.  
 > **Phạm vi:** Tập trung vào một giải pháp **đúng quy định, tổng quát hóa được, có thể tái lập và đo lường được**. Các kỹ thuật tối ưu PA nâng cao, fine-tuning, ensemble hay multi-agent **để sau khi baseline hoàn chỉnh**.  
-> **Trạng thái:** `PIPELINE_ACCEPTED_FOR_NOW` — người dùng tạm chấp nhận pipeline hiện tại. Mẫu train100: 34 đúng, 12 sai, 54 abstain; PA mẫu 0,22, preparation chiếm 90,32% elapsed records. Kết quả ngắn gọn lưu tại đây, chi tiết run nằm ngoài source tree; [JSON kết quả lịch sử](reports/stage_results.json) giữ nguyên. S6/full3000/SLA chưa nghiệm thu.
+> **Trạng thái:** `PIPELINE_ACCEPTED_FOR_NOW` — người dùng tạm chấp nhận pipeline hiện tại. Mẫu train100: 34 đúng, 12 sai, 54 abstain; PA mẫu 0,22, preparation chiếm 90,32% elapsed records. Kết quả ngắn gọn lưu tại đây, chi tiết run nằm ngoài source tree; JSON kết quả lịch sử `reports/stage_results.json` đã gỡ ngày 07/11, còn trong git history. S6/full3000/SLA chưa nghiệm thu.
 > **Thiết lập hiện có (theo xác nhận của người thực hiện):** dự án đang có thư mục `dataset/` và đã đưa `dataset/` vào `.gitignore`; **không tạo lại bước gitignore dataset**. Mã nguồn dùng trực tiếp `src/`, **không có lớp thư mục `src/datamate/`**. Cần kiểm tra trạng thái Git thực tế trước khi kết luận dữ liệu chưa từng được track.
 
 **Cách sử dụng:** Các phase là nhóm công việc, không phải chuỗi phải hoàn thiện tuần tự. Triển khai theo lát cắt ở mục 4 và lịch mục 7. Các hợp đồng tại Phụ lục C–F là tiêu chí cho code và nghiệm thu; checklist chưa đánh dấu không phải chức năng đã tồn tại. Phase 0 đã được nghiệm thu lại sau cleanup; chỉ tick hạng mục khi tất cả kiểm tra liên quan đạt, không dùng kết quả CPU thay bằng chứng Docker/GPU.
 
 ---
 
-## Colab train/public runner — 06/11/2026
+## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026
+
+Theo yêu cầu người dùng: đọc Docker Submission Guide DataMate, dọn project theo đúng pipeline
+hướng dẫn và xóa pipeline thừa. Quyết định của người dùng: chuyển runtime sang base image BTC
+`vllm/vllm-openai:v0.10.1.1`; xóa Colab; xóa audit/dev scripts và `reports/`; tag
+`zaic2026_datamate_datamate:final`.
+
+- **Runtime:** `src/agent/local.py` dùng vLLM `LLM.chat` với greedy decoding (temperature 0,
+  seed 0) và guided JSON schema trong một worker process có timeout cứng. Dùng một GPU,
+  `max_model_len` 4096, `generation_config="vllm"` để bỏ sampling defaults của model. Tuple
+  `items` được chuyển sang `prefixItems` cho grammar backend. Planner, executor, Decimal và
+  log format không đổi.
+- **Model:** cùng model Qwen2.5-1.5B-Instruct nhưng dùng safetensors BF16 HF, revision
+  `989aa7980e4cf806f80c7fef2b1adb7bc71aa306`. Nằm ở `models/` (gitignored), được COPY vào
+  `/code/models/`. SHA-256 safetensors khớp HF LFS. GGUF/llama.cpp không còn được dùng.
+- **Image:** Dockerfile một stage theo §9, `.dockerignore` dạng allowlist,
+  `requirements.txt`, `training_code/` (README no-training, `data_manifest.json`,
+  `model.sha256`). README root có Approach/Models/Data và các lệnh build/run/export của guide.
+  CLI bỏ `--gpu-layers`/`--model-threads`/env defaults; default model là
+  `<repo>/models/qwen2.5-1.5b-instruct`, trùng `/code/models/...` trong image.
+- **Đã xóa:** `scripts.submission`, `build_context`, Colab notebook/helper, `input_data`,
+  `probe_environment`, các audit/benchmark/annotate scripts, `reports/`, `config/`,
+  `docs/submission_guide.md`, `docs/model-license.txt`, các test của chúng, cùng group
+  uv `llm`/`gpu` (torch cu124).
+- **Thêm mới:** `scripts/check_submission.py` cho checklist §10 (đủ câu theo thứ tự, log
+  đủ trường, ước lượng `load + avg × 500`, so sánh hai lần chạy). `verify_runtime` giờ chỉ
+  còn CPU gate.
+
+**Hai lỗi tìm ra khi kiểm tra và đã sửa:**
+1. `run_identity` hash `pyproject.toml`/`uv.lock`, nhưng image không có hai file này, nên
+   inference sẽ crash ngay khi khởi động. Giờ chỉ hash các file có trong image.
+   `tests/test_image_layout.py` dựng lại layout từ allowlist của `.dockerignore`.
+2. Với `maxLength: 256` trên mọi string, xgrammar compile mất từ 30 s đến hơn 30 phút cho
+   mỗi schema, đủ để vượt timeout 120 s/câu và kill worker. `guided_schema` bỏ
+   `maxLength`; `validate_query_plan` vẫn kiểm giới hạn này sau khi parse (có test).
+
+**Đã kiểm tra:**
+- **CPU gate** (lock, Ruff, pytest): **484 tests pass**; Python 3.12 cũng pass toàn bộ.
+- **Image** `zaic2026_datamate_datamate:final` build được: linux/amd64, 23,4 GB,
+  `ENTRYPOINT` null, CMD `bash /code/predict.sh`, layout `/code` đúng guide, 8 file model
+  OK theo `sha256sum -c`, vLLM 0.10.1.1, torch 2.7.1+cu128, Python 3.12.11.
+- **Grammar:** API vLLM khớp tham số trong `local.py`. 745/745 schemas compile bằng
+  xgrammar, không có fallback; `prefixItems` ép đúng thứ tự và độ dài; chat template là ChatML.
+- **Đường chạy trong image** với planner thay thế, `/data` read-only, network none:
+  3 câu train `completed`, 0 lỗi; log có đủ id/answer/elapsed_ms/thinking/code/inputs/output.
+
+**NOT_TESTED:** model inference trên GPU. Driver local 555 (CUDA 12.5) bị chặn bởi
+`cuda>=12.8`; nếu bỏ check này thì torch cu128 báo "No CUDA GPUs are available". Cần chạy
+trên máy có driver ≥ R570 để đo PA, thời gian và kiểm tra hai lần chạy cho cùng kết quả.
+Máy local: RAM 8 GB, WSL 4 GB; Docker cần `max-concurrent-downloads: 1` mới pull được base image.
+
+**Trạng thái đáp án:** backend đổi từ GGUF Q4_K_M sang BF16 vLLM nên kết quả train100 cũ không
+còn áp dụng cho revision này. Cần chạy lại train trên GPU ≥ CUDA 12.8 để đo PA và thời gian.
+
+## Colab train/public runner — 06/11/2026 (đã gỡ 07/11)
 
 Theo yêu cầu mới, tiếp tục setup Colab sau cleanup: duy nhất
 `scripts/DataMate_Colab.ipynb`, chọn `SPLIT="train"` đủ3000 hoặc
@@ -153,8 +207,8 @@ không chứng nhận Blackwell/CUDA≥12.8. Không đổi base/driver/weights �
 Scorer equivalence và các addenda/split authority mới vẫn `NEEDS_OFFICIAL_CONFIRMATION`.
 Actual archive, Drive upload, portal submit và freeze đều pending.
 
-Audit/matrix/gaps: [requirements](docs/submission_guide.md); lệnh và manual steps:
-[guide](docs/submission_guide.md); evidence gates: [checklist](docs/submission_guide.md);
+Audit/matrix/gaps: requirements (`docs/submission_guide.md`, đã gỡ); lệnh và manual steps:
+guide (`docs/submission_guide.md`, đã gỡ); evidence gates: checklist (`docs/submission_guide.md`, đã gỡ);
 model/source/training declarations nằm trong image khi prepare thực sự chạy.
 
 ## Train100 Docker/CUDA — 06/11/2026
@@ -330,7 +384,7 @@ rulebook parser v8 và metric contracts v5 nối trực tiếp planner/preflight
   replay 166/0/8 của S1/S2 phải giữ nguyên trong JSON chung.
 
 Chưa đóng baseline trong lúc các gate nghiệm thu còn chạy. Evidence kỹ thuật giữ tại
-`.artifacts/s3-s6/`, kết quả từng câu sẽ thêm vào [JSON chung](reports/stage_results.json).
+`.artifacts/s3-s6/`, kết quả từng câu sẽ thêm vào JSON chung (`reports/stage_results.json`, đã gỡ).
 Lệnh tái chạy ở [README](README.md#tái-chạy-baseline-local-s3s6). Một image production `datamate-baseline:local` chứa source/model/license/runtime đã khớp checksum;
 source refresh offline từ chính image đã được kiểm tra. Full train 3.000 câu đang được ưu tiên
 trước hai lượt core 262; chỉ chấm dev 1.776, giữ 1.224 holdout unscored. Runtime cu124/GTX1650 chưa chứng nhận Blackwell/CUDA≥12.8 và
@@ -520,9 +574,9 @@ Annotations, gold types và thống kê theo câu chỉ phục vụ phân tích/
 5. Contracts S1 và capability matrix có required sources/operators, expected values synthetic và fallback cụ thể. Kiểm tra schema/manifest và invariant đã triển khai phải chạy đạt; case nghiệp vụ chờ Phase 2–6 ghi `planned`, không lấy mock làm bằng chứng metric đúng. Chưa được bật revenue/count chỉ vì fixture đã được viết.
 6. Ghi trạng thái, kết quả kiểm tra, giới hạn và việc tiếp theo trong roadmap. Phase 1 hoàn thành nghĩa là đặc tả/fixtures/protocol sẵn sàng cho S1; M1 vẫn cần **LLM thật → plan → execution → output → evaluator**, và baseline vẫn cần các gate ở các phase sau.
 
-**Nghiệm thu Phase 1 — 01/11/2026:** [contracts](docs/data-contracts.md), [observations](roadmap.md), [capability matrix](docs/capability-matrix.md), [acceptance cases](tests/fixtures/data_acceptance_cases.json), [validation manifest](config/validation_split.json), hai công cụ offline và 33 fixture synthetic đã có. Lint/format và **84 tests** (58 cũ + 26 mới) đạt trong `.venv` Python 3.11. Inventory **162 file / 340 bảng train** khớp hash/kích thước/tên bảng với EDA cũ, input giữ nguyên. Manifest seed 20261101 có hai protocol: business dev/validation/final = **16/7/7 shop, 1.658/671/671 câu**; structure = **27/2/1 shop, 2.645/237/118 câu**, tách toàn họ handwritten/mixed. Pilot và khảo sát sâu mới chỉ dùng giao hai dev.
+**Nghiệm thu Phase 1 — 01/11/2026:** [contracts](docs/data-contracts.md), [observations](roadmap.md), [capability matrix](docs/capability-matrix.md), acceptance cases (`tests/fixtures/data_acceptance_cases.json`, đã gỡ), validation manifest (`config/validation_split.json`, đã gỡ), hai công cụ offline và 33 fixture synthetic đã có. Lint/format và **84 tests** (58 cũ + 26 mới) đạt trong `.venv` Python 3.11. Inventory **162 file / 340 bảng train** khớp hash/kích thước/tên bảng với EDA cũ, input giữ nguyên. Manifest seed 20261101 có hai protocol: business dev/validation/final = **16/7/7 shop, 1.658/671/671 câu**; structure = **27/2/1 shop, 2.645/237/118 câu**, tách toàn họ handwritten/mixed. Pilot và khảo sát sâu mới chỉ dùng giao hai dev.
 
-**Annotation và bằng chứng:** taxonomy v1 bao phủ đúng **3.000 IDs**; **100 câu dev đã rà nghĩa câu**, **2.900 câu proposed**. Số unresolved theo chiều intent/metric/temporal/dependency/output lần lượt **43/212/48/212/2.331**; không coi proposal là gold annotation. Không trích gold types hoặc mở thêm giá trị đáp án; labels chỉ hash opaque bytes. Annotation chạy lại cho records giống từng byte; artifacts/reviews giữ cục bộ tại `.artifacts/data_preparation/`, không commit. Chi tiết hash/version và gates trong [reports/data_preparation.json](reports/data_preparation.json).
+**Annotation và bằng chứng:** taxonomy v1 bao phủ đúng **3.000 IDs**; **100 câu dev đã rà nghĩa câu**, **2.900 câu proposed**. Số unresolved theo chiều intent/metric/temporal/dependency/output lần lượt **43/212/48/212/2.331**; không coi proposal là gold annotation. Không trích gold types hoặc mở thêm giá trị đáp án; labels chỉ hash opaque bytes. Annotation chạy lại cho records giống từng byte; artifacts/reviews giữ cục bộ tại `.artifacts/data_preparation/`, không commit. Chi tiết hash/version và gates trong reports/data_preparation.json (`reports/data_preparation.json`, đã gỡ).
 
 **Chốt Phase 1 — 02/11/2026:** rà soát lại code và deliverables theo exit criteria, không còn lỗi chặn trong phạm vi audit/contracts/protocol. Verifier hiện tại đạt lint/format, **84 tests**, train/public mock mỗi split hai lượt ổn định và **259 file nguồn giữ nguyên hash**. Audit train và 3.000 annotation được tái tạo, records giống từng byte; kiểm tra local links và hash artifact đạt. Kết quả CPU mới được ghi trong `final_review` của report data preparation; `runtime_verified=false` ở lượt CPU do Docker/CUDA chưa chạy, không thay bằng chứng host đầy đủ trước đây. Phạm vi Phase 1 đã khóa; các annotation proposed/unresolved, coverage unknown và capability nghiệp vụ chưa triển khai tiếp tục là giới hạn tường minh khi bắt đầu S1.
 
@@ -608,7 +662,7 @@ Full-train technical scan chỉ thực hiện sau khi khóa reader/config; phân
 - **3 table profiles có distinct statistics partial** và **14 diagnostics về giới hạn relationship evidence** được giữ minh bạch; không bỏ raw rows, không gọi kiểm tra thiếu là verified. Views/system tables được kiểm kê với lý do loại; multi-table/header chưa phân giải giữ ambiguous. Observed/available coverage, grain và semantic row roles chưa được xác lập bởi reader; capability revenue/count vẫn unsupported/planned.
 - Runtime train **3.000** câu và public **1.000** câu, mỗi split hai lượt: output IDs/order/hash ổn định, logs đủ, source input không đổi; vẫn all-abstain PA=0. Public chỉ chạy frozen inference smoke, không lấy feedback để sửa parser. Docker chạy đủ 3.000 câu với network none, root/input read-only, output writable; `.venv` Python 3.11.18/torch 2.6.0+cu124 tạo tensor CUDA trên GTX 1650, synchronize/readback đạt. Docker/CUDA được chạy ngoài sandbox sau khi sandbox chặn socket/GPU. Gate GPU đã sửa để không phụ thuộc `docker info` timeout: Docker có gate độc lập; ghi nguyên căn cứ NVML/tensor thật trong report runtime. **runtime_verified=true**, mọi gate passed.
 
-Bằng chứng chi tiết nằm trong [ingestion report](reports/ingestion_verification.json) và [runtime report](reports/runtime_verification.json). Không thêm dataset, weights, generated predictions hoặc source catalog vào Git. Report Phase 1 giữ như bằng chứng của phiên bản Phase 1, không dùng hashes tài liệu cũ để chứng nhận bản Phase 2.
+Bằng chứng chi tiết nằm trong ingestion report (`reports/ingestion_verification.json`, đã gỡ) và runtime report (`reports/runtime_verification.json`, đã gỡ). Không thêm dataset, weights, generated predictions hoặc source catalog vào Git. Report Phase 1 giữ như bằng chứng của phiên bản Phase 1, không dùng hashes tài liệu cũ để chứng nhận bản Phase 2.
 
 **Việc tiếp theo:** Phase 3 cho S1 — parser ngày/tiền dùng chung, xác lập roles/status, grouping/dedup, coverage và reconciliation; nối metric hẹp với Phase 4/6/7 và LLM thật theo Phase 5 để đạt M1. Phase 2 hoàn thành không phải baseline v1 hoặc metric accuracy đã đạt.
 
@@ -690,7 +744,7 @@ Chỉ tạo facts khi nguồn và capability cần dùng; bảng thiếu khác b
 - `PreparedBusiness` mở facts read-only/query-only, `BusinessContext.prepared` được tạo một lần/business trong runtime. Catalog raw không bị sửa thành facts. Lệnh `src.cli prepare` reuse CLI hiện có; không thêm wrapper/config hoặc dependency. Blocked fields có issues/affected metrics, shape/authority chưa hiểu trả unsupported và không tạo facts rỗng.
 - Lint/format và **157 tests** đạt; gồm 41 test cases mới về parser precision, grouping/dedup/lineage, summary/aux error/amount error, order conflict, partial return sau ngày hỏi, coverage contradiction, namespace/cache corruption/invalidation, interruption, output guards và label isolation. Đây là nghiệm thu preparation liên quan acceptance cases, chưa nâng toàn bộ C01–C30 thành passed.
 - Nguồn dev S1: **22.428 orders, 56.501 order_lines, 56.502 lineage records, 0 issues**; raw CSV reference độc lập đối chiếu số đơn/dòng và tổng theo từng status. Hai cold runs và warm cache cùng content hash; 5 nguồn/authority/questions giữ nguyên hash. Không mở labels, QA/annotations hoặc public/private để phát triển/đối chiếu.
-- Local: cold **21,507 / 18,892 giây**, warm **1,926 giây**, facts **77,549,568 bytes**, process peak RSS **107.66 MiB** (gồm raw reference và kiểm tra trong cùng process). Đây là số đo S1 trên máy local, không phải benchmark toàn solution/hardware BTC. Output/cache kiểm chứng đặt trong temporary directory và tự dọn; chỉ giữ [report ngắn](reports/normalization_verification.json).
+- Local: cold **21,507 / 18,892 giây**, warm **1,926 giây**, facts **77,549,568 bytes**, process peak RSS **107.66 MiB** (gồm raw reference và kiểm tra trong cùng process). Đây là số đo S1 trên máy local, không phải benchmark toàn solution/hardware BTC. Output/cache kiểm chứng đặt trong temporary directory và tự dọn; chỉ giữ report ngắn (`reports/normalization_verification.json`, đã gỡ).
 - Docker offline với source context hash của bản cuối đã đạt trên input synthetic hỗ trợ: 2 câu, 2 orders/2 lines, duplicate và summary có accounting; host/container predictions khớp, input/root read-only, output writable, network none. Image và working outputs kiểm chứng tự dọn. Đây không phải frozen all-train/public Docker hoặc CUDA acceptance.
 - Available start/completeness của S1 vẫn **unknown**, không suy từ observed min/max/calendar. Metric execution và LLM chưa có nên mọi câu runtime vẫn abstain; M1 chưa đạt. Full train/public/Docker/CUDA report Phase 2 là bằng chứng lịch sử, không chứng nhận bản chuẩn hóa mới.
 
@@ -785,7 +839,7 @@ Chỉ tạo facts khi nguồn và capability cần dùng; bảng thiếu khác b
 
 - Bốn module implementation trong `src/semantics/` và `src/temporal/`; dùng lại loader/context/CLI, parser/serializer, SQLite read-only và error boundary. Không thêm dependency, wrapper hoặc script thực thi. Rule profile giữ source hash/line/section/scope/quote; normalization dùng chung dedup/inheritance/return policy. Registry/preflight có required fields và issues riêng theo metric; raw catalog/facts không bị đổi thành câu trả lời.
 - Lint/format và **204 tests** đạt, gồm **47 cases mới** về rule evidence/đổi luật/scope, unsupported clauses, calendar boundaries/lunar, coverage/quality/schema, cache/reordering và isolation. Fixtures C01–C30 vẫn planned ở mức toàn capability; resolved contract hoặc eligible preflight chưa chứng nhận expected numeric. Rounding tie chưa có quy định rõ được ghi abstain, không tự chọn cách làm tròn.
-- Nguồn dev S1 đối chiếu độc lập với raw: **22.428 orders / 56.501 lines**, status counts và observed dates khớp. Hai cold runs và warm cache có semantic revision giống nhau; 5 file input/authority/questions giữ nguyên hash. Raw reference được tạo không dùng labels; validation cuối reuse reference sau kiểm hash nguồn. Thời gian/RSS và revision nằm trong [report](reports/semantics_verification.json), chỉ là số đo local có tải đồng thời, không là benchmark phần cứng BTC.
+- Nguồn dev S1 đối chiếu độc lập với raw: **22.428 orders / 56.501 lines**, status counts và observed dates khớp. Hai cold runs và warm cache có semantic revision giống nhau; 5 file input/authority/questions giữ nguyên hash. Raw reference được tạo không dùng labels; validation cuối reuse reference sau kiểm hash nguồn. Thời gian/RSS và revision nằm trong report (`reports/semantics_verification.json`, đã gỡ), chỉ là số đo local có tải đồng thời, không là benchmark phần cứng BTC.
 - Coverage dev S1 vẫn `available_span=null`; ngày cuối README được kiểm chứng riêng là **24/08/2026**. Probe trong observed span trả `abstain/coverage_unknown`; probe sau confirmed end trả `unanswerable` nội bộ preflight theo rulebook. Đây không phải prediction của planner; runtime vẫn xuất mock abstain cho mọi câu. Không suy available start từ observed min/calendar.
 - Docker smoke synthetic kiểm tra host/container có predictions và semantic metadata khớp, input/root read-only, output writable, network none; duplicate/summary có accounting. Image/output tạm tự dọn; không chạy mới all-train/public inference hoặc CUDA. Bằng chứng đúng source context ghi trong report; các report Phase 2/3 giữ phạm vi lịch sử.
 
@@ -866,7 +920,7 @@ Theo quyết định của người thực hiện, giữ implementation hiện t
 - Dùng lại `sales.py`, canonical orders, lineage/cache và count executor để mở một CSV header-only có README xác nhận một dòng/một đơn không detail. Không tạo line facts giả, không lấy payable làm revenue. Dòng Cộng/Tổng ngày chỉ bỏ khi ID/date/status trống; có ID vẫn unknown để chặn. Thêm aliases trạng thái khách hủy/Hoàn trả/Chờ giao. Nguồn dev có 28.888 đơn, 429 summary và 0 issues; S1 order-line cũ giữ 22.428 orders/56.501 lines, 0 issues.
 - Cùng QueryPlan, không thêm contract cạnh tranh: grammar/validator đối chiếu cue revenue/count và relative time, bổ sung ngày/range/tháng/quý có năm tường minh. Requested bounds phải đúng trước clipping, tránh lỗi quý 2 thành tháng 2 bị coverage che. “Tính riêng ngày hôm nay” là scope thời gian, câu hỏi lịch sự kết thúc “được không?” không tự coi là phủ định filter. Không repair plan bằng bỏ điều kiện.
 - Rule parser thêm aliases label hữu hạn và guard cho một số paragraph/section nêu ngoại lệ hoặc định nghĩa trái chiều rõ ràng. Case “Đơn đang giao không được tính vào doanh thu” ngoài bảng nay chặn policy thay vì âm thầm resolved. Vẫn không chứng nhận đọc đủ mọi ngoại lệ, paraphrase hoặc bố cục rulebook mới; giới hạn 02/11 giữ làm bằng chứng lịch sử.
-- **271 tests** đạt; lint/format đạt. Trước khi gọi model lại hoặc đọc nhãn, cả 12 câu dev được hỗ trợ (6 order-line revenue/count, 6 header count) đều khớp reference trực tiếp từ raw CSV qua deterministic executor; đây chưa phải chứng cứ model hiểu câu. Model/evaluator/latency và revision nghiệm thu ghi tại [planner report](reports/planner_verification.json).
+- **271 tests** đạt; lint/format đạt. Trước khi gọi model lại hoặc đọc nhãn, cả 12 câu dev được hỗ trợ (6 order-line revenue/count, 6 header count) đều khớp reference trực tiếp từ raw CSV qua deterministic executor; đây chưa phải chứng cứ model hiểu câu. Model/evaluator/latency và revision nghiệm thu ghi tại planner report (`reports/planner_verification.json`, đã gỡ).
 - Lượt nghiệm thu cuối sau khi khóa code: 13 câu thuộc dev của cả hai protocol (12 supported và 1 entity filter unsupported), hai fresh model workers, không sửa draft/SQL/output. Mỗi lượt evaluator **12 correct / 0 wrong / 1 abstain**, 0 missing/malformed; cả 12 numeric/metric/requested windows khớp raw reference, predictions hai lượt giống nhau. Synthetic 8 câu mỗi lượt gồm 5 numeric đúng, 1 unanswerable đúng và 2 unsupported abstain; evaluator giữ đủ mẫu số 8. Labels chỉ đọc sau khi cả hai workers đóng, input hashes không đổi; không dùng validation/final/public để tuning.
 - 42 model calls không timeout với budget 120 s; median generation **25,47 s**, p95 **48,81 s**, max **80,39 s**, peak worker RSS **1.909,84 MiB**. Hai lần model startup khoảng 29,60/19,52 s; preparation timings và cache hits có trong report. OS caches không flush, host load không cố định; đây là subset CPU benchmark, không phải SLA/full-dataset throughput. Bounded fallback vẫn cần giữ.
 - Docker smoke numeric synthetic đạt với fixed validated plans, host/container bằng nhau, network none, input/root read-only và input hash bất biến; container/image/facts tạm tự dọn. Đây là CPU source image, chưa đóng gói local LLM hoặc chứng nhận CUDA/Blackwell. 271 tests bao gồm snapshot regression; probe model snapshot trước đó giữ source hashes/phạm vi lịch sử riêng.
@@ -881,7 +935,7 @@ Theo quyết định của người thực hiện, giữ implementation hiện t
 - Smoke GPU trên GTX 1650 4 GiB/compute capability 7.5/driver 555.97 đã load cùng GGUF, native log xác nhận 29/29 layer offload, generation JSON đạt. Sau smoke bằng software mounts, image CUDA tự chứa đã nghiệm thu đủ hai lượt trên cùng 13 câu S1: mỗi lượt 12 correct/0 wrong/1 abstain, không missing/malformed. Predictions khớp giữa hai lượt và với CPU, weights/source/input hashes bằng nhau; không chấp nhận CPU fallback khi yêu cầu GPU.
 - GPU có 26 model calls, generation median **5,77 s**, p95 **10,30 s**; wall time hai lượt **171,05/169,02 s**, startup gồm hash **42,52/71,42 s**, peak worker RSS cao nhất **1.313,64 MiB**. Telemetry 500 ms ghi peak VRAM toàn device **1197 MiB**, peak utilization 100%; không phải bộ nhớ riêng process hoặc cứng bảo đảm không có spike giữa samples. Latency CPU/GPU có startup/preparation riêng, không quy toàn bộ wall time thành inference.
 - Laptop reset làm gián đoạn một GPU attempt (`docker: unexpected EOF`), Docker Desktop phải khởi động lại; attempt này không được tính là nghiệm thu. Sau khôi phục vẫn cùng image IDs/GPU/driver/source/model/input, cả hai GPU repetitions đã chạy lại từ đầu và đạt. Host load/OS caches không kiểm soát, nên số đo CPU/GPU chỉ mang tính quan sát. Chưa chứng nhận Blackwell, full-dataset throughput hoặc model nộp thi.
-- `scripts.verify_runtime --scope llm` chạy hai container/backend với input/root read-only; labels/EDA/reports không mount. Chỉ evaluator host đọc nhãn sau khi cả hai container thoát. Nghiệm thu mới tại [Docker LLM report](reports/docker_llm_verification.json); planner/normalization/semantic reports cũ giữ phạm vi revision tương ứng. Quality hiện có 285 tests và lint/format đạt, lockfile offline không đổi declarations.
+- `scripts.verify_runtime --scope llm` chạy hai container/backend với input/root read-only; labels/EDA/reports không mount. Chỉ evaluator host đọc nhãn sau khi cả hai container thoát. Nghiệm thu mới tại Docker LLM report (`reports/docker_llm_verification.json`, đã gỡ); planner/normalization/semantic reports cũ giữ phạm vi revision tương ứng. Quality hiện có 285 tests và lint/format đạt, lockfile offline không đổi declarations.
 
 **Chốt checkpoint S1 hẹp — 03/11/2026:** Phase 5–S1 và phần Phase 6–7 cần cho revenue/order_count trên hai shape CSV đã nghiệm thu: planner → validator/resolve/preflight → executor → verifier/typed answer → evaluator, cùng Docker CPU/GPU offline. Chốt trong phạm vi một aggregate/window, toàn business, output number; các checkbox tổng quát của Phase 5–7 không được suy thành hoàn tất. Giữ 13 câu đã khóa làm regression; bước tiếp theo là S2 nhiều kỳ/derived metrics, bổ sung dependencies và tests theo từng capability. Header-only revenue, Excel order normalization/JOIN, hiểu rulebook tổng quát và Blackwell vẫn mở.
 
@@ -922,7 +976,7 @@ Theo quyết định của người thực hiện, giữ implementation hiện t
 **Lịch sử report tại checkpoint growth:** hai bản kết quả khi đó được trích từ saved
 evidence, không chạy lại inference hoặc đổi predictions; S1 12/0/1, S2 native 8/0/0 mỗi lượt.
 Chỉ nghiệm thu scope CUDA hẹp của checkpoint, broader S2/holdout/CPU còn mở.
-Định dạng hiện tại đã thay bằng [reports/stage_results.json](reports/stage_results.json):
+Định dạng hiện tại đã thay bằng reports/stage_results.json (`reports/stage_results.json`, đã gỡ):
 `stages.<S1..S6>` cùng cấu trúc `primary_evaluation`, `summaries`, `questions`; mỗi câu
 chỉ lưu thông tin câu hỏi, đáp án kỳ vọng/thực tế và kết quả/điểm theo lượt đánh giá.
 Native, synthetic và behavior checks được tách trong summaries; repetitions giống nhau
@@ -1033,7 +1087,7 @@ Scope đóng ở baseline hữu hạn: revenue/count, temporal comparisons, ca c
 growth/AOV/cancellation/share/averages và list tối đa ba scalar. Tám câu entity/product,
 ranking/threshold/purchase vẫn abstain. Không mở S3–S5, schema tùy ý hoặc tối ưu score.
 CPU full, generalization holdout, official scorer và BTC/Blackwell chưa chứng nhận.
-Chi tiết: [JSON kết quả các giai đoạn](reports/stage_results.json). Evidence chi tiết lưu local
+Chi tiết: JSON kết quả các giai đoạn (`reports/stage_results.json`, đã gỡ). Evidence chi tiết lưu local
 tại `.artifacts/s1-s2-full/verification-evidence.json`, section `s1_s2_final_baseline`.
 
 **Deliverables:** local model adapter, context builder, planner, JSON schema, prompt templates được version hóa.  
@@ -1389,7 +1443,7 @@ license Apache-2.0 đã đóng gói trong image. Không suy chứng nhận Black
 
 **Bản ghi quy định dự kiến trong Phase 0:** mỗi mục có `claim`, `value`, `status`, `source_url_or_file`, `section`, `retrieved_at`, `version_or_hash`, `verified_by`, `affected_config`, `open_question`. Khi chưa có nguồn, ghi `unverified`; không tự tạo trích dẫn. Giải quyết trước quyết định phụ thuộc vào thông số đó và trước nộp bài.
 
-**Cập nhật06/11:** Docker guide DataMate riêng đã được tìm và đọc; nguồn/hash và requirements matrix tại [submission requirements](docs/submission_guide.md). **Còn cần kiểm tra trước nộp:** execution trên Blackwell/CUDA≥12.8, full-batch SLA, addenda mới và evaluator chính thức (list/table/alias). Các giới hạn chung không tự chứng nhận image local. Công thức `PA_full` nội bộ suy ra từ +1/−1/0 chia tổng câu; phải đối chiếu cách BTC hiển thị/chấm khi evaluator chính thức có sẵn.
+**Cập nhật06/11:** Docker guide DataMate riêng đã được tìm và đọc; nguồn/hash và requirements matrix tại submission requirements (`docs/submission_guide.md`, đã gỡ). **Còn cần kiểm tra trước nộp:** execution trên Blackwell/CUDA≥12.8, full-batch SLA, addenda mới và evaluator chính thức (list/table/alias). Các giới hạn chung không tự chứng nhận image local. Công thức `PA_full` nội bộ suy ra từ +1/−1/0 chia tổng câu; phải đối chiếu cách BTC hiển thị/chấm khi evaluator chính thức có sẵn.
 
 **Ngoài phạm vi tài liệu này:** chọn model cụ thể, thiết kế prompt hoàn chỉnh, lựa chọn fine-tuning, mục tiêu PA dự đoán, điều chỉnh theo public/private test và kế hoạch tối ưu hậu baseline. Các quyết định này sẽ được đặt trong **Technical Blueprint** và **Experiment Log** sau khi có baseline và benchmark đầu tiên.
 

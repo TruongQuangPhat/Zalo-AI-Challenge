@@ -154,29 +154,6 @@ def test_paragraph_purchase_exception_blocks_only_dependent_contract(rulebook_te
     assert metric_contract(rules, "revenue").time_axis == "ordered_at"
 
 
-def test_audit_reads_only_authority_and_retains_unrecognized_units(synthetic_split, monkeypatch):
-    from scripts.audit_rulebook import audit
-
-    real_open = Path.open
-
-    def guarded(path, *args, **kwargs):
-        assert path.name in {
-            "rulebook.md",
-            "README.md",
-            "calendar.csv",
-            "rulebook.py",
-            "business_rules.py",
-        }
-        return real_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "open", guarded)
-    report = audit(synthetic_split)
-    assert report["sources"] == {}
-    assert len(report["readmes"]) == 1
-    assert report["clauses"][0]["status"] == "unmapped"
-    assert report["clauses"][0]["understood"] is False
-
-
 def test_parser_helper_change_invalidates_prepared_cache(semantic_source, tmp_path, monkeypatch):
     first = semantic_source(cache_dir=tmp_path / "cache")
     real_read = Path.read_bytes

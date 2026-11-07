@@ -15,7 +15,7 @@ import pytest
 
 from src.agent.context import build_context
 from src.agent.execution import execute_plan
-from src.agent.local import LocalModel
+from src.agent.local import LocalModel, guided_schema
 from src.agent.plan import PLAN_SCHEMA, _schema, generation_schema, validate_query_plan
 from src.agent.planner import LocalPlanner
 from src.data.split import Question
@@ -401,8 +401,41 @@ def test_subset_keeps_input_order_and_rejects_unknown_before_writing(synthetic_s
 
 
 def test_local_loader_rejects_remote_or_missing_weights(tmp_path):
-    with pytest.raises(ContractError, match="local GGUF"):
-        LocalModel(tmp_path / "missing.gguf")
+    with pytest.raises(ContractError, match="local model directory"):
+        LocalModel(tmp_path / "missing")
+    weights_only = tmp_path / "weights-only"
+    weights_only.mkdir()
+    (weights_only / "model.safetensors").write_bytes(b"synthetic")
+    with pytest.raises(ContractError, match="local model directory"):
+        LocalModel(weights_only)
+
+
+def test_guided_schema_converts_tuple_items_without_mutating_plan_schema():
+    schema = {
+        "type": "object",
+        "properties": {
+            "pair": {"type": "array", "items": [{"const": "a"}, {"const": "b"}]},
+            "list": {"type": "array", "items": {"type": "string", "maxLength": 256}},
+        },
+    }
+    converted = guided_schema(schema)
+    assert converted["properties"]["pair"] == {
+        "type": "array",
+        "prefixItems": [{"const": "a"}, {"const": "b"}],
+        "items": False,
+    }
+    assert converted["properties"]["list"] == {"type": "array", "items": {"type": "string"}}
+    assert isinstance(schema["properties"]["pair"]["items"], list)
+    assert schema["properties"]["list"]["items"]["maxLength"] == 256
+
+
+def test_plan_validator_rejects_overlong_text_that_the_grammar_no_longer_bounds():
+    from src.agent.plan import validate_query_plan
+
+    overlong = draft()
+    overlong["aggregations"][0]["id"] = "x" * 257
+    with pytest.raises(ContractError, match="bounded text"):
+        validate_query_plan(overlong, question(), None)
 
 
 def test_context_reuses_static_prefix_without_changing_authority_or_coverage(semantic_source):

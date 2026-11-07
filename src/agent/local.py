@@ -1,98 +1,75 @@
-"""One persistent local llama.cpp worker, explicit offload and a hard timeout."""
+"""One persistent local vLLM worker with greedy guided JSON decoding and a hard timeout."""
 
 from __future__ import annotations
 
-import importlib.metadata
 import multiprocessing
-import re
-import resource
+import os
 import time
+from copy import deepcopy
 from pathlib import Path
 
 from src.data.catalog import digest
 from src.jsonio import ContractError
 
-
-def backend_identity() -> dict:
-    """Hash installed backend code/binaries without importing or loading a model."""
-    package = importlib.metadata.distribution("llama-cpp-python")
-    artifacts = {
-        str(file): digest(Path(package.locate_file(file)))
-        for file in sorted(package.files or [], key=str)
-        if Path(file).parts[0] not in {"lib", "include", "share"}
-        and Path(file).suffix in {".py", ".so", ".dll", ".dylib"}
-    }
-    if not artifacts:
-        raise ContractError("cannot establish local backend binary identity")
-    return {"version": package.version, "artifacts": artifacts}
+MAX_MODEL_LEN = 4096
+GPU_MEMORY_UTILIZATION = 0.85
+REQUIRED_FILES = ("config.json", "tokenizer.json", "tokenizer_config.json")
 
 
-def _worker(pipe, model_path: str, n_ctx: int, threads: int, gpu_layers: int = 0) -> None:
-    # Import only inside the worker: data/CPU tooling never requires the LLM group.
+def guided_schema(schema: dict) -> dict:
+    """Adapt the plan schema for the vLLM xgrammar backend.
+
+    Tuple arrays become draft 2020-12 ``prefixItems``. String ``maxLength`` is dropped:
+    xgrammar expands each bound into repetition states, so the plan schema took from
+    seconds to over 30 minutes to compile. The plan validator still enforces it after
+    parsing, and ``max_tokens`` bounds the output.
+    """
+
+    def convert(node):
+        if isinstance(node, list):
+            return [convert(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        result = {key: convert(value) for key, value in node.items() if key != "maxLength"}
+        if isinstance(node.get("items"), list):
+            result["prefixItems"] = result.pop("items")
+            result["items"] = False
+        return result
+
+    return convert(deepcopy(schema))
+
+
+def _worker(pipe, model_dir: str, max_model_len: int, gpu_memory_utilization: float) -> None:
+    # Keep the engine in this process so terminating the worker releases the GPU.
+    os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
+    os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
     try:
-        from llama_cpp import (
-            Llama,
-            llama_log_callback,
-            llama_log_set,
-            llama_perf_context,
-            llama_perf_context_reset,
-            llama_supports_gpu_offload,
-        )
-
-        native_log = []
-
-        @llama_log_callback
-        def capture_log(level, message, user_data):
-            line = message.decode("utf-8", "replace").strip()
-            if len(native_log) < 64 and re.search(r"offload|CUDA|device", line, re.I):
-                native_log.append(line[:512])
-
-        llama_log_set(capture_log, None)
+        import torch
+        import vllm
+        from vllm import LLM, SamplingParams
+        from vllm.sampling_params import GuidedDecodingParams
 
         started = time.monotonic()
-        model = Llama(
-            model_path=model_path,
-            n_ctx=n_ctx,
-            n_batch=128,
-            n_threads=threads,
-            n_threads_batch=threads,
-            n_gpu_layers=gpu_layers,
+        model = LLM(
+            model=model_dir,
+            tokenizer=model_dir,
+            dtype="auto",
             seed=0,
-            chat_format="chatml",
-            verbose=False,
+            max_model_len=max_model_len,
+            tensor_parallel_size=1,
+            gpu_memory_utilization=gpu_memory_utilization,
+            generation_config="vllm",
+            trust_remote_code=False,
+            disable_log_stats=True,
         )
-        offloaded = max(
-            (
-                int(match[1])
-                for line in native_log
-                if (match := re.search(r"offloaded (\d+)/\d+ layers", line))
-            ),
-            default=0,
-        )
-        gpu_supported = llama_supports_gpu_offload()
-        if gpu_layers != 0 and (not gpu_supported or offloaded == 0):
-            raise ContractError(
-                "GPU requested but no model layers offloaded; CPU fallback rejected"
-            )
         pipe.send(
             {
                 "ready": True,
                 "load_seconds": time.monotonic() - started,
-                "runtime": importlib.metadata.version("llama-cpp-python"),
-                "batch_threads": model.n_threads_batch,
-                "n_batch": model.n_batch,
-                "gpu_offload_supported": gpu_supported,
-                "layers_offloaded": offloaded,
-                "native_device_log": native_log,
-                "gguf": {
-                    key: model.metadata.get(key)
-                    for key in (
-                        "general.name",
-                        "general.architecture",
-                        "general.file_type",
-                    )
-                },
-                "peak_rss_mib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
+                "runtime": {"vllm": vllm.__version__, "torch": torch.__version__},
+                "cuda": torch.version.cuda,
+                "device": torch.cuda.get_device_name(0),
+                "compute_capability": list(torch.cuda.get_device_capability(0)),
             }
         )
         while True:
@@ -104,32 +81,28 @@ def _worker(pipe, model_path: str, n_ctx: int, threads: int, gpu_layers: int = 0
             token_budget = (
                 384 if request["schema"]["properties"]["aggregations"]["maxItems"] > 1 else 256
             )
-            llama_perf_context_reset(model.ctx)
-            result = model.create_chat_completion(
-                messages=request["messages"],
+            params = SamplingParams(
                 temperature=0,
                 seed=0,
                 max_tokens=token_budget,
-                response_format={"type": "json_object", "schema": request["schema"]},
+                guided_decoding=GuidedDecodingParams(json=guided_schema(request["schema"])),
             )
-            perf = llama_perf_context(model.ctx)
+            result = model.chat(request["messages"], params, use_tqdm=False)[0]
+            completion = result.outputs[0]
+            prompt_tokens = len(result.prompt_token_ids or [])
             pipe.send(
                 {
-                    "text": result["choices"][0]["message"]["content"],
-                    "finish_reason": result["choices"][0]["finish_reason"],
-                    "usage": result["usage"],
-                    "output_token_budget": token_budget,
-                    "timings": {
-                        "prompt_seconds": perf.t_p_eval_ms / 1000,
-                        "decode_seconds": perf.t_eval_ms / 1000,
-                        "prompt_tokens_evaluated": perf.n_p_eval,
-                        "tokens_decoded": perf.n_eval,
+                    "text": completion.text,
+                    "finish_reason": completion.finish_reason,
+                    "usage": {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": len(completion.token_ids),
+                        "total_tokens": prompt_tokens + len(completion.token_ids),
                     },
+                    "output_token_budget": token_budget,
                     "seconds": time.monotonic() - started,
-                    "peak_rss_mib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
                 }
             )
-        model.close()
     except Exception as exc:
         pipe.send({"error": f"{type(exc).__name__}: {exc}"})
     finally:
@@ -137,39 +110,37 @@ def _worker(pipe, model_path: str, n_ctx: int, threads: int, gpu_layers: int = 0
 
 
 class LocalModel:
-    """No model ID, downloader, HTTP client, remote code, or auto GPU fallback."""
+    """Packaged weights only: no model ID, downloader, HTTP client or remote code."""
 
-    def __init__(
-        self, path: Path, *, load_timeout: float = 180, threads: int = 4, gpu_layers: int = 0
-    ):
+    def __init__(self, path: Path, *, load_timeout: float = 900):
         started = time.monotonic()
-        if not path.is_file() or path.is_symlink() or path.suffix.lower() != ".gguf":
-            raise ContractError("provide an existing local GGUF file")
-        if threads < 1 or load_timeout <= 0:
-            raise ContractError("threads and model load timeout must be positive")
-        if type(gpu_layers) is not int or not -1 <= gpu_layers < 2**31:
-            raise ContractError("gpu_layers must be -1 (all), 0 (CPU), or a positive layer count")
+        if (
+            not path.is_dir()
+            or path.is_symlink()
+            or not all((path / name).is_file() for name in REQUIRED_FILES)
+            or not list(path.glob("*.safetensors"))
+        ):
+            raise ContractError("provide an existing local model directory with safetensors")
+        if load_timeout <= 0:
+            raise ContractError("model load timeout must be positive")
         self.metadata = {
-            "file": path.name,
-            "sha256": digest(path),
-            "bytes": path.stat().st_size,
-            "backend": "llama-cpp-python",
-            "backend_identity": backend_identity(),
+            "directory": path.name,
+            "files": {p.name: digest(p) for p in sorted(path.iterdir()) if p.is_file()},
+            "backend": "vllm",
             "load_timeout_seconds": load_timeout,
-            "device": "gpu" if gpu_layers else "cpu",
-            "requested_gpu_layers": gpu_layers,
-            "n_ctx": 4096,
+            "max_model_len": MAX_MODEL_LEN,
+            "gpu_memory_utilization": GPU_MEMORY_UTILIZATION,
             "max_output_tokens": 256,
             "max_difference_output_tokens": 384,
-            "threads": threads,
             "seed": 0,
             "temperature": 0,
-            "chat_format": "chatml",
+            "guided_decoding": "json_schema",
         }
         mp = multiprocessing.get_context("spawn")
         self.pipe, child = mp.Pipe()
         self.process = mp.Process(
-            target=_worker, args=(child, str(path.resolve()), 4096, threads, gpu_layers)
+            target=_worker,
+            args=(child, str(path.resolve()), MAX_MODEL_LEN, GPU_MEMORY_UTILIZATION),
         )
         self.process.start()
         child.close()
@@ -203,7 +174,7 @@ class LocalModel:
     def close(self) -> None:
         if self.process.is_alive():
             self.process.terminate()
-        self.process.join(timeout=2)
+        self.process.join(timeout=5)
         if self.process.is_alive():
             self.process.kill()
             self.process.join(timeout=2)

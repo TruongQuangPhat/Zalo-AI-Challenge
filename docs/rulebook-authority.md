@@ -1,5 +1,8 @@
 # Rulebook authority S1–S5
 
+> Ghi chú 07/11/2026: `reports/*.json` và các audit script nhắc trong tài liệu này đã được gỡ khỏi
+> source tree khi dọn theo Docker guide; bản lịch sử nằm trong git history trước commit dọn dẹp.
+
 Catalogue này là diễn giải và chỉ mục nguồn; không thay rulebook phát hành. Không có
 model run, native evaluation, gold, public questions hoặc feedback predictions trong
 phiên này. `resolved` chỉ có nghĩa clause được nhận diện trong **scope đang xét**.
@@ -280,15 +283,8 @@ Standalone payment-only/stock-only packages chưa có general preparation entryp
 independent preflight áp dụng facts đã chuẩn bị hợp lệ trong pipeline hiện có.
 Báo tests/gates và diff của phiên trong roadmap; không cập nhật native result report.
 
-Rerun inventory (không đọc questions/answers, không tạo facts hoặc gọi model):
-
-```bash
-uv run --no-sync python -m scripts.audit_rulebook \
-  --data-dirs dataset/train dataset/public_test --include-sources \
-  --output .artifacts/rulebook-s1-s5/authority.json
-```
-
-Audit JSON có raw-source hashes khi dùng `--include-sources`, cho phép đối chiếu input
+Inventory trên được tạo bằng `scripts.audit_rulebook` (đã gỡ, xem git history).
+Audit JSON khi đó có raw-source hashes, cho phép đối chiếu input
 trước/sau quality gates; normalizer/parser fingerprints vẫn do code thật tính. Không
 sửa tay cache/manifest. Registry/preflight/resolver software hashes vào semantic revision;
 parser hash gồm `business_rules.py`; normalizer và mapping code vào prepared dependency.

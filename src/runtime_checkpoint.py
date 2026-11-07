@@ -73,8 +73,7 @@ def run_identity(split: Split, questions: tuple[Question, ...], adapter: Any) ->
     paths = [
         *sorted((root / "src").rglob("*.py")),
         root / "predict.sh",
-        root / "pyproject.toml",
-        root / "uv.lock",
+        root / "requirements.txt",
     ]
     metadata = getattr(adapter, "metadata", None)
     if metadata:

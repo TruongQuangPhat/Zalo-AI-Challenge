@@ -1,158 +1,142 @@
-# Zalo AI Challenge — DataMate
+# Zalo AI Challenge 2026 — DataMate
 
-Một đường chạy inference duy nhất:
+Một Docker image chứa toàn bộ giải pháp. Đường chạy duy nhất:
 
-`predict.sh → src.cli predict → LocalModel + LocalPlanner → run_inference → typed JSONL`
+`/code/predict.sh → src.cli predict → LocalModel (vLLM) + LocalPlanner → run_inference`
 
-Runtime tự đọc rulebook/calendar và CSV/XLSX/SQLite, chuẩn bị facts một lần/business,
-validate/preflight structured plan rồi thực thi bằng SQLite read-only và Python Decimal.
-Không cần chạy preprocessing riêng. Không có mock mode hoặc fallback khi thiếu model.
-Phạm vi nghiệp vụ hữu hạn nằm trong [capability matrix](docs/capability-matrix.md);
-khả năng chưa hỗ trợ giữ abstain. Lịch sử/bằng chứng nằm trong `roadmap.md`.
+## Approach
 
-## Setup
+1. **Đọc dữ liệu.** Đọc `/data/rulebook.md`, `calendar.csv`, `questions.jsonl` và
+   CSV/XLSX/SQLite + README của từng `data/<business_id>/`. Mỗi business chỉ chuẩn bị một
+   lần: reader chặt chẽ, catalog/profile, chuẩn hoá thành `facts.sqlite` (dòng bán, header,
+   ledger, tồn kho, công nợ, lô) có lineage, Decimal và quality gates.
+2. **Lập kế hoạch bằng LLM.** Qwen2.5-1.5B-Instruct sinh một *structured QueryPlan* (JSON)
+   bằng greedy decoding, ràng buộc bởi JSON schema (vLLM guided decoding). Model không tự
+   tính số và không sinh code tự do.
+3. **Thực thi bằng code có sẵn.** Plan được validate/preflight theo rulebook, README và
+   coverage, rồi thực thi bằng các hàm Python cố định (`src/agent/execution.py`,
+   `src/agent/business_execution.py`) trên SQLite read-only với Decimal chính xác.
+4. **Chọn đáp án.** Kết quả được định dạng theo đúng type (number/percent/string/date/
+   boolean/list/table). Khi intent/schema chưa hỗ trợ, plan lỗi hoặc quá thời gian thì
+   trả `abstain`. Chỉ trả `unanswerable` khi có bằng chứng dữ liệu nguồn thiếu.
 
-Dùng Python 3.11 và `.venv` của repository. Nếu môi trường hiện tại đã chạy được
-CPU/GPU thì giữ nguyên; không sync lại để vô tình thay CUDA binding đang dùng.
-Trên môi trường mới, cài từ lockfile trước khi inference:
+Phạm vi nghiệp vụ hỗ trợ được liệt kê trong [capability matrix](docs/capability-matrix.md).
+Không hard-code đáp án hay logic theo question/business ID. Không đọc nhãn khi inference.
 
-```bash
-uv sync --locked --python /usr/bin/python3.11 --group llm
-```
+## Models
 
-Weights là file local có sẵn, không nằm trong Git. Nguồn/checksum/license và parameter
-budget khai báo tại [config/submission_model.json](config/submission_model.json);
-[license model](docs/model-license.txt) được giữ trong image.
-
-Baseline dùng trực tiếp Qwen2.5-1.5B-Instruct-GGUF Q4_K_M, Apache-2.0, weights phát
-hành 18/09/2024, revision `91cad51170dc346986eccefdc2dd33a9da36ead9`.
-Không fine-tune hoặc sinh training data; số mẫu train/validation cho training: 0/0.
-GGUF chứa tokenizer metadata; không cần tải tokenizer khi chạy. Không có model phụ.
-Runtime `llama-cpp-python==0.3.16`, ChatML, seed 0, temperature 0, context 4096,
-batch 128, threads 4, output tối đa 256/384 tokens, tối đa hai attempts, 120 s/câu,
-180 s/load. Tổng budget khai báo bảo thủ 1.6B, dưới giới hạn 15B.
-
-## Chạy inference
-
-Chạy từ repository root, chọn output mới:
-
-```bash
-./predict.sh \
-  --data-dir dataset/train \
-  --output-dir .artifacts/train-run-new \
-  --model .artifacts/models/qwen2.5-1.5b-instruct/model.gguf \
-  --gpu-layers 0
-```
-
-GPU dùng **cùng lệnh**, đổi `--gpu-layers -1`. Runtime từ chối silent CPU fallback
-khi đã yêu cầu GPU. Smoke subset thêm `--question-id ID` cho từng câu cần chạy;
-bỏ option để chạy toàn split. Không sửa đáp án hoặc dùng test làm training data.
-
-Defaults nằm tại `src/cli.py`, không lặp lại trong shell wrappers:
-
-| Option | Default |
+| Trường | Giá trị |
 |---|---|
-| `--data-dir` | `/data` |
-| `--output-dir` | `/result` |
-| `--model` | `DATAMATE_MODEL`, nếu chưa đặt: `.artifacts/models/qwen2.5-1.5b-instruct/model.gguf` trong repo |
-| `--gpu-layers` | `DATAMATE_GPU_LAYERS`, mặc định 0 |
-| `--cache-dir` | `DATAMATE_CACHE`, mặc định không dùng cache đĩa |
+| Model | Qwen2.5-1.5B-Instruct (BF16 safetensors, không quantize) |
+| Nguồn public | https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct |
+| Revision cố định | `989aa7980e4cf806f80c7fef2b1adb7bc71aa306` |
+| Ngày phát hành gốc | 2024-09-17/18 (trước 26/10/2026) |
+| License | Apache-2.0 (`/code/models/qwen2.5-1.5b-instruct/LICENSE`) |
+| Số tham số | 1,54B (budget khai báo 1,6B ≤ 15B); không có model phụ |
+| Vị trí trong image | `/code/models/qwen2.5-1.5b-instruct/` (weights, tokenizer, config) |
 
-Thiếu weights/dependencies là lỗi, không tạo một submission toàn abstain giả.
-Trong Docker, **chính file root này** được copy tới `/code/predict.sh`; không có
-entrypoint inference thứ hai. Image đặt model
-`/opt/model/model.gguf`, cache `/result/cache`, GPU layers -1; chạy no-args đúng BTC.
+Runtime: `vllm==0.10.1.1` từ base image `vllm/vllm-openai:v0.10.1.1` (PyTorch 2.7.1+cu128,
+hỗ trợ RTX 5090). Cố định trong `src/agent/local.py`: một GPU (`tensor_parallel_size=1`),
+`max_model_len` 4096, temperature 0, seed 0, output tối đa 256/384 tokens, tối đa 2 attempts,
+120 s/câu, 900 s cho load model. Không fine-tune. Qwen2.5 không sinh reasoning riêng, nên
+log có `thinking: null`; raw response của model được giữ trong `plan` của log.
 
-Input split gồm `questions.jsonl`, `rulebook.md`, `calendar.csv`, `data/<business>/`.
-Inference không đọc `answers.jsonl`, EDA answer reports hoặc labels. Input Docker
-mount read-only. Output nằm ngoài input/dataset:
+## Data
 
-- `submission.jsonl`: một typed answer mỗi câu, ghi/fsync theo thứ tự input.
-- `logs/*.json`: calls/plans, execution, errors, elapsed_ms, thinking và code/inputs/output.
-- `run_manifest.json`: source/input/model/config identity, progress và preparation timing.
-- `catalogs/`, `prepared/<business>/facts.sqlite`: dữ liệu suy ra và provenance.
+- Inference chỉ dùng input của split được mount vào `/data`.
+- Không có training hoặc data generation; số mẫu train/validation cho training: 0/0.
+  Chi tiết xem [training_code/README.md](training_code/README.md) và `data_manifest.json`.
+- Train split (có `answers.jsonl`) chỉ dùng để chấm offline sau inference. Không dùng
+  public/private test để train, pseudo-label hoặc tuning.
 
-Qwen ở cấu hình hiện tại không sinh reasoning channel riêng, nên thinking=null;
-raw structured responses được giữ nguyên trong logs. Ghi log không đổi format JSONL.
-Cache là catalog/facts, không phải đáp án; fingerprint/config/checksum kiểm stale data.
-Thêm `--cache-dir .artifacts/source-cache` để reuse preparation hợp lệ.
+## Input/output
 
-## Tiếp tục run và chấm train
+- `/data` (read-only): `questions.jsonl`, `rulebook.md`, `calendar.csv`, `data/<business_id>/`.
+- `/result/submission.jsonl`: một typed answer mỗi câu, ghi và fsync ngay theo thứ tự input.
+- `/result/logs/<n>_<id>.json`: một record mỗi câu, gồm `id`, `answer`, `elapsed_ms`,
+  `thinking`, `code` (hàm Python đã gọi), `inputs`, `output`, cùng plan và execution chi tiết.
+- `/result/run_manifest.json`, `catalogs/`, `prepared/<business>/facts.sqlite`: identity,
+  tiến độ, timing và dữ liệu đã chuẩn hoá.
 
-Resume yêu cầu source/model/input/config khớp, parent đã dừng và output mới:
+## Layout trong image
 
-```bash
-./predict.sh --data-dir dataset/train --output-dir .artifacts/resumed-new \
-  --model .artifacts/models/qwen2.5-1.5b-instruct/model.gguf \
-  --resume-from .artifacts/train-run-new --gpu-layers 0
+```
+/code/
+├── predict.sh            # entry point, chạy không cần tham số
+├── README.md
+├── requirements.txt
+├── src/                  # inference code (chỉ dùng standard library + vLLM)
+├── models/qwen2.5-1.5b-instruct/
+└── training_code/        # README no-training, data_manifest.json
 ```
 
-Checkpoint cũ khác source revision không được ghép vào run mới. Evaluator là command
-riêng, chỉ chạy với labels train sau inference:
+## Build, kiểm tra và nộp (theo Docker guide)
+
+Chuẩn bị weights một lần, vào `models/` (bị gitignore):
 
 ```bash
-uv run --no-sync python -m src.cli evaluate \
-  --answers dataset/train/answers.jsonl \
-  --predictions .artifacts/train-run-new/submission.jsonl \
-  --report .artifacts/train-score-new.json
+R=989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+mkdir -p models/qwen2.5-1.5b-instruct && cd models/qwen2.5-1.5b-instruct
+for f in LICENSE config.json generation_config.json merges.txt tokenizer.json \
+         tokenizer_config.json vocab.json model.safetensors; do
+  curl -fL -o "$f" "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/resolve/$R/$f"
+done
+cd - && sha256sum -c training_code/model.sha256
 ```
 
-`src.cli validate/catalog/prepare` là công cụ chẩn đoán input, không là pipeline
-prediction khác. Không chấm public/private test bằng nhãn tự thu thập.
-
-## Kiểm tra và đóng gói
+Build và kiểm tra layout:
 
 ```bash
-uv run --no-sync python -m scripts.verify_runtime --scope cpu
+docker build --platform linux/amd64 -t zaic2026_datamate_datamate:final .
+docker image inspect -f '{{.Os}}/{{.Architecture}} {{.Size}}' zaic2026_datamate_datamate:final
+docker run --rm --network none --entrypoint "" zaic2026_datamate_datamate:final find /code -maxdepth 2
 ```
 
-CPU gate chạy lint/format/tests và kiểm context source; **không chạy model giả hoặc
-chứng nhận Docker/GPU**. Report hiện hành: `reports/runtime_verification.json`.
-Test doubles chỉ nằm trong `tests/`, không nằm trong image hoặc production fallback.
-
-Build/test/export/reload dùng [một hướng dẫn submission](docs/submission_guide.md).
-Các thao tác đóng gói trong `scripts.submission` đều gọi lại root predict.sh:
+Chạy bằng đúng lệnh chấm của BTC (output mới mỗi lần):
 
 ```bash
-uv run --no-sync python -m scripts.submission prepare \
-  --base-image datamate-baseline:local --image zaic2026_datamate_team:review1 \
-  --input dataset/train --output .artifacts/submission-review-new \
-  --mode smoke --limit 3 --gpus none --timeout 1800
+docker run --rm --gpus '"device=0,1"' --network none --shm-size=16g \
+  --entrypoint bash \
+  -v /path/to/public_test:/data:ro \
+  -v /path/to/output:/result \
+  zaic2026_datamate_datamate:final /code/predict.sh
 ```
 
-Mặc định dry-run. Thêm `--execute` khi đã dành tài nguyên để build, test, export/load.
-Không upload, commit hoặc freeze tự động. Full gate cần image mới đã build:
+Kiểm tra trước khi nộp (mục 10): đủ câu, log đủ trường, ước lượng `load + avg × 500 ≤ 6h`,
+và hai lần chạy cho cùng đáp án:
 
 ```bash
-uv run --no-sync python -m scripts.verify_runtime --scope all \
-  --image zaic2026_datamate_team:review1 --data-dir dataset/train --gpus all
+uv run --no-sync python -m scripts.check_submission \
+  --data-dir /path/to/public_test --output-dir /path/to/output --compare /path/to/output-2
 ```
 
-Image cũ `/app` cần rebuild trước khi dùng đường chạy `/code`. CUDA12.4/GTX1650 local
-chưa chứng nhận RTX5090/Blackwell, và chưa chứng nhận SLA sáu giờ trên máy BTC.
+Chấm train (chỉ sau inference, đọc nhãn riêng):
 
-## Colab: train 3000 và public test 1000
+```bash
+uv run --no-sync python -m src.cli evaluate --answers dataset/train/answers.jsonl \
+  --predictions /path/to/train-output/submission.jsonl --report /path/to/score.json
+```
 
-Dùng duy nhất [scripts/DataMate_Colab.ipynb](scripts/DataMate_Colab.ipynb), chọn GPU và
-Run all. Notebook clone GitHub, tự setup model/runtime đã pin; không cần runtime ZIP.
-Repo private dùng Colab Secret `GITHUB_TOKEN` với quyền Contents:read. Ref được clone
-phải chứa notebook/helper train-public mới; thay đổi chưa push không tự có trên Colab.
+Export và nộp (mục 11):
 
-Dữ liệu đã có trong `MyDrive/DataMate/`: `train.zip`, folder `train/` và
-`public_test/`. Folder split chứa `questions.jsonl`, `rulebook.md`, `calendar.csv`,
-`data/`; train có thêm `answers.jsonl` để evaluator riêng sử dụng sau inference.
+```bash
+set -o pipefail
+docker save zaic2026_datamate_datamate:final | pigz -p 8 > zaic2026_datamate_datamate.tar.gz
+pigz -dc zaic2026_datamate_datamate.tar.gz | wc -c      # uncompressed .tar bytes, ≤ 100 GB
+md5sum zaic2026_datamate_datamate.tar.gz > zaic2026_datamate_datamate.tar.gz.md5
+```
 
-| Cấu hình notebook | Hành vi |
-|---|---|
-| `SPLIT="train"` | Đủ3000 predictions, sau đó chấm cả3000 nếu `EVALUATE_TRAIN=True` |
-| `SPLIT="public_test"` | Đủ1000 predictions, không đọc nhãn/chấm điểm; tải file public JSONL |
-| `INPUT_SOURCE="auto"` | Ưu tiên `<split>.zip` nếu có, nếu không dùng folder `<split>/` |
-| `INPUT_SOURCE="folder"` | Dùng trực tiếp folder khi đã giải nén hoặc folder mới hơn ZIP |
-| `CHUNK_SIZE=100` | Checkpoint mỗi100 câu; giữ RUN_ID/source/config để resume |
+Upload `.tar.gz`, gửi link, file `.md5` và kích thước `.tar` không nén cho BTC. Không đổi
+tên archive sau khi tạo MD5; tải lại từ link trên máy khác và chạy `md5sum -c` trước khi gửi.
 
-Chỉ đổi `SPLIT` rồi Run all để chuyển chế độ; train/public có namespace riêng.
-Inference vẫn gọi root `predict.sh`, chạy trên SSD `/content`, không đọc SQLite từ
-Drive. Kết quả/checkpoint nằm ở `DataMate/results/<split>/<RUN_ID>/`; phần đang chạy
-dở chưa checkpoint có thể phải chạy lại khi VM mất. Đổi RUN_ID cho lượt độc lập.
-Public `submission.jsonl` để tự nộp portal → Submission; file train không dùng nộp
-public leaderboard. Notebook không tự submit/commit/push và chưa được test hosted Colab.
+## Phát triển (CPU)
+
+```bash
+uv sync --locked --python /usr/bin/python3.11
+uv run --no-sync python -m scripts.verify_runtime     # lockfile, Ruff lint/format, pytest
+```
+
+`.venv` chỉ dùng cho tests, evaluator và công cụ chẩn đoán dữ liệu
+(`src.cli validate/catalog/prepare`); nó không có vLLM. Inference chạy trong image. Trên host
+có sẵn môi trường vLLM thì `./predict.sh --data-dir ... --output-dir ...` dùng cùng
+entrypoint. Tiến độ và evidence nằm trong [roadmap.md](roadmap.md).

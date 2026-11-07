@@ -1,5 +1,8 @@
 # Data contracts — Phase 1
 
+> Ghi chú 07/11/2026: `reports/*.json` và các audit script nhắc trong tài liệu này đã được gỡ khỏi
+> source tree khi dọn theo Docker guide; bản lịch sử nằm trong git history trước commit dọn dẹp.
+
 Contract version: `data-contracts-v1`. Taxonomy: `question-taxonomy-v1`.
 Đây là đặc tả đầu vào cho S1; trạng thái triển khai nằm trong
 [roadmap](../roadmap.md), không suy ra từ việc có tài liệu hoặc fixture.
@@ -93,7 +96,7 @@ Nhận diện summary trước grouping/forward-fill. Dòng unknown có thể �
 Âm ở voucher không tự là return; sổ không mã đơn giữ các bản ghi giống nhau.
 
 S1/S2 baseline hiện tại đã kiểm chứng trong scope hữu hạn; kết quả tại
-[JSON chung](../reports/stage_results.json); evidence kỹ thuật local tại
+JSON chung `reports/stage_results.json`; evidence kỹ thuật local tại
 `.artifacts/s1-s2-full/verification-evidence.json`, section `s1_s2_final_baseline`. Summary phải bị nhận diện trước
 header inheritance; bare “Cộng/Tổng” chỉ bị loại khi thoả điều kiện cấu trúc dòng,
 không loại giao dịch thật chỉ vì trùng tên. Header revenue có filter kênh phải lọc
@@ -262,7 +265,7 @@ M1 chỉ chứng nhận wiring train-dev đã ghi trong roadmap/report, không t
 trong schema không cấp quyền trả lời: `summary.extensions.issues`, required fields,
 preflight và dữ liệu của các bản ghi liên quan vẫn phải qua gate. Lỗi payment/cost
 không tự chặn revenue/count S1. Kết quả nghiệm thu đọc theo evaluation trong
-[JSON chung](../reports/stage_results.json), không suy từ trạng thái preparation `ready`.
+JSON chung `reports/stage_results.json`, không suy từ trạng thái preparation `ready`.
 
 | Facts | Grain và ràng buộc chính |
 |---|---|
@@ -350,7 +353,7 @@ Process lock chặn resume parent còn chạy. Tail policy mặc định reject,
 áp final bytes thiếu newline và ghi hash/evidence. Parent immutable; output mới kế thừa prefix,
 chạy phần còn lại, kiểm types/IDs/order và giữ question errors. `running` và heartbeat không
 thay liveness proof; SIGINT/TERM khác abrupt kill/power loss. Không migrate legacy proof hoặc
-trộn source revisions. Backend identity hash installed llama-cpp package Python/native files;
+trộn source revisions. Backend identity ghi version vLLM/PyTorch/CUDA và GPU do worker báo;
 không phải certification toàn bộ driver/hardware hoặc Docker/GPU repeatability.
 
 Delivery family chỉ được tách khỏi sales khi README section của đúng source tuyên bố
