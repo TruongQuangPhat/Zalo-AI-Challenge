@@ -64,6 +64,14 @@ hướng dẫn và xóa pipeline thừa. Quyết định của người dùng: c
 trên máy có driver ≥ R570 để đo PA, thời gian và kiểm tra hai lần chạy cho cùng kết quả.
 Máy local: RAM 8 GB, WSL 4 GB; Docker cần `max-concurrent-downloads: 1` mới pull được base image.
 
+**Bỏ uv (cùng ngày, theo yêu cầu người dùng):** dependency giờ chỉ nằm trong hai file pip.
+`requirements.txt` là runtime của image; `requirements-dev.txt` là pytest/ruff cho `.venv`,
+cài bằng `python3.11 -m venv` + `pip`. `pyproject.toml` chỉ giữ cấu hình Ruff/pytest. Đã xóa
+`uv.lock` và `.python-version`; `verify_runtime` so phiên bản với `requirements-dev.txt`.
+Đã xác minh: trong image, `pip install --no-index -r requirements.txt` không cài gì thêm, và
+`pip check`/`pip freeze` trùng với base image. `.venv` tạo lại từ đầu thì gate pass 484 tests;
+image build lại và import được.
+
 **Trạng thái đáp án:** backend đổi từ GGUF Q4_K_M sang BF16 vLLM nên kết quả train100 cũ không
 còn áp dụng cho revision này. Cần chạy lại train trên GPU ≥ CUDA 12.8 để đo PA và thời gian.
 

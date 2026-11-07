@@ -1,17 +1,5 @@
-[project]
-name = "datamate-baseline"
-version = "0.0.1"
-description = "Offline DataMate local LLM planning and deterministic execution (vLLM runtime in Docker)"
-requires-python = ">=3.11,<3.13"
-dependencies = []
-
-[dependency-groups]
-dev = ["pytest==9.1.1", "ruff==0.15.22", "packaging==26.3"]
-
-[tool.uv]
-package = false
-default-groups = ["dev"]
-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# Tool configuration only. Dependencies: requirements.txt (image runtime) and
+# requirements-dev.txt (local .venv tools).
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -20,7 +8,7 @@ addopts = "-ra --strict-markers --strict-config"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-extend-exclude = ["dataset", "reports", ".artifacts"]
+extend-exclude = ["dataset", ".artifacts", "models"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

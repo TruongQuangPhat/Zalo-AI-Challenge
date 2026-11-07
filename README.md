@@ -106,14 +106,14 @@ Kiểm tra trước khi nộp (mục 10): đủ câu, log đủ trường, ướ
 và hai lần chạy cho cùng đáp án:
 
 ```bash
-uv run --no-sync python -m scripts.check_submission \
+.venv/bin/python -m scripts.check_submission \
   --data-dir /path/to/public_test --output-dir /path/to/output --compare /path/to/output-2
 ```
 
 Chấm train (chỉ sau inference, đọc nhãn riêng):
 
 ```bash
-uv run --no-sync python -m src.cli evaluate --answers dataset/train/answers.jsonl \
+.venv/bin/python -m src.cli evaluate --answers dataset/train/answers.jsonl \
   --predictions /path/to/train-output/submission.jsonl --report /path/to/score.json
 ```
 
@@ -132,8 +132,8 @@ tên archive sau khi tạo MD5; tải lại từ link trên máy khác và chạ
 ## Phát triển (CPU)
 
 ```bash
-uv sync --locked --python /usr/bin/python3.11
-uv run --no-sync python -m scripts.verify_runtime     # lockfile, Ruff lint/format, pytest
+python3.11 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m scripts.verify_runtime     # pinned tools, Ruff lint/format, pytest
 ```
 
 `.venv` chỉ dùng cho tests, evaluator và công cụ chẩn đoán dữ liệu

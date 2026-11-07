@@ -14,26 +14,26 @@ Keep contributor practices here, setup in `README.md`, and plans, progress, and 
 
 ## Development Commands
 
-Use the isolated Python 3.11 `.venv`, managed through `pyproject.toml` and `uv.lock`. Run from the repository root:
+Use the isolated Python 3.11 `.venv` with the pinned tools in `requirements-dev.txt`; the image runtime is pinned in `requirements.txt`. `pyproject.toml` holds only Ruff/pytest configuration. Run from the repository root:
 
 ```bash
-uv sync --locked --python /usr/bin/python3.11
-uv run --no-sync python -m scripts.verify_runtime
+python3.11 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m scripts.verify_runtime
 docker build --platform linux/amd64 -t zaic2026_datamate_datamate:final .
 docker run --rm --gpus '"device=0,1"' --network none --shm-size=16g --entrypoint bash \
   -v "$PWD/dataset/public_test:/data:ro" -v "$PWD/.artifacts/my-run:/result" \
   zaic2026_datamate_datamate:final /code/predict.sh
-uv run --no-sync python -m scripts.check_submission \
+.venv/bin/python -m scripts.check_submission \
   --data-dir dataset/public_test --output-dir .artifacts/my-run
 ```
 
-Packaging follows the organizers' Docker guide; README.md holds the build/run/export commands. `verify_runtime` runs the lockfile check, Ruff lint/format and pytest; it does not run a model or certify Docker/CUDA. The `.venv` has no vLLM: inference runs in the `vllm/vllm-openai` image through root `predict.sh`, copied to `/code/predict.sh`. Model weights are required; there is no production mock fallback. Use fresh output directories.
+Packaging follows the organizers' Docker guide; README.md holds the build/run/export commands. `verify_runtime` checks the pinned tool versions and runs Ruff lint/format and pytest; it does not run a model or certify Docker/CUDA. The `.venv` has no vLLM: inference runs in the `vllm/vllm-openai` image through root `predict.sh`, copied to `/code/predict.sh`. Model weights are required; there is no production mock fallback. Use fresh output directories.
 
 ## Coding Style & Simplicity
 
-Use four-space indentation, type hints, `snake_case` functions/modules, and `PascalCase` classes. Ruff enforces import ordering and a 100-character line limit. Format with `uv run --no-sync python -m ruff format src scripts tests`.
+Use four-space indentation, type hints, `snake_case` functions/modules, and `PascalCase` classes. Ruff enforces import ordering and a 100-character line limit. Format with `.venv/bin/python -m ruff format src scripts tests`.
 
-Keep changes scoped to the requested work. Prefer existing entrypoints and direct implementations. Add abstractions, shell wrappers, configuration, ADRs, or separate logs only for a demonstrated need. Update dependency declarations and regenerate the uv lockfile together.
+Keep changes scoped to the requested work. Prefer existing entrypoints and direct implementations. Add abstractions, shell wrappers, configuration, ADRs, or separate logs only for a demonstrated need. Pin exact versions (`==`) in the requirements files; keep runtime and dev dependencies separate.
 
 ## Testing & Verification
 

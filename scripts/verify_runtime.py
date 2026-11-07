@@ -1,4 +1,4 @@
-"""CPU quality gate: toolchain lock, Ruff lint/format and pytest. No model, Docker or GPU."""
+"""CPU quality gate: pinned dev tools, Ruff lint/format and pytest. No model, Docker or GPU."""
 
 from __future__ import annotations
 
@@ -7,10 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
-import tomllib
 from pathlib import Path
-
-from packaging.requirements import Requirement
 
 from src.environment import require_project_environment
 from src.jsonio import ContractError, dumps
@@ -19,20 +16,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def check_toolchain() -> dict:
+    """Installed dev tools must match the exact pins in requirements-dev.txt."""
     require_project_environment()
     versions = {}
-    config = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    lock = tomllib.loads((ROOT / "uv.lock").read_text())
-    locked = {p["name"]: p["version"] for p in lock["package"]}
-    for line in config["dependency-groups"]["dev"]:
-        requirement = Requirement(line)
-        expected = locked[requirement.name]
-        if str(requirement.specifier) != "==" + expected:
-            raise ContractError(f"development dependency and uv.lock disagree: {line}")
-        actual = importlib.metadata.version(requirement.name)
+    for line in (ROOT / "requirements-dev.txt").read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        name, separator, expected = line.partition("==")
+        if not separator:
+            raise ContractError(f"requirements-dev.txt must pin exact versions: {line}")
+        actual = importlib.metadata.version(name)
         if actual != expected:
-            raise ContractError(f"toolchain mismatch: {requirement.name} {actual} != {expected}")
-        versions[requirement.name] = actual
+            raise ContractError(f"toolchain mismatch: {name} {actual} != {expected}")
+        versions[name] = actual
     return versions
 
 
