@@ -9,16 +9,24 @@ import tempfile
 import time
 from collections.abc import Iterator
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 
 from src.data.cache import fingerprint
 from src.data.catalog import BusinessContext, digest, discover_sources, require_output
 from src.data.normalization.entities import build_entities
+from src.data.normalization.llm_mapping import (
+    Propose,
+    check_proposal,
+    request_proposal,
+    synthesize_readme,
+    verify_facts,
+)
 from src.data.normalization.relational import build_relational, relational_mapping
 from src.data.normalization.sales import build_sales, sales_mapping
 from src.data.normalization.stock import build_stock, stock_mapping
+from src.data.normalization.values import parse_date
 from src.jsonio import ContractError, dumps, loads
 
 VERSION = "prepared-facts-v8"
@@ -185,49 +193,126 @@ def _cached(entry: Path, dependencies: dict) -> tuple[Path, dict] | None:
         return None
 
 
+def _select_mapping(context: BusinessContext) -> tuple[object, object, dict[str, str]]:
+    attempts = {}
+    for name, mapper, builder in [
+        ("sales", sales_mapping, build_sales),
+        ("relational", relational_mapping, build_relational),
+        ("snapshot", stock_mapping, build_stock),
+    ]:
+        try:
+            return mapper(context), builder, attempts
+        except ContractError as error:
+            attempts[name] = str(error)
+    return None, None, attempts
+
+
+def _unsupported(context: BusinessContext, attempts: dict, started: float, **extra):
+    result = PreparedBusiness(
+        None,
+        {
+            "version": VERSION,
+            "status": "unsupported",
+            "reason": "; ".join(attempts.values()),
+            "failure_family": "unsupported_mapping",
+            "mapping_attempts": attempts,
+            "metric_execution": "not_implemented",
+            **extra,
+        },
+        elapsed_seconds=time.perf_counter() - started,
+    )
+    context.prepared = result
+    return result
+
+
 def prepare_facts(
-    context: BusinessContext, output_dir: Path, *, cache_dir: Path | None = None
+    context: BusinessContext,
+    output_dir: Path,
+    *,
+    cache_dir: Path | None = None,
+    propose: Propose | None = None,
 ) -> PreparedBusiness:
-    """Prepare supported facts once/business; unsupported shapes never become empty facts."""
+    """Prepare supported facts once/business; unsupported shapes never become empty facts.
+
+    ``propose`` (a model) is consulted only when no README mapper reads sales; its column
+    meanings become README declarations and must pass the unchanged mappers, builders,
+    quality gates and ``verify_facts`` (one retry with the rejection reasons).
+    """
     started = time.perf_counter()
     require_output(output_dir, context.root)
     if cache_dir is not None:
         require_output(cache_dir, context.root)
     _assert_revision(context)
-    try:
-        mapping = sales_mapping(context)
-        builder = build_sales
-    except ContractError as sales_error:
+    mapping, builder, attempts = _select_mapping(context)
+    # A shop read only as an inventory snapshot has unread sales; the model may map them.
+    if mapping is not None and (propose is None or builder is not build_stock):
+        return _store(context, output_dir, cache_dir, mapping, builder, started)
+    snapshot = mapping
+    if propose is None:
+        return _unsupported(context, attempts, started)
+    if output_dir.exists():
+        raise ContractError("prepared output already exists; use a fresh directory")
+    end_hint = context.catalog["coverage"].get("available_end_hint")
+    end_day = parse_date(end_hint).isoformat() if end_hint else None
+    feedback: list[str] = []
+    rejected = []
+    for _ in range(2):
         try:
-            mapping = relational_mapping(context)
-            builder = build_relational
-        except ContractError as relational_error:
+            proposal = request_proposal(context.catalog, propose, cache_dir, feedback)
+        except ContractError as error:
+            rejected.append([str(error)])
+            break
+        feedback = check_proposal(context.catalog, proposal)
+        if not feedback:
+            catalog = {**context.catalog, "readme": synthesize_readme(context.catalog, proposal)}
+            trial = replace(context, catalog=catalog)
+            mapping, builder, failed = _select_mapping(trial)
+            if mapping is None or builder is build_stock:
+                feedback = [f"{k}: {v}" for k, v in failed.items()] or ["sales still unmapped"]
+        if not feedback:
+            provenance = {
+                "mapping_source": "llm_proposal",
+                "proposal_sha256": fingerprint(proposal),
+                "proposal": proposal,
+            }
             try:
-                mapping = stock_mapping(context)
-                builder = build_stock
-            except ContractError as stock_error:
-                mapping = None
-                reason = f"{sales_error}; {relational_error}; {stock_error}"
-                mapping_attempts = {
-                    "sales": str(sales_error),
-                    "relational": str(relational_error),
-                    "snapshot": str(stock_error),
-                }
-    if mapping is None:
-        result = PreparedBusiness(
-            None,
-            {
-                "version": VERSION,
-                "status": "unsupported",
-                "reason": reason,
-                "failure_family": "unsupported_mapping",
-                "mapping_attempts": mapping_attempts,
-                "metric_execution": "not_implemented",
-            },
-            elapsed_seconds=time.perf_counter() - started,
-        )
-        context.prepared = result
-        return result
+                result = _store(
+                    trial,
+                    output_dir,
+                    cache_dir,
+                    mapping,
+                    builder,
+                    started,
+                    provenance=provenance,
+                    verify=lambda conn, summary: verify_facts(conn, summary, end_day),
+                )
+            except ContractError as error:
+                feedback = [str(error)]
+                if output_dir.is_dir() and not any(output_dir.iterdir()):
+                    output_dir.rmdir()  # the rejected build left nothing; retry reuses it
+            else:
+                context.catalog = catalog
+                context.prepared = result
+                return result
+        rejected.append(feedback)
+    if snapshot is not None:
+        return _store(context, output_dir, cache_dir, snapshot, build_stock, started)
+    return _unsupported(
+        context, attempts, started, mapping_source="llm_rejected", llm_rejections=rejected
+    )
+
+
+def _store(
+    context: BusinessContext,
+    output_dir: Path,
+    cache_dir: Path | None,
+    mapping,
+    builder,
+    started: float,
+    *,
+    provenance: dict | None = None,
+    verify=None,
+) -> PreparedBusiness:
     if output_dir.exists():
         raise ContractError("prepared output already exists; use a fresh directory")
     dependencies = {
@@ -238,6 +323,8 @@ def prepare_facts(
             {p.name: digest(p) for p in sorted(Path(__file__).parent.glob("*.py"))}
         ),
     }
+    if provenance is not None:
+        dependencies["proposal_sha256"] = provenance["proposal_sha256"]
     cache_entry = cache_dir / "prepared" / fingerprint(dependencies) if cache_dir else None
     if cache_entry is not None:
         require_output(cache_entry, context.root)
@@ -280,6 +367,10 @@ def prepare_facts(
                         | set(stock_summary["blocking_metrics"])
                     )
             summary["extensions"] = build_entities(context, connection, summary, mapping)
+            if provenance is not None:
+                summary.update(provenance)
+            if verify is not None and (errors := verify(connection, summary)):
+                raise ContractError("model mapping rejected: " + "; ".join(errors))
             for key, value in [("dependencies", dependencies), ("summary", summary)]:
                 connection.execute("INSERT INTO metadata VALUES (?,?)", (key, dumps(value)))
             connection.commit()

@@ -13,6 +13,68 @@
 
 ---
 
+## LLM gợi ý mapping cột, giai đoạn 1 (code + đo CPU) — 08/11/2026
+
+Kế hoạch: `.artifacts/plan-llm-schema-mapping.md`. Khi không bộ map README nào đọc được bán
+hàng, model gán nhãn cho từng cột từ một từ vựng đóng. Code viết các dòng README chuẩn tương
+ứng; các bộ map, builder và quality gate giữ nguyên và quyết định. **Chưa có lượt GPU nào.**
+
+- `src/data/normalization/llm_mapping.py`:
+  - **Schema** sinh riêng cho từng shop. Tên bảng và tên cột là key bắt buộc; nhãn cột và role
+    bảng là enum (31 nhãn, trong đó có nhãn mồi `unit_price`, `line_gross_amount`, `discount`,
+    `cost_price`, `other`), cùng 6 khai báo (grain, thông tin đơn, quy ước số, nhiều phần,
+    số lượng âm, xuất từ phần mềm). Các sheet cùng file và cùng cột được gộp thành một mục.
+  - `check_proposal`: role phải khớp cột; mỗi nhãn chỉ được gán cho một cột; bảng phụ không
+    được mang trạng thái hoặc tiền dòng, và không được trùng bộ cột với bảng đơn.
+  - `synthesize_readme`: chỉ thêm hoặc thay bullet `## Cột trong`, không xoá gì của README gốc.
+  - `verify_facts`: không có blocking/issue; ít nhất 50% đơn hoàn thành; ngày trong
+    [2000, ngày cuối README]; tiền là số nguyên VND; doanh thu dương. Cả 30 shop train gốc đều
+    qua.
+  - Proposal được cache theo hash (prompt, schema, model).
+- `prepare_facts(..., propose=None)`: nhánh model chỉ chạy khi mọi bộ map thất bại, **hoặc chỉ
+  đọc được tồn kho (snapshot)**. Có 1 lần thử lại kèm lý do bị từ chối; không đạt thì vẫn
+  `unsupported`, hoặc giữ snapshot như trước. Summary ghi `mapping_source` và proposal.
+- `relational.py`: thêm câu khai báo "File phụ, không chứa giao dịch bán." để gán role
+  `auxiliary`. README train không chứa câu này.
+- `src/agent/local.py`:
+  - `max_model_len` và `max_tokens` chỉnh được theo từng request.
+  - Lỗi của một request (ví dụ prompt quá dài) không còn làm chết worker.
+  - `MappingProposer` gọi model đã load.
+- `scripts/perturb_train.py`: tạo biến thể train `no_decl`, `synonyms` (bảng từ đồng nghĩa cố
+  định, không lấy từ public), `no_columns`, và `monthly_csv` (tách CSV theo tháng, giữ nguyên
+  byte từng dòng). Có `--check-work-dir` để xem bộ map cũ còn đọc được shop nào.
+- `scripts/eval_rule_ops.py`: thêm `--model`, `--cached-proposals` và `--baseline`.
+
+**Bộ map cũ trên biến thể** (30 shop train; gốc: 6 sales, 24 relational):
+
+| Biến thể | Còn đọc được | Bị hỏng |
+|---|---|---|
+| no_decl | 14 relational | 14 unsupported, 2 chỉ còn snapshot |
+| synonyms | 1 | 27 unsupported, 2 snapshot |
+| no_columns | 1 | 23 unsupported, 6 snapshot |
+| monthly_csv | 0 | 4/4 |
+
+**Proposal oracle trên CPU** (proposal đúng dựng từ README gốc; script debug trong
+`.artifacts/oracle/`, không commit). Kiểm tra riêng đường synthesize → bộ map → build, chưa
+tính sai số của model. Chạy trên biz_101 (CSV), 102 (XLSX sheet theo tháng), 107 (sổ không có
+mã đơn), 110 (CSV chỉ có header đơn):
+- `synonyms` và `no_columns`: 4/4 shop prepare được; phép tính cho **187/187 câu cùng đáp án**
+  với shop gốc, **0 sai**.
+- `monthly_csv`: biz_101 đạt (37 câu cùng đáp án). biz_110 vẫn `unsupported`: nhiều file chỉ
+  có header đơn là giới hạn của bộ map hiện tại, nên 30 câu abstain.
+
+**Kiểm tra:** `verify_runtime`: lint và format đạt, 582 tests đạt (11 test mới dùng model giả:
+proposal đúng thì prepare được và README trên đĩa không đổi; proposal sai trạng thái, trùng nhãn,
+sai role, thiếu cột hoặc thiếu bảng thì bị chặn; thử lại có phản hồi; replay cache).
+
+**Còn lại:**
+- Notebook `.artifacts/molab_llm_mapping.py` chạy 4 bước: train gốc bằng code mới (phải giữ
+  1.926 / 0); mỗi biến thể chạy không model rồi có model, so với shop gốc; smoke public.
+- Đổi `normalizer_sha256` làm mất hiệu lực cache facts cũ.
+- Runtime (`predict.sh`) chưa truyền `propose`, và planner vẫn dùng `max_model_len` 4096.
+
+---
+
 ## Guard A: abstain cho intent chưa có operator — 07/11/2026
 
 Phân tích lỗi baseline-v1 trên full train (1.235 đúng / 272 sai / 1.493 abstain, PA 0,321).

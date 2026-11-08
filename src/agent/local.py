@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 import os
 import time
@@ -79,40 +80,43 @@ def _worker(
             request = pipe.recv()
             if request is None:
                 break
-            started = time.monotonic()
-            # Two aggregates plus refs need more JSON than the S1 scalar draft.
-            token_budget = (
-                384 if request["schema"]["properties"]["aggregations"]["maxItems"] > 1 else 256
-            )
-            params = SamplingParams(
-                temperature=0,
-                seed=0,
-                max_tokens=token_budget,
-                guided_decoding=GuidedDecodingParams(json=guided_schema(request["schema"])),
-            )
-            # Qwen3 templates think by default, which the JSON grammar forbids; other
-            # templates ignore the unknown variable.
-            result = model.chat(
-                request["messages"],
-                params,
-                use_tqdm=False,
-                chat_template_kwargs={"enable_thinking": False},
-            )[0]
-            completion = result.outputs[0]
-            prompt_tokens = len(result.prompt_token_ids or [])
-            pipe.send(
-                {
-                    "text": completion.text,
-                    "finish_reason": completion.finish_reason,
-                    "usage": {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": len(completion.token_ids),
-                        "total_tokens": prompt_tokens + len(completion.token_ids),
-                    },
-                    "output_token_budget": token_budget,
-                    "seconds": time.monotonic() - started,
-                }
-            )
+            try:
+                started = time.monotonic()
+                # Two aggregates plus refs need more JSON than the S1 scalar draft.
+                token_budget = request.get("max_tokens") or (
+                    384 if request["schema"]["properties"]["aggregations"]["maxItems"] > 1 else 256
+                )
+                params = SamplingParams(
+                    temperature=0,
+                    seed=0,
+                    max_tokens=token_budget,
+                    guided_decoding=GuidedDecodingParams(json=guided_schema(request["schema"])),
+                )
+                # Qwen3 templates think by default, which the JSON grammar forbids; other
+                # templates ignore the unknown variable.
+                result = model.chat(
+                    request["messages"],
+                    params,
+                    use_tqdm=False,
+                    chat_template_kwargs={"enable_thinking": False},
+                )[0]
+                completion = result.outputs[0]
+                prompt_tokens = len(result.prompt_token_ids or [])
+                pipe.send(
+                    {
+                        "text": completion.text,
+                        "finish_reason": completion.finish_reason,
+                        "usage": {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": len(completion.token_ids),
+                            "total_tokens": prompt_tokens + len(completion.token_ids),
+                        },
+                        "output_token_budget": token_budget,
+                        "seconds": time.monotonic() - started,
+                    }
+                )
+            except Exception as exc:  # one bad request (e.g. prompt too long) keeps the engine
+                pipe.send({"request_error": f"{type(exc).__name__}: {exc}"})
     except Exception as exc:
         pipe.send({"error": f"{type(exc).__name__}: {exc}"})
     finally:
@@ -135,7 +139,14 @@ def model_identity(path: Path) -> dict:
 class LocalModel:
     """Packaged weights only: no model ID, downloader, HTTP client or remote code."""
 
-    def __init__(self, path: Path, *, load_timeout: float = 900, tensor_parallel: int = 1):
+    def __init__(
+        self,
+        path: Path,
+        *,
+        load_timeout: float = 900,
+        tensor_parallel: int = 1,
+        max_model_len: int = MAX_MODEL_LEN,
+    ):
         started = time.monotonic()
         identity = model_identity(path)
         if load_timeout <= 0 or tensor_parallel < 1:
@@ -144,7 +155,7 @@ class LocalModel:
             **identity,
             "backend": "vllm",
             "load_timeout_seconds": load_timeout,
-            "max_model_len": MAX_MODEL_LEN,
+            "max_model_len": max_model_len,
             "gpu_memory_utilization": GPU_MEMORY_UTILIZATION,
             "max_output_tokens": 256,
             "max_difference_output_tokens": 384,
@@ -161,7 +172,7 @@ class LocalModel:
             args=(
                 child,
                 str(path.resolve()),
-                MAX_MODEL_LEN,
+                max_model_len,
                 GPU_MEMORY_UTILIZATION,
                 tensor_parallel,
             ),
@@ -187,12 +198,16 @@ class LocalModel:
         if "error" in result:
             self.close()
             raise ContractError(result["error"])
+        if "request_error" in result:
+            raise ContractError(result["request_error"])
         return result
 
-    def generate(self, messages: list[dict], schema: dict, timeout: float) -> dict:
+    def generate(
+        self, messages: list[dict], schema: dict, timeout: float, *, max_tokens: int | None = None
+    ) -> dict:
         if not self.process.is_alive():
             raise ContractError("local_model_worker_unavailable")
-        self.pipe.send({"messages": messages, "schema": schema})
+        self.pipe.send({"messages": messages, "schema": schema, "max_tokens": max_tokens})
         return self._receive(timeout)
 
     def close(self) -> None:
@@ -203,3 +218,31 @@ class LocalModel:
             self.process.kill()
             self.process.join(timeout=2)
         self.pipe.close()
+
+
+class MappingProposer:
+    """Column-meaning proposals (``llm_mapping``) from the already loaded planner model."""
+
+    def __init__(self, model: LocalModel, *, timeout: float = 600):
+        self.model, self.timeout = model, timeout
+        self.model_id = model.metadata["sha256"]
+        self.calls: list[dict] = []
+
+    def __call__(self, prompt: str, schema: dict) -> dict:
+        columns = sum(
+            len(t["properties"]["columns"]["properties"])
+            for t in schema["properties"]["tables"]["properties"].values()
+        )
+        result = self.model.generate(
+            [{"role": "user", "content": prompt}],
+            schema,
+            self.timeout,
+            max_tokens=256 + 16 * columns,
+        )
+        self.calls.append({k: v for k, v in result.items() if k != "text"})
+        if result["finish_reason"] != "stop":
+            raise ContractError(f"mapping proposal incomplete: {result['finish_reason']}")
+        try:
+            return json.loads(result["text"])
+        except ValueError as exc:
+            raise ContractError("mapping proposal is not JSON") from exc

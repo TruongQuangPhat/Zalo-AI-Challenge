@@ -228,6 +228,9 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
             # An explicit but unresolved declaration must not fall through to the
             # older auxiliary filename vocabulary and hide financial overlap.
             raise ContractError("delivery_family_mapping_or_authority_unsupported")
+        elif "file phu, khong chua giao dich ban" in normalized(body):
+            # Explicit README authority (also written for accepted model proposals).
+            role = "auxiliary"
         elif {"order_id", "ordered_at", "status"} <= fields.keys():
             role = "combined" if {"amount", "item"} <= fields.keys() else "header"
         elif {"order_id", "amount"} <= fields.keys() and ({"product_id", "item"} & fields.keys()):
