@@ -185,6 +185,26 @@ Sửa sau lượt này (replay trên log của chính lượt này: 4 sai → ab
 - Chưa kiểm chứng: TP=2 trên 2 × 32 GB (cấu hình BTC) hoặc FP8; thời gian trên RTX 5090.
 - `verify_runtime`: lint và format đạt, 568 tests đạt.
 
+**Giảm abstain, đợt 1 (cùng ngày).** Phân tích 993 câu abstain của lượt 14B: 412 câu do
+validator từ chối plan vì câu hỏi có điều kiện chưa có phép tính, 118 câu do biz_117 không
+prepare được, phần còn lại là công nợ/nhập hàng/tồn kho/kê đơn/đơn giá (cần sửa khâu chuẩn
+hoá) và các biến thể cách hỏi của phép tính đã có.
+
+- **biz_117 prepare được:** từ khoá file phụ của nhánh relational thêm `giaohang` (sổ giao
+  hàng) và `hanno` (sổ hạn nợ). Kết quả 14.992 đơn, 33.332 dòng hàng, 0 issue; phép tính trả
+  đúng 64/118 câu của shop này. (Public dev_004 cùng mẫu README vẫn lỗi ở bước khác; không sửa
+  theo dữ liệu public.)
+- **Phép tính mới:** doanh thu theo kênh bán (phone / store / zalo_oa: một số, list hai kênh,
+  hoặc tỉ trọng %), số mặt hàng có mặt ở ≥ N đơn.
+- **Mở rộng cách hỏi:** "doanh thu **đạt** X trở lên", "tháng **liền trước**", MTD "tháng này
+  … cùng kỳ tháng trước" (so với cùng số ngày tháng trước, §2), "khách **thuộc** nhóm X",
+  "mua **nhiu** đơn nhất", "số đơn mua nhiều nhất".
+- Đo bằng `scripts/eval_rule_ops.py`: **18 phép tính, 1.926 đúng / 0 sai** (trước 1.732).
+  Tăng trưởng 42 → 122, khách 87 → 110, kênh bán 25 mới.
+- Ghép với log lượt 14B (đã áp sửa guard): **PA train ước tính 0,715**, abstain 993 → 856,
+  0 câu sai. Chưa phải lượt chạy thật.
+- `verify_runtime`: lint và format đạt, 571 tests đạt.
+
 ---
 
 ## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026

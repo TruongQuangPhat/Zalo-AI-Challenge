@@ -94,3 +94,29 @@ def test_item_group_share_uses_the_whole_shop_denominator(semantic_source):
     )
     text = "Tháng 1/2026 nhóm trà sữa chiếm bao nhiêu % doanh thu?"
     assert answer(context, text) == {"id": "synthetic", "type": "percent", "answer": 30.0}
+
+
+def test_items_in_at_least_n_valid_orders(semantic_source):
+    context = semantic_source(rows=ROWS)
+    # Item A sits in orders 001 and 003; Item C's order 004 is returned (§1).
+    text = "Tháng 1/2026 có mấy mặt hàng được mua ở 2 đơn khác nhau trở lên?"
+    assert answer(context, text)["answer"] == 1
+
+
+def test_reaching_a_revenue_bound_counts_as_inclusive(semantic_source):
+    text = "Tháng 1/2026 có mấy ngày doanh thu đạt 60 đồng trở lên?"
+    assert answer(semantic_source(rows=ROWS), text)["answer"] == 2
+
+
+def test_channel_revenue_and_share(semantic_source):
+    context = semantic_source(
+        extra_columns=["channel"],
+        readme_extra="- **channel**: sales channel\n",
+        rows=[
+            ["1", "01/01/2026", "Xong", "30", "A", "zalo_oa"],
+            ["2", "02/01/2026", "Xong", "70", "B", "store"],
+        ],
+    )
+    assert answer(context, "Tháng 1/2026 doanh thu các đơn bán qua Zalo OA?")["answer"] == 30
+    share = "Tháng 1/2026 đơn bán tại quầy chiếm bao nhiêu % doanh thu?"
+    assert answer(context, share) == {"id": "synthetic", "type": "percent", "answer": 70.0}

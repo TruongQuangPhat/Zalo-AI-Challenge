@@ -37,7 +37,7 @@ STOCK = r"\b(?:kho|ton|con (?:lai|bao|may|nhieu)|cuoi ngay|het hom nay)\b"
 DAY_COUNT = r"\b(?:so ngay|may ngay|bao nhieu ngay|bao nhiu ngay|bn ngay|bnhiu ngay|nhieu ngay)\b"
 AMOUNT = r"(\d[\d.,]*)\s*(trieu|tr|k|nghin|ngan)?\b"
 COMPARATORS = (
-    (r"\btu " + AMOUNT + r"(?: dong| d| vnd)? tro len\b", ">="),
+    (r"\b(?:tu|dat) " + AMOUNT + r"(?: dong| d| vnd)? tro len\b", ">="),
     (r"\btu " + AMOUNT + r"(?: dong| d| vnd)? tro xuong\b", "<="),
     (r"(?:>=|≥)\s*" + AMOUNT, ">="),
     (r"(?:<=|≤)\s*" + AMOUNT, "<="),
@@ -66,6 +66,8 @@ def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
         _threshold_count,
         _best_period,
         _method_revenue,
+        _channel_revenue,
+        _items_in_orders,
         _cancellation,
         _product_ranking,
         _group_revenue,
@@ -566,9 +568,10 @@ def _group_label(context, text):
     if not found:
         return None
     label, kind = max(found, key=lambda x: len(x[0]))
-    if kind == "customer" and not re.search(r"\bkhach(?: hang)? nhom\b", text):
+    customer_cue = r"\bkhach(?: hang)?(?: thuoc)? nhom\b"
+    if kind == "customer" and not re.search(customer_cue, text):
         return None
-    if kind == "item" and re.search(r"\bkhach(?: hang)? nhom\b", text):
+    if kind == "item" and re.search(customer_cue, text):
         return None
     return label, kind
 
@@ -630,8 +633,14 @@ def _customer_ops(question, context, text):
         text,
     ):
         return None
-    money = re.search(r"\b(?:nhieu tien|chi tieu|tong tien mua|chi nhieu|mua nhieu tien)\b", text)
-    orders_rank = re.search(r"\b(?:nhieu don nhat|mua nhieu don|mua nhieu lan)\b", text)
+    money = re.search(
+        r"\b(?:nhieu tien|nhiu tien|chi tieu|tong tien mua|chi nhieu|mua nhieu tien)\b", text
+    )
+    orders_rank = re.search(
+        r"\b(?:nhieu|nhiu) (?:don|don hang|lan)(?: mua)? nhat\b|\bmua (?:nhieu|nhiu) (?:don|lan)\b"
+        r"|\bso don(?: mua)? (?:nhieu|nhiu) nhat\b",
+        text,
+    )
     count = re.search(
         r"\b(?:it nhat|tu|>=|≥)\s*(\d+) (?:don|lan)(?: tro len)?\b|(?:≥|>=)\s*(\d+) don\b", text
     )
@@ -691,7 +700,10 @@ def _growth(question, context, text):
         return None
     expressions = _literal_windows(question)
     last_year = re.search(r"\b(?:cung ky|cung thang) nam (?:truoc|ngoai)\b|\bnam ngoai\b", text)
-    previous = re.search(r"\b(?:thang|th) (?:truoc|trc)\b|\bcung ky thang\b", text)
+    previous = re.search(r"\b(?:thang|th)(?: lien)? (?:truoc|trc|roi)\b|\bcung ky thang\b", text)
+    # "tháng này ... cùng kỳ tháng trước": the previous month is the comparison, not a window.
+    if previous and sorted(e["kind"] for e in expressions) == ["current_month", "previous_month"]:
+        expressions = [{"kind": "current_month"}]
     if len(expressions) != 1 or bool(last_year) == bool(previous):
         return None
     current = expressions[0]
@@ -876,3 +888,91 @@ def _trend(question, context, text):
     values = [_executor_value(context, c, rounded=False) for c in checks]
     rising = all(b > a for a, b in zip(values, values[1:], strict=False))
     return _decision("trend", checks[0], rising, "boolean")
+
+
+CHANNELS = {
+    "phone": (r"\bqua dien thoai\b", {"phone"}),
+    "store": (r"\btai quay\b", {"store", "counter"}),
+    "zalo_oa": (r"\bzalo(?: oa)?\b", {"zalo_oa", "zalo"}),
+}
+
+
+def _channel_revenue(question, context, text):
+    """§1 revenue by sales channel: one value, two in question order, or a share."""
+    positions = sorted(
+        (m.start(), key)
+        for key, (pattern, _) in CHANNELS.items()
+        for m in re.finditer(pattern, text)
+    )
+    found = list(dict.fromkeys(key for _, key in positions))
+    if not 1 <= len(found) <= 2 or not re.search(r"\b(?:doanh thu|dthu|revenue|tien)\b", text):
+        return None
+    share = bool(re.search(r"%|\b(?:phan tram|ti trong|ty trong|chiem)\b", text))
+    rest = text
+    for key in found:
+        rest = re.sub(CHANNELS[key][0], " ", rest)
+    if (share and len(found) != 1) or re.search(
+        r"\b(nhom|khach|ca sang|ca chieu|nhan vien|tien mat|chuyen khoan|cod|huy|tra hang|"
+        r"so voi|tang|giam|trung binh|binh quan|nhat|top|mat hang|san pham)\b",
+        rest,
+    ):
+        return None
+    with closing(context.prepared.connect()) as conn:
+        channels = dict(conn.execute("SELECT order_key,channel FROM order_scopes"))
+    if not channels:
+        return None
+    check = _window(question, context)
+    if check is None:
+        return None
+    answer_type = "percent" if share else "number" if len(found) == 1 else "list"
+    if isinstance(check, tuple):
+        return _decision("channel_revenue", check, None, answer_type)
+    roles = set(check["contract"].get("row_roles") or {"sale_item", "service_fee"})
+    totals, whole = dict.fromkeys(found, Decimal(0)), Decimal(0)
+    for row in _lines(context, check):
+        order, amount, role = row[0], row[2], row[3]
+        if role not in roles or amount is None:
+            continue
+        if order not in channels:
+            raise ContractError("order_channel_missing")
+        value = Decimal(str(amount))
+        whole += value
+        for key in found:
+            if plain(channels[order] or "") in CHANNELS[key][1]:
+                totals[key] += value
+    if share:
+        if not whole:
+            return None
+        value = _percent(totals[found[0]] * 100 / whole)
+    else:
+        values = [_money(totals[key]) for key in found]
+        value = values[0] if len(values) == 1 else values
+    return _decision("channel_revenue", check, value, answer_type, channels=found)
+
+
+def _items_in_orders(question, context, text):
+    """Count products present in at least N distinct valid orders (§1 order policy)."""
+    found = re.search(
+        r"\b(?:mat hang|san pham|mon)\b.*\b(?:o|trong) (?:it nhat |>= ?|≥ ?)?(\d+) don"
+        r"(?: hang)?(?: khac nhau)?(?: tro len)?\b",
+        text,
+    )
+    if not found or not re.search(r"\b(?:may|bao nhieu|bn|bnhiu|dem so|so)\b", text):
+        return None
+    if not re.search(r"\btro len\b|>=|≥|\bit nhat\b", text) or re.search(GROUP_QUALIFIERS, text):
+        return None
+    least = int(found[1])
+    check = _window(question, context)
+    if check is None:
+        return None
+    if isinstance(check, tuple):
+        return _decision("items_in_orders", check, None, "number")
+    orders = defaultdict(set)
+    for row in _lines(context, check):
+        if row[3] != "sale_item":
+            continue
+        if row[4] is None:
+            raise ContractError("sale_line_product_unknown")
+        orders[row[4]].add(row[0])
+    count = sum(1 for v in orders.values() if len(v) >= least)
+    return _decision("items_in_orders", check, count, "number", least=least)

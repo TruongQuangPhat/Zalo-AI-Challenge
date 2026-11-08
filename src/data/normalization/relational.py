@@ -243,7 +243,7 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
         elif any(
             v.startswith("he so: so don vi co ban") for v in definitions.values()
         ) or re.search(
-            r"nhap|purchase|tonkho|stock|thekho|donvi|quydoi|conversion|thuoc|drug|nhacungcap|supplier|nhanvien|chinhanh|cash|soquy|thanhtoan|payment|phongban|phieugiao|congno|lichsugia|banggia|lohang|calam|chiphi|phieuthu",
+            r"nhap|purchase|tonkho|stock|thekho|donvi|quydoi|conversion|thuoc|drug|nhacungcap|supplier|nhanvien|chinhanh|cash|soquy|thanhtoan|payment|phongban|phieugiao|giaohang|congno|hanno|lichsugia|banggia|lohang|calam|chiphi|phieuthu",
             token(table + name),
         ):
             role = "auxiliary"
