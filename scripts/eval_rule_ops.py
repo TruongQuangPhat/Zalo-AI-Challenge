@@ -28,7 +28,7 @@ from src.semantics.answerability import prepare_semantics
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--answers", type=Path, required=True)
+    parser.add_argument("--answers", type=Path, help="omit for an unlabelled smoke run")
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--verbose", action="store_true", help="print every non-correct answer")
     args = parser.parse_args(argv)
@@ -57,6 +57,14 @@ def main(argv: list[str] | None = None) -> None:
         decision = answer_by_rule(question, context)
         if decision is not None:
             rows.append((decision["plan"]["op"], q, decision["answer"]))
+    if args.answers is None:
+        counts = collections.Counter(op for op, _, _ in rows)
+        for op, count in sorted(counts.items()):
+            print(f"{op:20s} answered {count}")
+        (args.work_dir / "predictions.jsonl").write_text(
+            "".join(json.dumps(a, ensure_ascii=False) + "\n" for _, _, a in rows)
+        )
+        return
     gold = {json.loads(line)["id"]: line for line in args.answers.open()}
     answers, predictions = args.work_dir / "answers.jsonl", args.work_dir / "predictions.jsonl"
     answers.write_text("".join(gold[a["id"]] for _, _, a in rows))
