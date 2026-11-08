@@ -104,6 +104,34 @@ chưa xác nhận được.
   cần lượt GPU tiếp theo để đo.
 - `verify_runtime`: lint và format đạt, 547 tests đạt.
 
+## Phép tính theo luật, không qua model — 08/11/2026
+
+`src/agent/rule_ops.py` (`answer_by_rule`) chạy trong `LocalPlanner.decide`, trước guard và
+trước LLM. Mỗi phép tính nhận diện một dạng câu, kiểm tra facts đã chuẩn hoá có đủ dữ liệu
+không, rồi tính bằng Decimal theo hợp đồng doanh thu §1 (status policy, row roles) và kỳ
+`_literal_windows` + `preflight`. Không khớp hoặc dữ liệu thiếu thì trả `None` và đường cũ
+xử lý. Kết quả vẫn qua bước kiểm tra kiểu đáp án (Guard D).
+
+| Phép tính | Luật | Train đúng / sai |
+|---|---|---:|
+| `size_quantity` | Cà phê: size M/L = tên kết thúc `(M)`/`(L)`; dừng nếu có dòng bán thiếu mặt hàng | 37 / 0 |
+| `unit_quantity` | §3 "bán được bao nhiêu <đơn vị>": cộng số lượng cơ bản của hàng có đơn vị đó, hoặc của một mặt hàng | 107 / 0 |
+| `threshold_orders`, `threshold_days` | Số đơn / số ngày có doanh thu qua ngưỡng; §2 "từ N trở lên" gồm N, "trên/dưới N" không gồm | 25 / 0 |
+| `best_day`, `best_month` | Ngày/tháng có doanh thu cao nhất hoặc nhiều đơn nhất; hoà lấy ngày sớm nhất | 53 / 0 |
+| `method_revenue` | §1 doanh thu theo hình thức thanh toán ghi trên đơn; hai hình thức → list theo thứ tự hỏi | 10 / 0 |
+
+- Đo offline trên CPU bằng facts train đã prepare (cache), chấm bằng `src.cli evaluate`:
+  **232 đúng / 0 sai**. So với lượt GPU 1.5B: 208 câu abstain → đúng, 10 câu sai → đúng,
+  0 câu đúng bị mất. PA dự kiến 0,402 → **0,478**, chưa tính guard từ khoá (−18 câu sai).
+- Ba vòng sửa trước khi đạt kết quả trên: dòng bán thiếu mặt hàng ở biz_112 làm đếm thiếu;
+  đơn vị trùng từ thông dụng ("đơn", "tiền", "bao" trong "bao nhiêu"); câu tồn kho; "đơn trả
+  bằng X" (thanh toán) bị hiểu là đơn trả hàng.
+- Không làm trong đợt này: xác định ngành từ README (README không đủ tin cậy; phép tính tự
+  kiểm tra dữ liệu thay vì dựa vào ngành), thuốc kê đơn/hoạt chất, đợt giao, đơn giá ngày D,
+  nhân viên, giá vốn/lãi, công nợ/nhập hàng/tồn kho mở rộng. Các mục này giữ guard abstain.
+- Public chưa đo (không có nhãn); các luật chỉ có trong public chưa có phép tính.
+- `verify_runtime`: lint và format đạt, 559 tests đạt.
+
 ---
 
 ## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026

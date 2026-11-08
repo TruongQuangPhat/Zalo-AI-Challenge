@@ -209,6 +209,13 @@ class LocalPlanner:
         }
 
     def decide(self, question: Question, *, context: BusinessContext) -> dict:
+        from src.agent.rule_ops import answer_by_rule
+
+        # Rulebook operators the QueryPlan cannot express answer first, without the model.
+        if (ruled := answer_by_rule(question, context)) is not None:
+            if expected := shape_mismatch(question, ruled["answer"]["type"]):
+                return _suppress(ruled, question, "guard:answer_shape", expected=expected)
+            return ruled
         if intent := unsupported_intent(question):
             reason = f"guard:unsupported_intent:{intent}"
             return {
