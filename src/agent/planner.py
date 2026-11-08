@@ -194,10 +194,11 @@ def _guard_unbound_entity(decision: dict, question: Question, context: BusinessC
 class LocalPlanner:
     name = "local-planner"
 
-    def __init__(self, model, *, attempts: int = 2, timeout: float = 120):
+    def __init__(self, model, *, attempts: int = 2, timeout: float = 120, rule_ops: bool = True):
         if not 1 <= attempts <= 2 or timeout <= 0:
             raise ContractError("planner requires 1..2 attempts and a positive question timeout")
         self.model, self.attempts, self.timeout = model, attempts, timeout
+        self.rule_ops = rule_ops
 
     @property
     def metadata(self) -> dict:
@@ -205,6 +206,7 @@ class LocalPlanner:
             "prompt_version": PROMPT_VERSION,
             "attempts": self.attempts,
             "question_timeout_seconds": self.timeout,
+            "rule_ops": self.rule_ops,
             "model": self.model.metadata,
         }
 
@@ -212,7 +214,7 @@ class LocalPlanner:
         from src.agent.rule_ops import answer_by_rule
 
         # Rulebook operators the QueryPlan cannot express answer first, without the model.
-        if (ruled := answer_by_rule(question, context)) is not None:
+        if self.rule_ops and (ruled := answer_by_rule(question, context)) is not None:
             if expected := shape_mismatch(question, ruled["answer"]["type"]):
                 return _suppress(ruled, question, "guard:answer_shape", expected=expected)
             return ruled

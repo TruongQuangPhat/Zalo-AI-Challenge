@@ -50,7 +50,7 @@ def test_best_day_takes_highest_revenue_and_earliest_tie(semantic_source):
 @pytest.mark.parametrize(
     "text",
     [
-        "Doanh thu tháng 1/2026?",
+        "Doanh thu tháng 1/2026 không tính hàng A?",
         "Tháng 1/2026 khách Lan có bao nhiêu đơn từ 60 trở lên doanh thu?",
         "Ngày nào trong tháng 1/2026 mặt hàng A bán nhiều nhất?",
     ],
@@ -65,3 +65,32 @@ def test_unrecognized_or_qualified_questions_fall_back_to_the_planner(semantic_s
 )
 def test_amounts_parse_vietnamese_grouping_and_scales(text, expected):
     assert _amount(re.search(AMOUNT, text)) == expected
+
+
+def test_whole_shop_revenue_order_count_and_aov_follow_the_revenue_policy(semantic_source):
+    context = semantic_source(rows=ROWS)
+    # Returned order 004 is excluded; the shipping order 003 counts (§1).
+    assert answer(context, "Doanh thu tháng 1/2026?")["answer"] == 239
+    assert answer(context, "Tháng 1/2026 có bao nhiêu đơn?")["answer"] == 4
+    assert answer(context, "Tháng 1/2026 trung bình mỗi đơn bao nhiêu tiền?")["answer"] == 60
+
+
+def test_cancellation_rate_divides_by_every_placed_order(semantic_source):
+    rows = [*ROWS, ["006", "02/01/2026", "Huỷ", "10", "Item A"]]
+    context = semantic_source(rows=rows)
+    assert answer(context, "Tháng 1/2026 có bao nhiêu đơn bị huỷ?")["answer"] == 1
+    # 1 cancelled of 6 placed orders, all statuses included.
+    assert answer(context, "Tỉ lệ huỷ đơn tháng 1/2026 là bao nhiêu %?")["answer"] == 16.67
+
+
+def test_item_group_share_uses_the_whole_shop_denominator(semantic_source):
+    context = semantic_source(
+        extra_columns=["group"],
+        readme_extra="- **group**: product group\n",
+        rows=[
+            ["1", "01/01/2026", "Xong", "30", "A", "Trà sữa"],
+            ["2", "02/01/2026", "Xong", "70", "B", "Khác"],
+        ],
+    )
+    text = "Tháng 1/2026 nhóm trà sữa chiếm bao nhiêu % doanh thu?"
+    assert answer(context, text) == {"id": "synthetic", "type": "percent", "answer": 30.0}

@@ -132,6 +132,37 @@ xử lý. Kết quả vẫn qua bước kiểm tra kiểu đáp án (Guard D).
 - Public chưa đo (không có nhãn); các luật chỉ có trong public chưa có phép tính.
 - `verify_runtime`: lint và format đạt, 559 tests đạt.
 
+**Mở rộng cùng ngày: 16 phép tính, 1.732 đúng / 0 sai trên train.** Thêm theo rulebook:
+huỷ đơn và tỉ lệ huỷ (§1, mẫu số mọi đơn đặt), mặt hàng bán chạy / doanh thu cao nhất (§3,
+hoà theo mã), doanh thu và tỉ trọng nhóm hàng / nhóm khách (§1), khách chi nhiều nhất / nhiều
+đơn nhất / số khách mua từ N đơn (§3), tăng trưởng so tháng trước hoặc cùng kỳ năm trước
+(§1, §2), hiệu ứng tăng giá (§5), doanh thu một mặt hàng, xu hướng 3 tháng, và doanh thu / số
+đơn / AOV cả shop qua executor đã kiểm chứng (`_compute`) cùng guard phạm vi
+`_check_question_scope`.
+
+| Phép tính | Đúng | Phép tính | Đúng |
+|---|---:|---|---:|
+| whole_shop | 739 | best_day / best_month | 90 / 15 |
+| cancellation | 227 | product_revenue | 75 |
+| group_revenue | 170 | price_effect | 48 |
+| unit_quantity | 107 | growth | 42 |
+| customer | 87 | product_ranking | 41 |
+| size_quantity | 37 | trend | 19 |
+| threshold (đơn/ngày) | 25 | method_revenue | 10 |
+
+- Đo bằng `scripts/eval_rule_ops.py` (facts train prepare có cache trong `.artifacts/`, chấm
+  bằng evaluator): **0 câu sai**. So với baseline-v1: 606 abstain → đúng, 164 sai → đúng,
+  962 đúng giữ nguyên.
+- Các lỗi đã sửa trước khi đạt 0 sai: shop không có số lượng quy đổi (biz_102/103/121/122) chỉ
+  được dùng số lượng bán khi hàng có đơn vị cơ bản và tên không có quy cách đóng gói; "thuốc
+  kê đơn" không được rơi về doanh thu cả shop; câu có kỳ chưa parse được không qua phép tính nào.
+- **Ước tính PA train ≈ 0,654** khi ghép phép tính với guard trên dự đoán baseline (chưa phải
+  lượt chạy thật). Cần một lượt GPU để xác nhận.
+- `LocalPlanner(rule_ops=False)` tắt phép tính, dùng trong test đường model.
+- Rủi ro: regex nhận diện viết theo cách hỏi của train; public/private hỏi khác thì phép tính
+  không nhận và rơi về planner/guard (abstain), không trả lời bừa. Public chưa đo.
+- `verify_runtime`: lint và format đạt, 562 tests đạt.
+
 ---
 
 ## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026

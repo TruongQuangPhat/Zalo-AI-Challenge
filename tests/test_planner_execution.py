@@ -327,7 +327,8 @@ def test_validator_rejects_semantic_scope_dependencies_and_injection(semantic_so
 def test_retry_is_bounded_and_never_erases_unsupported_intent(semantic_source):
     context = semantic_source()
     model = ScriptedModel("{", dumps(draft("order_count")))
-    result = LocalPlanner(model).decide(question(question="Số đơn tháng này?"), context=context)
+    planner = LocalPlanner(model, rule_ops=False)  # exercise the model path itself
+    result = planner.decide(question(question="Số đơn tháng này?"), context=context)
     assert result["answer"]["answer"] == 2 and model.calls == 2
     bad = draft()
     bad["aggregations"][0]["filters"] = ["item=A"]
