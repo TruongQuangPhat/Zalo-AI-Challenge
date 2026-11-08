@@ -88,10 +88,15 @@ Thiếu source/coverage không tự đoán dữ liệu; server preflight quyết
 # Intents whose rulebook definition has no executor operator yet. Without one, a plan
 # silently falls back to a whole-business metric, so abstain before planning.
 UNSUPPORTED_INTENTS = {
-    "unit_price": r"\b(don gia|gia ban)\b|\bgia (mot|1) ",
+    "unit_price": (
+        r"\b(don gia|gia ban)\b|\bgia (mot|1) "
+        r"|\bgia (?:bao nhieu|bao nhiu|bn|bnhiu) (?:tien )?(?:mot|1)\b"
+    ),
     "size_quantity": r"\bsize (m|l)\b",
     "delivery_batches": r"\bdot (giao|hang)\b|\b(may|bao nhieu|bao nhiu|bn|bnhiu|nhieu|so) dot\b",
     "prescription": r"\bke don\b",
+    # Sources record a status, never why an order was cancelled.
+    "cancel_reason": r"\bhuy vi\b|\bly do\b",
     "day_count_threshold": (
         r"\b(so ngay|may ngay|bao nhieu ngay|bao nhiu ngay|bn ngay|bnhiu ngay|nhieu ngay)\b"
     ),
@@ -117,8 +122,10 @@ def unsupported_intent(question: Question) -> str | None:
 _ASK = r"(?:bao nhieu|bao nhiu|bnhiu|bnhieu|bn|nhieu)"
 # Question wording that fixes the answer shape regardless of the plan.
 _LIST_CUES = (
-    r"\b(lan luot|moi loai|moi ben|tung thang|moi thang)\b",
-    _ASK + r"\b.*\b" + _ASK + r"\b",
+    # "tinh moi loai do uong" means all items, not one value per kind.
+    r"\b(lan luot|(?<!tinh )(?<!cong )moi loai|moi ben|tung thang|moi thang)\b",
+    # Two questions in one sentence, unless a single percentage compares two periods.
+    r"^(?!.*(?:%|\bphan tram\b)).*\b" + _ASK + r"\b.*\b" + _ASK + r"\b",
     r"\bva (?:doanh thu |dthu |so don )?(?:cac )?don\b",
     r"\b(?:top )?(?:[2-9]|10|hai|ba|bon|nam) (?:mat hang|mon|san pham|khach|nhan vien)\b",
     r"\bnhung (?:mat hang|mon|san pham|khach)\b",
@@ -163,9 +170,26 @@ def _suppress(decision: dict, question: Question, reason: str, **details) -> dic
     }
 
 
+_UNIT_QUANTITY = (
+    r"\b(?:bao nhieu|bao nhiu|bn|bnhiu|may|nhieu|so)\s+"
+    r"(?:ly|chai|lon|hop|cay|thung|goi|vien|dia|phan|kg|m3|cuon|tuyp|noi)\b(?! nhi| tram)"
+)
+
+
 def _guard_answer(decision: dict, question: Question, context: BusinessContext) -> dict:
+    from src.semantics.rulebook import question_plain
+
     if expected := shape_mismatch(question, decision["answer"]["type"]):
         return _suppress(decision, question, "guard:answer_shape", expected=expected)
+    metrics = {a.get("metric_id") for a in decision["plan"].get("aggregations", [])}
+    # "Mấy ly/chai…" asks a quantity; an order count or revenue cannot answer it.
+    if (
+        decision["answer"]["type"] == "number"
+        and re.search(_UNIT_QUANTITY, question_plain(question.question))
+        and metrics
+        and not metrics & {"quantity", "stock_balance", "inventory_on_hand"}
+    ):
+        return _suppress(decision, question, "guard:unit_quantity_metric", metrics=sorted(metrics))
     return _guard_unbound_entity(decision, question, context)
 
 

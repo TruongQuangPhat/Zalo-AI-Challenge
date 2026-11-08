@@ -163,6 +163,28 @@ hoà theo mã), doanh thu và tỉ trọng nhóm hàng / nhóm khách (§1), kh�
   không nhận và rơi về planner/guard (abstain), không trả lời bừa. Public chưa đo.
 - `verify_runtime`: lint và format đạt, 562 tests đạt.
 
+**Lượt GPU Qwen3-14B, full train (molab, RTX PRO 6000 96 GB, commit `ff93bf7`).** BF16, TP=1,
+thinking tắt, load model 67 giây; 3000/3000 câu, 0 lỗi; tổng 6.432 giây (prepare 722 giây).
+Chấm bằng `src.cli evaluate`: **2.003 đúng / 4 sai / 993 abstain, PA 0,6663**, precision khi
+trả lời 99,8%.
+
+| Nguồn | Đúng | Sai | Abstain | Planner+exec TB / p95 |
+|---|---:|---:|---:|---|
+| Phép tính theo luật | 1.720 | 0 | 12 | 0,09 / 0,24 giây |
+| Qwen3-14B | 283 | 4 | 823 | 4,95 / 7,6 giây |
+| Guard trước model | 0 | 0 | 158 | ~0 |
+
+Sửa sau lượt này (replay trên log của chính lượt này: 4 sai → abstain, 12 abstain → đúng,
+**PA 0,6663 → 0,6717**, 0 câu sai):
+- Guard D bắt nhầm "tính **mọi loại** đồ uống" và câu % hiệu ứng tăng giá (hai lần "bao nhiêu")
+  thành câu hỏi list, chặn 12 câu phép tính đã trả đúng.
+- `unit_price` thêm "giá bao nhiêu một …"; thêm intent `cancel_reason` ("huỷ vì …", nguồn
+  không ghi lý do huỷ).
+- Guard sau plan `guard:unit_quantity_metric`: câu "mấy ly/chai/cây…" mà plan tính số đơn hoặc
+  doanh thu thì abstain (loại trừ "phần trăm").
+- Chưa kiểm chứng: TP=2 trên 2 × 32 GB (cấu hình BTC) hoặc FP8; thời gian trên RTX 5090.
+- `verify_runtime`: lint và format đạt, 568 tests đạt.
+
 ---
 
 ## Dọn project theo Docker guide, chuyển sang vLLM — 07/11/2026

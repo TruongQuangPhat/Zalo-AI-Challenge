@@ -1635,3 +1635,47 @@ def test_intents_without_an_operator_are_recognized(text, intent):
     from src.agent.planner import unsupported_intent
 
     assert unsupported_intent(question(question=text)) == intent
+
+
+@pytest.mark.parametrize(
+    "text,answer_type,expected",
+    [
+        ("Trong tháng 5/2026, số ly size L bán được, tính mọi loại đồ uống?", "number", None),
+        (
+            "Trà vải đổi giá ngày 24/05/2026, 30 ngày bán bao nhiêu, nhiều hơn bao nhiêu %?",
+            "percent",
+            None,
+        ),
+        ("Doanh thu tháng 5 và tháng 6 bao nhiêu, số đơn bao nhiêu?", "number", "list"),
+    ],
+)
+def test_all_kinds_and_single_percentages_are_not_list_questions(text, answer_type, expected):
+    from src.agent.planner import shape_mismatch
+
+    assert shape_mismatch(question(question=text), answer_type) == expected
+
+
+@pytest.mark.parametrize(
+    "text,intent",
+    [
+        ("Ngày 01/07/2025 bán Thép cuộn phi 6 giá bao nhiêu một kg?", "unit_price"),
+        ("Tháng 3/2026 có bao nhiêu đơn bị huỷ vì giao trễ?", "cancel_reason"),
+    ],
+)
+def test_price_and_cancel_reason_questions_abstain_before_planning(text, intent):
+    from src.agent.planner import unsupported_intent
+
+    assert unsupported_intent(question(question=text)) == intent
+
+
+def test_quantity_question_answered_with_an_order_count_is_suppressed(tmp_path):
+    from src.agent.planner import _guard_answer
+
+    decision = _decision()
+    decision["plan"]["aggregations"] = [{"metric_id": "order_count", "filters": [], "group_by": []}]
+    context = _entity_context(tmp_path)
+    text = "Tuần trước cửa hàng bán ra tổng cộng mấy ly?"
+    result = _guard_answer(decision, question(question=text), context)
+    assert result["plan"]["guard"]["reason"] == "guard:unit_quantity_metric"
+    percent = question(question="Doanh thu tháng 6/2025 tăng hay giảm mấy phần trăm?")
+    assert _guard_answer(_decision(), percent, context)["answer"]["answer"] == 999
