@@ -100,8 +100,25 @@ sản phẩm; nếu khác thì câu hỏi abstain. Replay lại biz_127: 88 câu
 load với planner. `MAX_MODEL_LEN` tăng từ 4096 lên 16384 vì prompt mapping liệt kê mọi cột của
 shop. Chưa chạy được trên CPU; notebook molab lần sau có bước smoke `predict.sh` trên public.
 
+**Lượt molab v2 (`16ed31e`, Qwen3-14B, 1 GPU, 10/11):**
+- Train gốc: 1.926 đúng / 0 sai.
+- Biến thể, so với shop gốc (30 shop, 1.926 câu), **0 câu sai ở mọi biến thể**:
+
+  | Biến thể | Shop đọc được (v1 → v2) | Câu cùng đáp án (v1 → v2) | Mất |
+  |---|---|---|---|
+  | synonyms | 7 → 30 | 315 → 1.892 | 34 |
+  | no_columns | 7 → 30 | 349 → 1.837 | 89 |
+  | no_decl | 15 → 30 | 983 → 1.923 | 3 |
+  | monthly_csv (4 shop) | 0 → 3 | 0 → 89 / 132 | 43 (biz_110 30) |
+
+- Câu mất chủ yếu do: model bỏ sót cột số lượng quy đổi ở 6 shop no_columns (câu số lượng
+  abstain, không sai); bộ nhãn chưa có hình thức thanh toán (method_revenue 10 → 1).
+- Public (smoke, không nhãn): đọc được 5/14 shop (README 3, v1 4); phép tính trả lời 180 câu
+  (README 98, v1 138). 2 shop bị `verify_facts` chặn; 1 lần output bị cắt (`length`).
+- `predict.sh` trên 14 câu public (1 câu/shop): 0 lỗi, 40 phút, trong đó chuẩn bị dữ liệu và
+  mapping khoảng 37 phút.
+
 **Còn lại:**
-- Lượt molab mới với code hiện tại: train gốc, 4 biến thể, smoke public.
 - monthly_csv: biz_110 (nhiều file chỉ có header đơn) vẫn chưa đọc được.
 
 ---
