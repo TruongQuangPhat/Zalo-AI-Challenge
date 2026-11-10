@@ -460,6 +460,15 @@ def build_entities(
                     except ContractError as exc:
                         fail(field, str(exc))
                         numbers.append(None)
+                # A sold quantity stands in for the base quantity only when the line is sold
+                # in the product's base unit; a case of 24 cans is not one can.
+                unit = get(row, f, "unit") if "unit" in f else None
+                if numbers[0] is None and unit:
+                    base_unit = conn.execute(
+                        "SELECT base_unit FROM entities WHERE entity_key=?", (key,)
+                    ).fetchone()[0]
+                    if base_unit and identity_text(str(unit)) != identity_text(base_unit):
+                        numbers[1] = None
                 conn.execute(
                     "INSERT OR IGNORE INTO line_items VALUES (?,?,?,?,?,?)",
                     (line, key, *numbers, dumps(ref)),

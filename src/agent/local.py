@@ -13,7 +13,7 @@ from src.data.cache import fingerprint
 from src.data.catalog import digest
 from src.jsonio import ContractError
 
-MAX_MODEL_LEN = 4096
+MAX_MODEL_LEN = 16384  # mapping prompts list every column of a shop
 GPU_MEMORY_UTILIZATION = 0.85
 REQUIRED_FILES = ("config.json", "tokenizer.json", "tokenizer_config.json")
 
@@ -237,7 +237,7 @@ class MappingProposer:
             [{"role": "user", "content": prompt}],
             schema,
             self.timeout,
-            max_tokens=256 + 16 * columns,
+            max_tokens=256 + 32 * columns,
         )
         self.calls.append({k: v for k, v in result.items() if k != "text"})
         if result["finish_reason"] != "stop":

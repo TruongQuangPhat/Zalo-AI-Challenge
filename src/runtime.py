@@ -94,6 +94,7 @@ def run_inference(
     question_ids: list[str] | None = None,
     resume_from: Path | None = None,
     resume_tail: str = "reject",
+    propose: Any = None,
 ) -> dict[str, Any]:
     split = load_split(data_dir)
     questions = split.questions
@@ -187,7 +188,10 @@ def run_inference(
                     try:
                         context = prepare_business(split, question.business_id, cache_dir=cache_dir)
                         facts = prepare_facts(
-                            context, output / "prepared" / question.business_id, cache_dir=cache_dir
+                            context,
+                            output / "prepared" / question.business_id,
+                            cache_dir=cache_dir,
+                            propose=propose,
                         )
                         semantics = prepare_semantics(context)
                         contexts[question.business_id] = context

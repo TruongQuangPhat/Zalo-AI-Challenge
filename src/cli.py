@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(args_list)
     try:
         if args.command == "predict":
-            from src.agent.local import LocalModel
+            from src.agent.local import LocalModel, MappingProposer
             from src.agent.planner import LocalPlanner
 
             model = LocalModel(
@@ -84,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
                     question_ids=args.question_id,
                     resume_from=args.resume_from,
                     resume_tail=args.resume_tail,
+                    propose=MappingProposer(model),
                 )
             finally:
                 model.close()

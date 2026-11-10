@@ -8,8 +8,9 @@ and score those answers against the separate answers file.
         --answers dataset/train/answers.jsonl --work-dir .artifacts/rule-ops
 
 Shops no README mapper reads can get model column mappings (``llm_mapping``): ``--model``
-proposes on GPU and caches under ``--work-dir/cache/llm_mapping``; ``--cached-proposals``
-replays that cache on CPU. ``--baseline`` compares answers with an earlier predictions file
+proposes on GPU and caches under ``--work-dir/cache/llm_mapping``; ``--replay-proposals DIR``
+replays such cache files on CPU, matched by prompt (a changed prompt is a cache miss).
+``--baseline`` compares answers with an earlier predictions file
 (e.g. the original train shops when scoring perturbed variants).
 """
 
@@ -22,6 +23,7 @@ import shutil
 import time
 from pathlib import Path
 
+from src.agent.local import MAX_MODEL_LEN
 from src.agent.rule_ops import answer_by_rule
 from src.data.catalog import prepare_business
 from src.data.normalization import prepare_facts
@@ -39,9 +41,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--verbose", action="store_true", help="print every non-correct answer")
     proposals = parser.add_mutually_exclusive_group()
     proposals.add_argument("--model", type=Path, help="local vLLM weights for mapping proposals")
-    proposals.add_argument("--cached-proposals", action="store_true")
+    proposals.add_argument("--replay-proposals", type=Path, help="cached proposal JSON files")
+    parser.add_argument("--businesses", nargs="+", help="default: every business asked")
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
-    parser.add_argument("--max-model-len", type=int, default=16384)
+    parser.add_argument("--max-model-len", type=int, default=MAX_MODEL_LEN)
     parser.add_argument("--baseline", type=Path, help="predictions.jsonl to compare answers with")
     args = parser.parse_args(argv)
     propose, model = None, None
@@ -55,10 +58,18 @@ def main(argv: list[str] | None = None) -> None:
             max_model_len=args.max_model_len,
         )
         propose = MappingProposer(model)
-    elif args.cached_proposals:
+    elif args.replay_proposals:
+        recorded = {}
+        for path in sorted(args.replay_proposals.rglob("*.json")):
+            record = json.loads(path.read_text(encoding="utf-8"))
+            recorded[record["prompt"]] = record["proposal"]
 
         def propose(prompt, schema):
-            raise ContractError("no cached mapping proposal")
+            if prompt not in recorded:
+                raise ContractError("no recorded mapping proposal for this prompt")
+            return recorded[prompt]
+
+        propose.model_id = "replay"
 
     try:
         _evaluate(args, propose)
@@ -71,6 +82,8 @@ def _evaluate(args, propose) -> None:
     split = load_split(args.data_dir)
     questions = [json.loads(line) for line in (args.data_dir / "questions.jsonl").open()]
     contexts = {}
+    if args.businesses:
+        questions = [q for q in questions if q["business_id"] in set(args.businesses)]
     for business in sorted({q["business_id"] for q in questions}):
         started = time.perf_counter()
         try:

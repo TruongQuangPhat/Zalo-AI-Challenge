@@ -17,7 +17,7 @@
 
 Kế hoạch: `.artifacts/plan-llm-schema-mapping.md`. Khi không bộ map README nào đọc được bán
 hàng, model gán nhãn cho từng cột từ một từ vựng đóng. Code viết các dòng README chuẩn tương
-ứng; các bộ map, builder và quality gate giữ nguyên và quyết định. **Chưa có lượt GPU nào.**
+ứng; các bộ map, builder và quality gate giữ nguyên và quyết định. Đã chạy một lượt GPU (09/11).
 
 - `src/data/normalization/llm_mapping.py`:
   - **Schema** sinh riêng cho từng shop. Tên bảng và tên cột là key bắt buộc; nhãn cột và role
@@ -67,11 +67,42 @@ mã đơn), 110 (CSV chỉ có header đơn):
 proposal đúng thì prepare được và README trên đĩa không đổi; proposal sai trạng thái, trùng nhãn,
 sai role, thiếu cột hoặc thiếu bảng thì bị chặn; thử lại có phản hồi; replay cache).
 
+**Lượt molab đầu (`fe0f78d`, Qwen3-14B, 09/11):**
+- Train gốc bằng code mới: 1.926 đúng / 0 sai.
+- Mọi biến thể đều 0 câu sai. Số shop đọc lại được còn ít: synonyms 6, no_columns 6,
+  no_decl 1, monthly_csv 0. Lỗi hay gặp nhất: trùng nhãn, sai role hoặc thiếu bảng đơn.
+- Public (smoke test): đọc được 4 shop thay vì 3; phép tính trả lời 138 câu thay vì 98.
+  `verify_facts` chặn đúng dev_002. Một số prompt public dài bị cắt output, đã nâng
+  `max_tokens` lên 32 token mỗi cột.
+
+**Cải tiến sau molab (chưa có lượt GPU):** `normalize_proposal` suy ra từ nhãn cột và profile
+thay vì tin model. Role đơn được tính lại; grain, cách ghi thông tin đơn và nhiều phần lấy từ
+dữ liệu; nhãn phụ bị trùng thì bỏ (nhãn cốt lõi trùng vẫn bị chặn); bảng danh mục thiếu cả mã
+lẫn tên thành bảng phụ. Worker vLLM không chết khi một request lỗi.
+
+**Replay trên CPU** (dùng lại proposal của lượt molab đầu, chỉ trên các shop bộ map cũ không
+đọc được; proposal ở lần thử lại kèm phản hồi không replay được vì prompt đã khác):
+
+| Biến thể | Shop đọc được | Câu cùng đáp án | Abstain | Sai |
+|---|---|---|---|---|
+| synonyms | 29/30 | 1.846 | 34 | 0 |
+| no_columns | 27/30 | 1.664 | 213 | 3, đã sửa |
+| no_decl | 16/17 | 970 | 3 | 0 |
+| monthly_csv | 3/5 | 89 | 43 | 0 |
+
+**Sửa trong builder** (`entities.py`): 3 câu sai ở biz_127 vì model gán cột số lượng đã quy
+đổi thành `other`. Số lượng bán theo thùng khi đó bị tính như số lon. Từ giờ, khi không có cột
+quy đổi, số lượng bán chỉ thay cho số lượng cơ bản nếu đơn vị của dòng trùng đơn vị cơ bản của
+sản phẩm; nếu khác thì câu hỏi abstain. Replay lại biz_127: 88 câu cùng đáp án, 9 abstain,
+0 sai. Train gốc trên CPU sau khi sửa: **1.926/1.926 cùng đáp án**. Lint đạt, 587 tests đạt.
+
+**Runtime:** `predict.sh` truyền bộ đề xuất mapping (`MappingProposer`) dùng chung model đã
+load với planner. `MAX_MODEL_LEN` tăng từ 4096 lên 16384 vì prompt mapping liệt kê mọi cột của
+shop. Chưa chạy được trên CPU; notebook molab lần sau có bước smoke `predict.sh` trên public.
+
 **Còn lại:**
-- Notebook `.artifacts/molab_llm_mapping.py` chạy 4 bước: train gốc bằng code mới (phải giữ
-  1.926 / 0); mỗi biến thể chạy không model rồi có model, so với shop gốc; smoke public.
-- Đổi `normalizer_sha256` làm mất hiệu lực cache facts cũ.
-- Runtime (`predict.sh`) chưa truyền `propose`, và planner vẫn dùng `max_model_len` 4096.
+- Lượt molab mới với code hiện tại: train gốc, 4 biến thể, smoke public.
+- monthly_csv: biz_110 (nhiều file chỉ có header đơn) vẫn chưa đọc được.
 
 ---
 

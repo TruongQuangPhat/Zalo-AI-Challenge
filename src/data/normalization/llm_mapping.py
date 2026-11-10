@@ -296,6 +296,121 @@ def check_proposal(catalog: dict, proposal: object) -> list[str]:
     return errors
 
 
+_CORE = {"order_id", "ordered_at", "status", "line_net_amount", "item_name", "product_id"}
+
+
+def _order_role(have: set[str]) -> str | None:
+    if {"ordered_at", "status", "line_net_amount", "item_name"} <= have:
+        return "order_lines"
+    if {"order_id", "ordered_at", "status"} <= have:
+        return "order_headers"
+    if {"order_id", "line_net_amount"} <= have and have & {"product_id", "item_name"}:
+        return "order_details"
+    return None
+
+
+def normalize_proposal(catalog: dict, proposal: dict) -> dict:
+    """Derive what code can establish itself; the model's column labels stay the evidence.
+
+    - An order role is re-derived from the labels (lines/headers/details). A table the model
+      called an order table that fits none becomes ``other`` when another order source
+      exists; a non-order table keeps its role but loses order status/line amounts, and a
+      product/customer list without both code and name becomes auxiliary.
+    - A non-core label on several columns is dropped from all of them (core stays rejected).
+    - Grain, order-info layout and multi-part come from the labels and source profiles;
+      the numeric convention is left to source evidence.
+    Structurally invalid proposals are returned unchanged for ``check_proposal`` to reject.
+    """
+    groups = _groups(catalog)
+    tables = proposal.get("tables") if isinstance(proposal, dict) else None
+    if (
+        not isinstance(tables, dict)
+        or set(tables) != set(groups)
+        or not isinstance(proposal.get("declarations"), dict)
+        or not all(
+            isinstance(e, dict)
+            and e.get("role") in ROLES
+            and isinstance(e.get("columns"), dict)
+            and set(e["columns"]) == set(_column_keys(groups[k][0]))
+            and all(v in MEANINGS for v in e["columns"].values())
+            for k, e in tables.items()
+        )
+    ):
+        return proposal
+    result = {}
+    for key, entry in tables.items():
+        columns = dict(entry["columns"])
+        used = [v for v in columns.values() if v not in DECOYS]
+        for label, meaning in columns.items():
+            if meaning not in _CORE and used.count(meaning) > 1:
+                columns[label] = "other"
+        have = set(columns.values())
+        role = entry["role"]
+        if role in _ORDER_ROLES:
+            role = _order_role(have) or role
+        else:
+            columns = {
+                c: "other" if m in {"status", "line_net_amount"} else m for c, m in columns.items()
+            }
+            # Masters the relational join cannot key (code and name) are kept as auxiliary.
+            pair = {
+                "products": {"product_id", "item_name"},
+                "customers": {"customer_id", "customer_name"},
+            }
+            if role in pair and not pair[role] <= set(columns.values()):
+                role = "other"
+        result[key] = {"role": role, "columns": columns}
+    complete = [
+        k
+        for k, e in result.items()
+        if e["role"] in _ORDER_ROLES and _order_role(set(e["columns"].values())) == e["role"]
+    ]
+    for key, entry in result.items():
+        if entry["role"] in _ORDER_ROLES and key not in complete and complete:
+            entry["role"] = "other"
+            entry["columns"] = {
+                c: "other" if m in {"status", "line_net_amount"} else m
+                for c, m in entry["columns"].items()
+            }
+    lines = [k for k, e in result.items() if e["role"] == "order_lines"]
+    headers = [k for k, e in result.items() if e["role"] == "order_headers"]
+    details = [k for k, e in result.items() if e["role"] == "order_details"]
+    if any("order_id" not in result[k]["columns"].values() for k in lines):
+        grain = "ledger_no_order_id"
+    elif headers and not lines and not details:
+        grain = "order_header_only"
+    else:
+        grain = "order_line"
+    order_info = "separate_tables"
+    if lines:
+        sparse = []
+        for key in lines:
+            position = next(
+                _column_keys(groups[key][0])[c]
+                for c, m in result[key]["columns"].items()
+                if m == "ordered_at"
+            )
+            empty = rows = 0
+            for table in groups[key]:
+                column = next(c for c in table["columns"] if c["position"] == position)
+                empty += (column.get("null_count") or 0) + (column.get("blank_string_count") or 0)
+                rows += column.get("row_count") or 0
+            sparse.append(rows > 0 and empty > 0.2 * rows)
+        order_info = "first_row_of_group_only" if any(sparse) else "repeated_every_row"
+    parts = {
+        role: sum(len(groups[k]) for k, e in result.items() if e["role"] == role)
+        for role in _ORDER_ROLES
+    }
+    declarations = {
+        **proposal["declarations"],
+        "row_grain": grain,
+        "order_info": order_info,
+        "numeric_convention": "unknown",
+        "multi_part": any(n > 1 for n in parts.values()),
+    }
+    return {"tables": result, "declarations": declarations}
+
+
 def synthesize_readme(catalog: dict, proposal: dict) -> str:
     """Original README plus canonical meaning bullets and declarations; nothing removed."""
     groups = _groups(catalog)

@@ -174,3 +174,133 @@ def test_synthesis_rewrites_existing_bullets_and_marks_auxiliary_tables(shop):
     assert "File phụ, không chứa giao dịch bán." in text
     assert "Mỗi dòng một dòng hàng." in text
     assert "- Dữ liệu có đến hết 03/01/2026." in text
+
+
+def test_code_derived_declarations_override_wrong_model_declarations(shop, tmp_path):
+    wrong = {
+        "tables": {"sales.csv": {"role": "order_details", "columns": GOOD}},
+        "declarations": {
+            **DECLARED,
+            "numeric_convention": "dot_grouped",  # data uses comma grouping
+            "order_info": "first_row_of_group_only",
+            "row_grain": "order_header_only",
+        },
+    }
+    prepared = prepare_facts(shop(), tmp_path / "facts", propose=FakeModel(wrong))
+    assert prepared.summary["status"] == "ready"
+    assert prepared.summary["proposal"]["tables"]["sales.csv"]["role"] == "order_lines"
+    assert prepared.summary["proposal"]["declarations"]["numeric_convention"] == "unknown"
+    assert prepared.summary["raw_proposal"] == wrong
+    assert revenue(prepared) == Decimal(170000)
+
+
+def test_duplicate_non_core_label_is_dropped_not_guessed(shop, tmp_path):
+    labels = {**GOOD, "Đơn giá": "quantity"}  # two quantity columns
+    prepared = prepare_facts(shop(), tmp_path / "facts", propose=FakeModel(proposal(labels)))
+    assert prepared.summary["status"] == "ready"
+    columns = prepared.summary["proposal"]["tables"]["sales.csv"]["columns"]
+    assert columns["SL"] == columns["Đơn giá"] == "other"
+
+
+def test_model_calling_the_sales_table_auxiliary_fails_closed(shop, tmp_path):
+    model = FakeModel(proposal(GOOD, role="other"), proposal(GOOD, role="other"))
+    prepared = prepare_facts(shop(), tmp_path / "facts", propose=model)
+    assert prepared.summary["status"] == "unsupported"
+    assert "no complete order source" in prepared.summary["llm_rejections"][0]
+
+
+def _table(file: str, sheet: str, columns: list[str], empty: int = 0) -> dict:
+    return {
+        "read_status": "read",
+        "structure_status": "resolved",
+        "format": "xlsx",
+        "raw_row_count": 10,
+        "source_ref": {"file": f"data/shop/{file}", "table": sheet},
+        "columns": [
+            {
+                "display_name": name,
+                "position": i,
+                "row_count": 10,
+                "null_count": empty,
+                "blank_string_count": 0,
+            }
+            for i, name in enumerate(columns, 1)
+        ],
+    }
+
+
+def test_roles_grain_and_parts_are_derived_from_labels_and_profiles():
+    from src.data.normalization.llm_mapping import check_proposal, normalize_proposal
+
+    lines = ["Ma", "Ngay", "TT", "Tien", "Hang"]
+    catalog = {
+        "readme": "# Dữ liệu shop\n",
+        "tables": [
+            _table("Ban.xlsx", "T1", lines, empty=6),
+            _table("Ban.xlsx", "T2", lines, empty=6),
+            _table("Giao.xlsx", "Sheet1", ["Ma", "TT", "Hang"]),
+            _table("Nhap.xlsx", "Sheet1", ["Ngay", "TT", "Tien", "Hang"]),
+        ],
+    }
+    labels = {"Ma": "order_id", "Ngay": "ordered_at", "TT": "status"}
+    labels |= {"Tien": "line_net_amount", "Hang": "item_name"}
+    raw = {
+        "tables": {
+            "Ban.xlsx / T1 (+1 sheet cùng cột)": {"role": "order_details", "columns": labels},
+            "Giao.xlsx / Sheet1": {
+                "role": "order_details",
+                "columns": {"Ma": "order_id", "TT": "status", "Hang": "item_name"},
+            },
+            "Nhap.xlsx / Sheet1": {
+                "role": "other",
+                "columns": {k: labels[k] for k in ["Ngay", "TT", "Tien", "Hang"]},
+            },
+        },
+        "declarations": {**DECLARED, "multi_part": False},
+    }
+    result = normalize_proposal(catalog, raw)
+    tables = result["tables"]
+    assert tables["Ban.xlsx / T1 (+1 sheet cùng cột)"]["role"] == "order_lines"
+    assert tables["Giao.xlsx / Sheet1"]["role"] == "other"  # incomplete, another source exists
+    assert tables["Giao.xlsx / Sheet1"]["columns"]["TT"] == "other"
+    assert tables["Nhap.xlsx / Sheet1"]["columns"]["Tien"] == "other"  # purchases stay auxiliary
+    assert result["declarations"]["multi_part"] is True  # two monthly sheets
+    assert result["declarations"]["order_info"] == "first_row_of_group_only"  # sparse dates
+    assert check_proposal(catalog, result) == []
+    no_id = {k: v for k, v in labels.items() if k != "Ma"} | {"Ma": "other"}
+    ledger = normalize_proposal(
+        catalog,
+        {
+            **raw,
+            "tables": {
+                **raw["tables"],
+                "Ban.xlsx / T1 (+1 sheet cùng cột)": {"role": "order_lines", "columns": no_id},
+            },
+        },
+    )
+    assert ledger["declarations"]["row_grain"] == "ledger_no_order_id"
+
+
+def test_master_list_without_code_and_name_becomes_auxiliary():
+    from src.data.normalization.llm_mapping import normalize_proposal
+
+    catalog = {
+        "readme": "# Dữ liệu shop\n",
+        "tables": [
+            _table("Ban.xlsx", "Sheet1", ["Ma", "Ngay", "TT", "Tien", "Hang"]),
+            _table("Khach.xlsx", "Sheet1", ["MaKH", "Nhom"]),
+        ],
+    }
+    labels = {"Ma": "order_id", "Ngay": "ordered_at", "TT": "status"}
+    labels |= {"Tien": "line_net_amount", "Hang": "item_name"}
+    raw = {
+        "tables": {
+            "Ban.xlsx / Sheet1": {"role": "order_lines", "columns": labels},
+            "Khach.xlsx / Sheet1": {
+                "role": "customers",
+                "columns": {"MaKH": "customer_id", "Nhom": "customer_group"},
+            },
+        },
+        "declarations": DECLARED,
+    }
+    assert normalize_proposal(catalog, raw)["tables"]["Khach.xlsx / Sheet1"]["role"] == "other"

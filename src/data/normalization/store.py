@@ -19,6 +19,7 @@ from src.data.normalization.entities import build_entities
 from src.data.normalization.llm_mapping import (
     Propose,
     check_proposal,
+    normalize_proposal,
     request_proposal,
     synthesize_readme,
     verify_facts,
@@ -258,10 +259,11 @@ def prepare_facts(
     rejected = []
     for _ in range(2):
         try:
-            proposal = request_proposal(context.catalog, propose, cache_dir, feedback)
+            raw = request_proposal(context.catalog, propose, cache_dir, feedback)
         except ContractError as error:
             rejected.append([str(error)])
             break
+        proposal = normalize_proposal(context.catalog, raw)
         feedback = check_proposal(context.catalog, proposal)
         if not feedback:
             catalog = {**context.catalog, "readme": synthesize_readme(context.catalog, proposal)}
@@ -274,6 +276,7 @@ def prepare_facts(
                 "mapping_source": "llm_proposal",
                 "proposal_sha256": fingerprint(proposal),
                 "proposal": proposal,
+                "raw_proposal": raw,
             }
             try:
                 result = _store(
@@ -296,7 +299,10 @@ def prepare_facts(
                 return result
         rejected.append(feedback)
     if snapshot is not None:
-        return _store(context, output_dir, cache_dir, snapshot, build_stock, started)
+        fallback = {"mapping_source": "snapshot_fallback", "llm_rejections": rejected}
+        return _store(
+            context, output_dir, cache_dir, snapshot, build_stock, started, provenance=fallback
+        )
     return _unsupported(
         context, attempts, started, mapping_source="llm_rejected", llm_rejections=rejected
     )
@@ -324,7 +330,9 @@ def _store(
         ),
     }
     if provenance is not None:
-        dependencies["proposal_sha256"] = provenance["proposal_sha256"]
+        dependencies["mapping_source"] = provenance["mapping_source"]
+        if "proposal_sha256" in provenance:
+            dependencies["proposal_sha256"] = provenance["proposal_sha256"]
     cache_entry = cache_dir / "prepared" / fingerprint(dependencies) if cache_dir else None
     if cache_entry is not None:
         require_output(cache_entry, context.root)
