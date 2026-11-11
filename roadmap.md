@@ -50,8 +50,24 @@ pipeline, chưa tính sai số của model; script debug `.artifacts/oracle/stat
 `verify_runtime`: lint và format đạt, 589 tests đạt (2 test mới: trạng thái lạ được phân loại;
 giá trị model không chắc vẫn chặn).
 
-**Còn lại:** lượt molab v3 (model thật cho phân loại trạng thái và mapping, cả 6 biến thể,
-smoke public).
+**Lượt molab v3 (`c18da92`, Qwen3-14B, 1 GPU):**
+- Train gốc 1.926 đúng / 0 sai. **Mọi biến thể 0 câu sai**:
+
+  | Biến thể | Shop đọc được | Cùng đáp án | Mất | Thêm đúng |
+  |---|---|---|---|---|
+  | synonyms | 30/30 | 1.901 | 25 | 5 |
+  | no_columns | 30/30 | 1.853 | 73 | 5 |
+  | no_decl | 30/30 | 1.924 | 2 | 5 |
+  | monthly_csv (4 shop) | 3/4 | 89 | 43 | 0 |
+  | status_words (model thật) | 24/24 | 1.581 | 0 | 0 |
+  | vn_numbers | 10/10 | 556 | 0 | 0 |
+
+- Public (smoke): đọc được 6/14 shop (v2: 5, README: 3), chiếm 573/1.000 câu; phép tính trả lời
+  218 câu (v2: 180). Shop mới đọc được nhờ phân loại trạng thái ("khách trả" → returned).
+  Nhóm lỗi còn lại theo log: dòng không xác định vai trò (`row_role_unknown`,
+  `item_role_unknown`), số mơ hồ (`number_ambiguous`), cấu trúc nguồn chưa giải được, model
+  không tìm ra nguồn đơn đầy đủ (3 shop), 1 lần output bị cắt.
+- `predict.sh` 14 câu public: 0 lỗi, 51 phút, trong đó chuẩn bị dữ liệu khoảng 48 phút.
 
 ## LLM gợi ý mapping cột, giai đoạn 1 (code + đo CPU) — 08/11/2026
 
