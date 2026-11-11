@@ -220,6 +220,19 @@ class LocalModel:
         self.pipe.close()
 
 
+def output_budget(schema: dict) -> int:
+    """Generous token bound for a JSON object whose keys are echoed back (column names,
+    status values): about one token per two characters plus label and punctuation."""
+
+    def walk(node) -> int:
+        if not isinstance(node, dict):
+            return 0
+        properties = node.get("properties") or {}
+        return sum(len(key) // 2 + 16 + walk(value) for key, value in properties.items())
+
+    return 256 + walk(schema)
+
+
 class MappingProposer:
     """Column-meaning proposals (``llm_mapping``) from the already loaded planner model."""
 
@@ -229,15 +242,11 @@ class MappingProposer:
         self.calls: list[dict] = []
 
     def __call__(self, prompt: str, schema: dict) -> dict:
-        columns = sum(
-            len(t["properties"]["columns"]["properties"])
-            for t in schema["properties"]["tables"]["properties"].values()
-        )
         result = self.model.generate(
             [{"role": "user", "content": prompt}],
             schema,
             self.timeout,
-            max_tokens=256 + 32 * columns,
+            max_tokens=output_budget(schema),
         )
         self.calls.append({k: v for k, v in result.items() if k != "text"})
         if result["finish_reason"] != "stop":

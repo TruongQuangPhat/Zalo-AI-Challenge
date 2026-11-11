@@ -21,16 +21,19 @@ from src.data.normalization.llm_mapping import (
     check_proposal,
     normalize_proposal,
     request_proposal,
+    request_status_aliases,
     synthesize_readme,
     verify_facts,
 )
 from src.data.normalization.relational import build_relational, relational_mapping
 from src.data.normalization.sales import build_sales, sales_mapping
 from src.data.normalization.stock import build_stock, stock_mapping
-from src.data.normalization.values import parse_date
+from src.data.normalization.values import STATUS_ALIASES, parse_date
+from src.data.profiling import normalized
 from src.jsonio import ContractError, dumps, loads
 
 VERSION = "prepared-facts-v8"
+MAX_STATUS_VALUES = 30  # more distinct rejected values than this is not a status column
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
@@ -247,7 +250,7 @@ def prepare_facts(
     mapping, builder, attempts = _select_mapping(context)
     # A shop read only as an inventory snapshot has unread sales; the model may map them.
     if mapping is not None and (propose is None or builder is not build_stock):
-        return _store(context, output_dir, cache_dir, mapping, builder, started)
+        return _with_statuses(context, output_dir, cache_dir, mapping, builder, started, propose)
     snapshot = mapping
     if propose is None:
         return _unsupported(context, attempts, started)
@@ -279,13 +282,14 @@ def prepare_facts(
                 "raw_proposal": raw,
             }
             try:
-                result = _store(
+                result = _with_statuses(
                     trial,
                     output_dir,
                     cache_dir,
                     mapping,
                     builder,
                     started,
+                    propose,
                     provenance=provenance,
                     verify=lambda conn, summary: verify_facts(conn, summary, end_day),
                 )
@@ -308,6 +312,81 @@ def prepare_facts(
     )
 
 
+def _unknown_statuses(path: Path) -> list[str]:
+    """Distinct raw status values the fixed vocabulary rejected, one per normalized token."""
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT json_extract(detail,'$.raw_value') FROM issues "
+            "WHERE json_extract(detail,'$.code')='status_ambiguous'"
+        ).fetchall()
+    values = {}
+    for (raw,) in rows:
+        text = str(raw).strip() if raw is not None else ""
+        if text:
+            values.setdefault(normalized(text).strip(), text)
+    return sorted(values.values())
+
+
+def _with_statuses(
+    context: BusinessContext,
+    output_dir: Path,
+    cache_dir: Path | None,
+    mapping,
+    builder,
+    started: float,
+    propose: Propose | None,
+    *,
+    provenance: dict | None = None,
+    verify=None,
+) -> PreparedBusiness:
+    """Build; if order statuses outside the fixed vocabulary blocked it, let the model
+    classify those values (closed enum, ``unknown`` stays blocking) and rebuild once.
+
+    The rebuild must pass ``verify_facts``; otherwise the original build is kept. ``verify``
+    (model-mapped facts) applies to whatever is returned.
+    """
+    args = (context, output_dir, cache_dir, mapping, builder, started)
+    result = _store(*args, provenance=provenance)
+    values = []
+    if propose is not None and (result.summary.get("issue_counts") or {}).get("status_ambiguous"):
+        values = _unknown_statuses(result.path)
+    aliases = {}
+    if values and len(values) <= MAX_STATUS_VALUES:
+        try:
+            aliases = request_status_aliases(
+                context.catalog["business_id"], values, propose, cache_dir
+            )
+        except ContractError:
+            aliases = {}
+    if aliases:
+        end_hint = context.catalog["coverage"].get("available_end_hint")
+        end_day = parse_date(end_hint).isoformat() if end_hint else None
+        shutil.rmtree(output_dir)  # this call's own blocked build
+        aliased = _store(
+            *args,
+            provenance={**(provenance or {"mapping_source": "readme"}), "status_aliases": aliases},
+            status_aliases=aliases,
+        )
+        check = verify or (lambda conn, summary: verify_facts(conn, summary, end_day))
+        try:
+            return _verified(aliased, output_dir, check)
+        except ContractError:
+            result = _store(*args, provenance=provenance)  # cached original build
+    return _verified(result, output_dir, verify)
+
+
+def _verified(result: PreparedBusiness, output_dir: Path, verify) -> PreparedBusiness:
+    """Run a model-path check on finished facts; a rejected build is removed, not kept."""
+    if verify is None:
+        return result
+    with closing(result.connect()) as connection:
+        errors = verify(connection, result.summary)
+    if errors:
+        shutil.rmtree(output_dir)
+        raise ContractError("model mapping rejected: " + "; ".join(errors))
+    return result
+
+
 def _store(
     context: BusinessContext,
     output_dir: Path,
@@ -317,7 +396,7 @@ def _store(
     started: float,
     *,
     provenance: dict | None = None,
-    verify=None,
+    status_aliases: dict[str, str] | None = None,
 ) -> PreparedBusiness:
     if output_dir.exists():
         raise ContractError("prepared output already exists; use a fresh directory")
@@ -333,6 +412,8 @@ def _store(
         dependencies["mapping_source"] = provenance["mapping_source"]
         if "proposal_sha256" in provenance:
             dependencies["proposal_sha256"] = provenance["proposal_sha256"]
+    if status_aliases:
+        dependencies["status_aliases"] = status_aliases
     cache_entry = cache_dir / "prepared" / fingerprint(dependencies) if cache_dir else None
     if cache_entry is not None:
         require_output(cache_entry, context.root)
@@ -350,6 +431,7 @@ def _store(
     destination = output_dir / "facts.sqlite"
     with tempfile.NamedTemporaryFile(dir=output_dir, suffix=".sqlite", delete=False) as handle:
         temporary = Path(handle.name)
+    aliases_token = STATUS_ALIASES.set(status_aliases or {})
     try:
         with closing(sqlite3.connect(temporary)) as connection:
             connection.executescript(SCHEMA)
@@ -377,8 +459,6 @@ def _store(
             summary["extensions"] = build_entities(context, connection, summary, mapping)
             if provenance is not None:
                 summary.update(provenance)
-            if verify is not None and (errors := verify(connection, summary)):
-                raise ContractError("model mapping rejected: " + "; ".join(errors))
             for key, value in [("dependencies", dependencies), ("summary", summary)]:
                 connection.execute("INSERT INTO metadata VALUES (?,?)", (key, dumps(value)))
             connection.commit()
@@ -387,6 +467,7 @@ def _store(
         _assert_revision(context)
         os.replace(temporary, destination)
     finally:
+        STATUS_ALIASES.reset(aliases_token)
         temporary.unlink(missing_ok=True)
     if cache_entry is not None:
         cache_entry.mkdir(parents=True, exist_ok=True)

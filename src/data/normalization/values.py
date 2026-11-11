@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import re
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, localcontext
 
 from src.data.ingestion import Cell
 from src.data.profiling import normalized
 from src.jsonio import ContractError
+
+STATUS_ALIASES: ContextVar[dict[str, str] | None] = ContextVar("status_aliases", default=None)
+"""Normalized status token -> canonical status, set only around a build by ``_store``."""
 
 
 class ParseError(ContractError):
@@ -155,58 +159,63 @@ def parse_date(value, *, year: int | None = None, date_system: str | None = None
     return parse_datetime(value, year=year, date_system=date_system).date()
 
 
+STATUSES: dict[str, set[str]] = {
+    "completed": {
+        "completed",
+        "hoan thanh",
+        "da hoan thanh",
+        "xong",
+        "thanh cong",
+        "da lay",
+        "da xong",
+        "da giao",
+        "ok",
+    },
+    "cancelled": {
+        "cancelled",
+        "huy",
+        "da huy",
+        "khach huy",
+        "cancel",
+        "khong giao duoc",
+        "huy don",
+        "da huy don",
+    },
+    "returned": {
+        "returned",
+        "tra hang",
+        "doi tra",
+        "hoan tra",
+        "hoan hang",
+        "da hoan hang",
+        "da tra hang",
+        "tra lai",
+        "hang tra ve",
+    },
+    # Active recorded order: revenue/count exclude cancellation and returns.
+    # This alias does not certify a physical shipment for future shipping metrics.
+    "shipping": {
+        "shipping",
+        "in_delivery",
+        "dang giao",
+        "dang giao hang",
+        "cho giao",
+        "dang giao dich",
+        "dang gui",
+        "dang xu ly",
+        "dang van chuyen",
+    },
+}
+
+
 def normalize_status(value) -> str:
-    statuses = {
-        "completed": {
-            "completed",
-            "hoan thanh",
-            "da hoan thanh",
-            "xong",
-            "thanh cong",
-            "da lay",
-            "da xong",
-            "da giao",
-            "ok",
-        },
-        "cancelled": {
-            "cancelled",
-            "huy",
-            "da huy",
-            "khach huy",
-            "cancel",
-            "khong giao duoc",
-            "huy don",
-            "da huy don",
-        },
-        "returned": {
-            "returned",
-            "tra hang",
-            "doi tra",
-            "hoan tra",
-            "hoan hang",
-            "da hoan hang",
-            "da tra hang",
-            "tra lai",
-            "hang tra ve",
-        },
-        # Active recorded order: revenue/count exclude cancellation and returns.
-        # This alias does not certify a physical shipment for future shipping metrics.
-        "shipping": {
-            "shipping",
-            "in_delivery",
-            "dang giao",
-            "dang giao hang",
-            "cho giao",
-            "dang giao dich",
-            "dang gui",
-            "dang xu ly",
-            "dang van chuyen",
-        },
-    }
     token = normalized(str(value)).strip()
-    for status, labels in statuses.items():
+    for status, labels in STATUSES.items():
         if token in labels:
             return status
+    aliases = STATUS_ALIASES.get() or {}
+    if token in aliases:
+        return aliases[token]
     raise ParseError("status_ambiguous", "unknown order status; no default was applied")
 
 

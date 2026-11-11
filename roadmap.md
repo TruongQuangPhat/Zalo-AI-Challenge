@@ -13,6 +13,46 @@
 
 ---
 
+## Phương án A: đọc được thêm shop — 11/11/2026
+
+Nhánh `feat/mapping-coverage`. Mỗi lỗi chỉ được sửa khi tái hiện được bằng một biến thể train
+(đáp án giữ nguyên). Không mở file public; log smoke public chỉ dùng để biết nhóm lỗi.
+
+- **Trạng thái đơn ngoài từ vựng cố định.** Danh sách chữ trạng thái trong `values.py` được viết
+  từ đúng các chữ có trong train; đổi "Xong" thành "Giao thành công" là cả shop bị chặn.
+  Khi một bản build bị chặn vì `status_ambiguous`, model phân loại từng giá trị lạ vào
+  completed/cancelled/returned/shipping/unknown (enum đóng). Áp dụng cho cả shop đọc bằng
+  README. `unknown` vẫn chặn; bản build lại phải qua `verify_facts`, không qua thì giữ bản cũ.
+  Bộ map relational nay ghi lại chữ trạng thái gốc trong issue (trước đây `raw_value` rỗng).
+- **Nhãn `payment_method`** cho mapping bằng model (v2: method_revenue 10 → 1).
+- **Phản hồi khi thử lại** nêu nhãn còn thiếu theo role và điều kiện của một nguồn đơn đầy đủ.
+- **`max_tokens`** tính theo độ dài các key trong schema (output bị cắt ở v2).
+- **Biến thể train mới** trong `scripts/perturb_train.py`:
+  - `status_words` (24 shop): ô trạng thái trong cột có tên kiểu trạng thái được đổi sang cách
+    viết cố định ngoài từ vựng ("Giao thành công", "Bị hủy", "Khách trả lại"…).
+  - `vn_numbers` (10 shop): ô tiền nguyên viết thành chuỗi nhóm nghìn bằng dấu chấm
+    ("1.234.000"). Lần đầu quy tắc nhận cột tiền khớp "gia" trong "Thời gian", làm hỏng cột
+    ngày của biz_109 (41 câu sai do dữ liệu bị đổi, không phải lỗi pipeline); đã sửa thành
+    khớp nguyên từ.
+- Bỏ hướng "dữ liệu không có cột trạng thái": rulebook quy định mỗi đơn có đúng một trong bốn
+  trạng thái.
+
+**Đo trên CPU** (oracle chỉ trả lời câu phân loại trạng thái theo bảng đổi chữ; kiểm tra
+pipeline, chưa tính sai số của model; script debug `.artifacts/oracle/status_oracle.py`):
+
+| Lượt | Shop đọc được | Cùng đáp án | Sai |
+|---|---|---|---|
+| `status_words`, chưa có phân loại | 6/24 (18 bị chặn) | 341 / 1.581 | 0 |
+| `status_words`, có phân loại | 24/24 | 1.581 / 1.581 | 0 |
+| `vn_numbers`, không model | 10/10 | 556 / 556 | 0 |
+| Train gốc, có oracle | 30/30, không shop nào bị hỏi | 1.926 / 1.926 | 0 |
+
+`verify_runtime`: lint và format đạt, 589 tests đạt (2 test mới: trạng thái lạ được phân loại;
+giá trị model không chắc vẫn chặn).
+
+**Còn lại:** lượt molab v3 (model thật cho phân loại trạng thái và mapping, cả 6 biến thể,
+smoke public).
+
 ## LLM gợi ý mapping cột, giai đoạn 1 (code + đo CPU) — 08/11/2026
 
 Kế hoạch: `.artifacts/plan-llm-schema-mapping.md`. Khi không bộ map README nào đọc được bán

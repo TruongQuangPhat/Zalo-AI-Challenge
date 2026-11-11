@@ -16,6 +16,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from src.data.cache import fingerprint
+from src.data.normalization.values import STATUSES
 from src.data.profiling import normalized
 from src.jsonio import ContractError, dumps, loads
 
@@ -60,6 +61,11 @@ MEANINGS: dict[str, tuple[str, str]] = {
         "số đơn vị cơ bản trong 1 đơn vị lớn",
     ),
     "base_quantity": ("số lượng đã đổi ra đơn vị cơ bản", "số lượng đã quy ra đơn vị cơ bản"),
+    "payment_method": (
+        "hình thức thanh toán của đơn: cash tiền mặt, transfer chuyển khoản, "
+        "ewallet ví điện tử, cod giao hàng thu tiền, debt ghi nợ",
+        "hình thức thanh toán của đơn: tiền mặt, chuyển khoản, ví điện tử, COD, ghi nợ",
+    ),
     "payment_id": ("mã phiếu thu", "mã phiếu thu tiền"),
     "paid_at": ("thời điểm thu", "ngày giờ thu tiền"),
     "paid_amount": ("số tiền", "số tiền thu trong một lần trả"),
@@ -271,7 +277,8 @@ def check_proposal(catalog: dict, proposal: object) -> list[str]:
         ):
             errors.append(f"{key}: order lines need order_id unless the grain is a ledger")
         if not any(r <= have for r in required):
-            errors.append(f"{key}: role {role} lacks required columns")
+            missing = sorted(min((r - have for r in required), key=len))
+            errors.append(f"{key}: role {role} lacks required columns {missing}")
         if role not in _ORDER_ROLES and have & {"status", "line_net_amount"}:
             errors.append(f"{key}: role {role} cannot carry order status or line amounts")
         names = frozenset(normalized(c).strip() for c in columns)
@@ -286,7 +293,11 @@ def check_proposal(catalog: dict, proposal: object) -> list[str]:
     if not ("order_lines" in present or {"order_headers", "order_details"} <= present) and not (
         "order_headers" in present and grain == "order_header_only"
     ):
-        errors.append("no complete order source")
+        errors.append(
+            "no complete order source: cần một bảng order_lines (ordered_at, status, "
+            "line_net_amount, item_name), hoặc order_headers (order_id, ordered_at, status) "
+            "cùng order_details (order_id, line_net_amount, product_id hoặc item_name)"
+        )
     if grain == "ledger_no_order_id" and any(
         "order_id" in proposal["tables"][k]["columns"].values()
         for k, r in roles.items()
@@ -532,3 +543,62 @@ def request_proposal(
         record = {"business_id": catalog["business_id"], "proposal": proposal, "prompt": prompt}
         path.write_text(dumps(record) + "\n", encoding="utf-8")
     return proposal
+
+
+STATUS_CHOICES = {
+    "completed": "đơn đã bán xong, tính doanh thu",
+    "cancelled": "đơn huỷ, không tính doanh thu",
+    "returned": "đơn khách trả hàng",
+    "shipping": "đơn đang giao/đang xử lý, chưa huỷ",
+    "unknown": "không chắc chắn",
+}
+
+
+def build_status_request(values: list[str]) -> tuple[str, dict]:
+    """Classify order-status values the fixed vocabulary does not know (closed enum)."""
+    examples = "\n".join(
+        f"- {status}: {', '.join(sorted(words)[:8])}" for status, words in STATUSES.items()
+    )
+    choices = "\n".join(f"- {k}: {hint}" for k, hint in STATUS_CHOICES.items())
+    prompt = (
+        "Cột trạng thái đơn của một cửa hàng Việt Nam có các giá trị dưới đây. Với mỗi giá "
+        "trị, chọn đúng một trạng thái chuẩn. Không chắc thì chọn `unknown`.\n\n"
+        f"Trạng thái chuẩn:\n{choices}\n\nVí dụ cách ghi đã biết:\n{examples}\n\n"
+        "Các giá trị cần phân loại:\n"
+        + "\n".join(f"- {json.dumps(v, ensure_ascii=False)}" for v in values)
+    )
+    schema = {
+        "type": "object",
+        "properties": {v: {"enum": list(STATUS_CHOICES)} for v in values},
+        "required": values,
+        "additionalProperties": False,
+    }
+    return prompt, schema
+
+
+def request_status_aliases(
+    business_id: str, values: list[str], propose: Propose, cache_dir: Path | None
+) -> dict[str, str]:
+    """Normalized status token -> canonical status; ``unknown`` answers are left out."""
+    prompt, schema = build_status_request(values)
+    key = fingerprint(
+        {"prompt": prompt, "schema": schema, "model": getattr(propose, "model_id", None)}
+    )
+    path = cache_dir / "llm_mapping" / f"status-{key}.json" if cache_dir else None
+    if path is not None and path.is_file() and not path.is_symlink():
+        answer = loads(path.read_text(encoding="utf-8"))["proposal"]
+    else:
+        answer = propose(prompt, schema)
+        if path is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            record = {"business_id": business_id, "proposal": answer, "prompt": prompt}
+            path.write_text(dumps(record) + "\n", encoding="utf-8")
+    if not isinstance(answer, dict) or set(answer) != set(values):
+        raise ContractError("status classification does not cover the asked values")
+    aliases = {}
+    for value, status in answer.items():
+        if status not in STATUS_CHOICES:
+            raise ContractError("status classification outside the closed vocabulary")
+        if status != "unknown":
+            aliases[normalized(value).strip()] = status
+    return aliases

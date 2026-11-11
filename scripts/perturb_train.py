@@ -15,26 +15,33 @@ Variants (V2-V4 build on V1):
 - ``synonyms``: column meanings rewritten with fixed synonyms outside the mapper vocabulary.
 - ``no_columns``: every ``## Cột trong`` section removed; only headers and data remain.
 - ``monthly_csv``: single-CSV shops split byte-for-byte into one file per sale month.
+- ``status_words``: README untouched; order-status cells (CSV/XLSX columns whose header reads
+  as a status) rewritten with fixed everyday wordings outside the status vocabulary.
+- ``vn_numbers``: README untouched; integer money cells (header reads as money) written as
+  Vietnamese dot-grouped text, e.g. ``1.234.000``.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import html
 import io
 import json
 import os
 import re
 import shutil
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
 from src.data.normalization.entities import EXTRA_MEANINGS
 from src.data.normalization.relational import MEANINGS
-from src.data.normalization.values import ParseError, parse_date
+from src.data.normalization.values import STATUSES, ParseError, parse_date
+from src.data.profiling import normalized
 from src.semantics.rulebook import plain
 
-VARIANTS = ("no_decl", "synonyms", "no_columns", "monthly_csv")
+VARIANTS = ("no_decl", "synonyms", "no_columns", "monthly_csv", "status_words", "vn_numbers")
 _BULLET = re.compile(r"^(\s*-\s+\*\*)(.+?)(\*\*\s*:\s*)(.+)$")
 _SECTION = re.compile(r"^## Cột trong `")
 # Plain-text column meaning -> wording a shop might use instead. Written from everyday
@@ -77,6 +84,19 @@ SYNONYMS = {
     "thoi diem thu": "lúc thu tiền",
     "so tien": "số tiền thu",
 }
+# Canonical status -> everyday wordings a shop might export instead (not from public/private).
+STATUS_SYNONYMS = {
+    "completed": ["Giao thành công", "Đã chốt", "Hoàn tất", "Đã bán"],
+    "cancelled": ["Bị hủy", "Hủy bỏ", "Đơn hủy"],
+    "returned": ["Khách trả lại", "Hoàn đơn", "Trả lại hàng"],
+    "shipping": ["Đang chuyển hàng", "Chờ lấy hàng", "Đang đi giao"],
+}
+assert not {
+    normalized(w).strip() for words in STATUS_SYNONYMS.values() for w in words
+} & set().union(*STATUSES.values()), "status synonym is vocabulary"
+_STATUS_HEADER = re.compile(r"trang thai|tinh trang|status|ket qua|xu ly")
+_MONEY_HEADER = re.compile(r"\b(?:tien|gia|tong|cong no|no|amount|price|total)\b")
+_CELL = re.compile(r'<c r="([A-Z]+)(\d+)"([^>]*?)(?:/>|>(.*?)</c>)', re.S)
 _KNOWN = {m for values in [*MEANINGS.values(), *EXTRA_MEANINGS.values()] for m in values}
 assert not {plain(s).rstrip(".") for s in SYNONYMS.values()} & _KNOWN, "synonym is vocabulary"
 
@@ -192,6 +212,24 @@ def perturb_business(source: Path, target: Path, variant: str) -> dict:
     if variant in steps:
         new = steps[variant](new)
     written = {}
+    if variant in {"status_words", "vn_numbers"}:
+        new, index, changed = readme, int(re.sub(r"\D", "", source.name) or 0), 0
+        rewriters = {".csv": rewrite_csv_statuses, ".xlsx": rewrite_xlsx_statuses}
+        if variant == "vn_numbers":
+            rewriters = {
+                ".csv": rewrite_csv_money,
+                ".xlsx": lambda d, i: rewrite_xlsx_statuses(d, i, _rewrite_money_sheet),
+            }
+        for path in list(files):
+            rewrite = rewriters.get(path.suffix.lower())
+            if rewrite is None:
+                continue
+            data, count = rewrite(path.read_bytes(), index)
+            if count:
+                written[path.name], changed = data, changed + count
+                files.remove(path)
+        if changed < (1000 if variant == "vn_numbers" else 1):  # a few cells test nothing
+            return {"skipped": f"no {variant} cells found"}
     if variant == "monthly_csv":
         column = _date_column(readme)
         if len(files) != 1 or files[0].suffix.lower() != ".csv" or column is None:
@@ -205,7 +243,156 @@ def perturb_business(source: Path, target: Path, variant: str) -> dict:
     for name, data in written.items():
         (target / name).write_bytes(data)
     (target / "README.md").write_text(new, encoding="utf-8")
-    return {"readme_changed": new != readme, "files": len(files) + len(written)}
+    return {"readme_changed": new != readme, "files": len(files) + len(written)} | (
+        {"changed_cells": changed} if variant in {"status_words", "vn_numbers"} else {}
+    )
+
+
+def _status_header(text) -> bool:
+    return bool(_STATUS_HEADER.search(normalized(str(text)).replace("_", " ")))
+
+
+def _status_synonym(text, index: int) -> str | None:
+    token = normalized(str(text)).strip()
+    for status, words in STATUSES.items():
+        if token in words:
+            return STATUS_SYNONYMS[status][index % len(STATUS_SYNONYMS[status])]
+    return None
+
+
+def _money_header(text) -> bool:
+    return bool(_MONEY_HEADER.search(normalized(str(text)).replace("_", " ")))
+
+
+def _grouped(text) -> str | None:
+    token = str(text).strip()
+    if re.fullmatch(r"-?\d{4,}", token):
+        return f"{int(token):,}".replace(",", ".")
+    if re.fullmatch(r"-?\d{1,3}(?:,\d{3})+", token):
+        return token.replace(",", ".")
+    return None
+
+
+def rewrite_csv_money(data: bytes, index: int) -> tuple[bytes, int]:
+    bom = b"\xef\xbb\xbf" if data.startswith(b"\xef\xbb\xbf") else b""
+    text = data[len(bom) :].decode("utf-8")
+    ending = "\r\n" if "\r\n" in text[:4096] else "\n"
+    rows = list(csv.reader(io.StringIO(text, newline="")))
+    if not rows:
+        return data, 0
+    columns = [j for j, cell in enumerate(rows[0]) if _money_header(cell)]
+    changed = 0
+    for row in rows[1:]:
+        for j in columns:
+            if j < len(row) and (new := _grouped(row[j])):
+                row[j], changed = new, changed + 1
+    out = io.StringIO()
+    csv.writer(out, lineterminator=ending).writerows(rows)
+    return bom + out.getvalue().encode("utf-8"), changed
+
+
+def _rewrite_money_sheet(xml: str, shared: list[str], index: int) -> tuple[str, int]:
+    cells = list(_CELL.finditer(xml))
+    first = min((int(m[2]) for m in cells), default=0)
+
+    def text(m) -> str | None:
+        if 't="inlineStr"' in m[3]:
+            parts = re.findall(r"<t[^>]*>(.*?)</t>", m[4] or "", re.S)
+            return html.unescape("".join(parts)) if parts else None
+        if 't="s"' in m[3] and (v := re.search(r"<v>(\d+)</v>", m[4] or "")):
+            return shared[int(v[1])]
+        return None
+
+    columns = {m[1] for m in cells if int(m[2]) == first and _money_header(text(m) or "")}
+    changed = 0
+
+    def swap(m: re.Match) -> str:
+        nonlocal changed
+        if m[1] not in columns or int(m[2]) == first or 't="' in m[3] and 't="n"' not in m[3]:
+            return m[0]
+        value = re.search(r"<v>([^<]*)</v>", m[4] or "")
+        new = _grouped(value[1]) if value else None
+        if new is None:
+            return m[0]
+        changed += 1
+        attrs = re.sub(r'\s+t="[^"]*"', "", m[3])
+        return f'<c r="{m[1]}{m[2]}"{attrs} t="inlineStr"><is><t>{new}</t></is></c>'
+
+    return _CELL.sub(swap, xml), changed
+
+
+def rewrite_csv_statuses(data: bytes, index: int) -> tuple[bytes, int]:
+    bom = b"\xef\xbb\xbf" if data.startswith(b"\xef\xbb\xbf") else b""
+    text = data[len(bom) :].decode("utf-8")
+    ending = "\r\n" if "\r\n" in text[:4096] else "\n"
+    rows = list(csv.reader(io.StringIO(text, newline="")))
+    header = next((i for i, r in enumerate(rows[:15]) if any(map(_status_header, r))), None)
+    if header is None:
+        return data, 0
+    columns = [j for j, cell in enumerate(rows[header]) if _status_header(cell)]
+    changed = 0
+    for row in rows[header + 1 :]:
+        for j in columns:
+            if j < len(row) and (new := _status_synonym(row[j], index)):
+                row[j], changed = new, changed + 1
+    out = io.StringIO()
+    csv.writer(out, lineterminator=ending).writerows(rows)
+    return bom + out.getvalue().encode("utf-8"), changed
+
+
+def _rewrite_sheet(xml: str, shared: list[str], index: int) -> tuple[str, int]:
+    def text(attrs: str, body: str | None) -> str | None:
+        if 't="inlineStr"' in attrs:
+            parts = re.findall(r"<t[^>]*>(.*?)</t>", body or "", re.S)
+            return html.unescape("".join(parts)) if parts else None
+        if 't="s"' in attrs and (m := re.search(r"<v>(\d+)</v>", body or "")):
+            return shared[int(m[1])]
+        return None
+
+    cells = list(_CELL.finditer(xml))
+    header_row, columns = None, set()
+    for m in cells:
+        if int(m[2]) <= 15 and (value := text(m[3], m[4])) and _status_header(value):
+            if header_row in (None, int(m[2])):
+                header_row = int(m[2])
+                columns.add(m[1])
+    if header_row is None:
+        return xml, 0
+    changed = 0
+
+    def swap(m: re.Match) -> str:
+        nonlocal changed
+        if m[1] not in columns or int(m[2]) <= header_row:
+            return m[0]
+        value = text(m[3], m[4])
+        new = _status_synonym(value, index) if value is not None else None
+        if new is None:
+            return m[0]
+        changed += 1
+        attrs = re.sub(r'\s+t="[^"]*"', "", m[3])
+        return f'<c r="{m[1]}{m[2]}"{attrs} t="inlineStr"><is><t>{html.escape(new)}</t></is></c>'
+
+    return _CELL.sub(swap, xml), changed
+
+
+def rewrite_xlsx_statuses(data: bytes, index: int, sheet=None) -> tuple[bytes, int]:
+    source = zipfile.ZipFile(io.BytesIO(data))
+    shared = []
+    if "xl/sharedStrings.xml" in source.namelist():
+        xml = source.read("xl/sharedStrings.xml").decode("utf-8")
+        shared = [
+            html.unescape("".join(re.findall(r"<t[^>]*>(.*?)</t>", si, re.S)))
+            for si in re.findall(r"<si>(.*?)</si>", xml, re.S)
+        ]
+    out, changed = io.BytesIO(), 0
+    with zipfile.ZipFile(out, "w") as target:
+        for info in source.infolist():
+            raw = source.read(info.filename)
+            if info.filename.startswith("xl/worksheets/") and info.filename.endswith(".xml"):
+                xml, count = (sheet or _rewrite_sheet)(raw.decode("utf-8"), shared, index)
+                raw, changed = xml.encode("utf-8"), changed + count
+            target.writestr(info, raw)
+    return (out.getvalue(), changed) if changed else (data, 0)
 
 
 def check_mappings(split_dir: Path, work_dir: Path, businesses: list[str]) -> dict:

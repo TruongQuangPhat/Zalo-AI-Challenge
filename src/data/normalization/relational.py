@@ -373,6 +373,14 @@ def data_rows(context: BusinessContext, source: MappedSource):
         yield table, row
 
 
+def raw_status(row: SourceRow, source: MappedSource):
+    """Rejected status token for the issue record (the model may classify it later)."""
+    try:
+        return value(row, source, "status")
+    except ParseError:
+        return None
+
+
 def value(row: SourceRow, source: MappedSource, key: str, default=None):
     if key not in source.fields:
         return default
@@ -390,13 +398,13 @@ def build_relational(
     group_errors = set()
     joins = []
 
-    def issue(code, ref, metrics):
+    def issue(code, ref, metrics, raw=None):
         blocked.update(metrics)
         counts[code] += 1
         detail = {
             "code": code,
             "source_ref": ref,
-            "raw_value": None,
+            "raw_value": raw,
             "affected_metrics": metrics,
             "severity": "blocking",
         }
@@ -536,7 +544,8 @@ def build_relational(
                 if s.role != "ledger" and (not isinstance(oid, str) or not oid.strip()):
                     raise ParseError("missing_order_id", "order key missing")
             except ParseError as exc:
-                issue(exc.code, ref, ["revenue", "order_count"])
+                raw = raw_status(row, s) if exc.code == "status_ambiguous" else None
+                issue(exc.code, ref, ["revenue", "order_count"], raw)
                 continue
             quantity = value(row, s, "quantity")
             if quantity is not None and str(quantity).lstrip().startswith("-"):
@@ -703,7 +712,8 @@ def build_relational(
                         )
                         status = normalize_status(value(row, source, "status"))
                     except ParseError as exc:
-                        issue(exc.code, row.reference(table), ["revenue", "order_count"])
+                        raw = raw_status(row, source) if exc.code == "status_ambiguous" else None
+                        issue(exc.code, row.reference(table), ["revenue", "order_count"], raw)
                         continue
                     yield source, table, row, None, day, status
                 else:

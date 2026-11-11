@@ -109,12 +109,13 @@ def test_correct_proposal_prepares_the_shop_without_touching_the_source(shop, tm
 
 def test_wrong_status_column_is_rejected_after_one_retry(shop, tmp_path):
     wrong = {**GOOD, "Tình trạng": "other", "Mặt hàng": "status", "SL": "item_name"}
-    model = FakeModel(proposal(wrong), proposal(wrong))
+    unsure = dict.fromkeys(["Bánh mì", "Cà phê", "Trà đá"], "unknown")  # item names as statuses
+    model = FakeModel(proposal(wrong), unsure, proposal(wrong), unsure)
     prepared = prepare_facts(shop(), tmp_path / "facts", propose=model)
     assert prepared.summary["status"] == "unsupported"
     assert prepared.summary["mapping_source"] == "llm_rejected"
     assert len(prepared.summary["llm_rejections"]) == 2
-    assert "Đề xuất trước bị từ chối" in model.prompts[1]
+    assert "Đề xuất trước bị từ chối" in model.prompts[2]
     assert not (tmp_path / "facts").exists()
 
 
@@ -206,7 +207,8 @@ def test_model_calling_the_sales_table_auxiliary_fails_closed(shop, tmp_path):
     model = FakeModel(proposal(GOOD, role="other"), proposal(GOOD, role="other"))
     prepared = prepare_facts(shop(), tmp_path / "facts", propose=model)
     assert prepared.summary["status"] == "unsupported"
-    assert "no complete order source" in prepared.summary["llm_rejections"][0]
+    first = prepared.summary["llm_rejections"][0]
+    assert any(e.startswith("no complete order source") for e in first)
 
 
 def _table(file: str, sheet: str, columns: list[str], empty: int = 0) -> dict:
@@ -304,3 +306,29 @@ def test_master_list_without_code_and_name_becomes_auxiliary():
         "declarations": DECLARED,
     }
     assert normalize_proposal(catalog, raw)["tables"]["Khach.xlsx / Sheet1"]["role"] == "other"
+
+
+def _unseen_statuses(synthetic_split: Path) -> None:
+    words = {"Xong": "Đã chốt", "Huỷ": "Bị hủy"}
+    path = synthetic_split / "data/shop_a/sales.csv"
+    with path.open("w", newline="") as handle:
+        csv.writer(handle).writerows([HEADER, *[[*r[:2], words[r[2]], *r[3:]] for r in ROWS]])
+
+
+def test_unseen_status_words_are_classified_by_the_model(shop, synthetic_split, tmp_path):
+    _unseen_statuses(synthetic_split)
+    model = FakeModel(proposal(GOOD), {"Bị hủy": "cancelled", "Đã chốt": "completed"})
+    prepared = prepare_facts(shop(), tmp_path / "facts", propose=model)
+    assert prepared.summary["status"] == "ready"
+    assert prepared.summary["status_aliases"] == {"bi huy": "cancelled", "da chot": "completed"}
+    assert revenue(prepared) == Decimal(170000)
+    assert "Bị hủy" in model.prompts[1] and "Xong" not in model.prompts[1].split("phân loại")[1]
+
+
+def test_status_the_model_is_unsure_about_stays_blocking(shop, synthetic_split, tmp_path):
+    _unseen_statuses(synthetic_split)
+    unsure = {"Bị hủy": "unknown", "Đã chốt": "completed"}
+    model = FakeModel(proposal(GOOD), unsure, proposal(GOOD), unsure)
+    prepared = prepare_facts(shop(), tmp_path / "facts", propose=model)
+    assert prepared.summary["status"] == "unsupported"
+    assert not model.answers
