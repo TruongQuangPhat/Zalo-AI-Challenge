@@ -266,8 +266,9 @@ def prepare_facts(
         except ContractError as error:
             rejected.append([str(error)])
             break
-        proposal = normalize_proposal(context.catalog, raw)
-        feedback = check_proposal(context.catalog, proposal)
+        notes = context.rules is not None and "note_status" in context.rules.rules
+        proposal = normalize_proposal(context.catalog, raw, notes)
+        feedback = check_proposal(context.catalog, proposal, notes)
         if not feedback:
             catalog = {**context.catalog, "readme": synthesize_readme(context.catalog, proposal)}
             trial = replace(context, catalog=catalog)

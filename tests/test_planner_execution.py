@@ -1418,8 +1418,9 @@ def test_abbreviated_periods_become_one_explicit_window(text, expected):
 @pytest.mark.parametrize(
     "text,unparsed",
     [
-        ("Doanh thu th3 được bao nhiêu?", True),
-        ("Trong tháng 6 bán được bao nhiêu tiền?", True),
+        ("Doanh thu th3 và th4/2025 được bao nhiêu?", True),
+        # Rulebook "Tháng M không ghi năm": a bare month alone is a supported period.
+        ("Trong tháng 6 bán được bao nhiêu tiền?", False),
         ("Doanh thu ngày 27/04 là bao nhiêu?", True),
         ("Tính từ ngày 1/1 đến hết hôm nay, doanh thu năm nay?", False),
         ("Doanh thu từ ngày 01/12/2025 đến ngày 02/01/2026?", False),
@@ -1435,7 +1436,7 @@ def test_unparsed_period_is_detected_without_flagging_supported_wording(text, un
 def test_unparsed_period_abstains_before_calling_the_model(semantic_source):
     model = ScriptedModel()
     result = LocalPlanner(model).decide(
-        question(question="Doanh thu th3 được bao nhiêu?"), context=semantic_source()
+        question(question="Doanh thu ngày 27/04 được bao nhiêu?"), context=semantic_source()
     )
     assert result["answer"]["type"] == "abstain" and model.calls == 0
     assert result["plan"]["reason"].endswith(":unparsed_time")
@@ -1609,7 +1610,7 @@ def test_unanswerable_is_not_suppressed_by_the_entity_guard(tmp_path):
         ("soos ddown hoom nay", "so don hom nay"),
         (
             "ngayf naof trong thangs 6/2025 dthu cao nhaats",
-            "ngay nao trong thang 6/2025 dthu cao nhat",
+            "ngay nao trong thang 6/2025 doanh thu cao nhat",
         ),
         ("tieenf bans Bia Tiger 330ml", "tien ban bia tiger 330ml"),
     ],

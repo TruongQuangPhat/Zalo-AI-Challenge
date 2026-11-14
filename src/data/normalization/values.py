@@ -114,6 +114,49 @@ def number_evidence(value: str) -> str | None:
     return None
 
 
+_SUMMARY = re.compile(
+    r"^(?:tong|cong)(?:\s+cong\b|\s+(?:ngay|thang|ky|nam)(?:\s*[:-]?\s*\d|\s*$)|\s*[:-]?\s*\d)"
+)
+
+
+def summary_label(value) -> bool:
+    """A subtotal label: "Cộng ngày 01/05", "Tổng 01/05", "Tổng cộng", "Tổng tháng 5".
+
+    A word after "tổng/cộng" that is not a period word followed by a number is a name
+    ("Tống Thắng Khánh"), not a subtotal.
+    """
+    return value is not None and bool(_SUMMARY.match(normalized(str(value)).strip()))
+
+
+# Purchase receipt statuses (plain text); anything else is never guessed.
+PURCHASE_RECEIVED = frozenset({"received", "da nhap", "da nhap hang", "da nhap kho"})
+PURCHASE_CANCELLED = frozenset({"cancelled", "huy", "da huy"})
+
+
+def annotation_label(value) -> bool:
+    """A footnote written into the table: "Ghi chú: số liệu ghi tay", "Lưu ý: …"."""
+    return value is not None and bool(
+        re.match(r"(?:ghi chu|chu thich|luu y)\s*:", normalized(str(value)).strip())
+    )
+
+
+def label_cell(value) -> bool:
+    """A subtotal or footnote label: never an order ID, date or status by itself."""
+    return summary_label(value) or annotation_label(value)
+
+
+def strip_unit(value, unit):
+    """ "2 ly" -> "2" only when the word is the line's own selling unit; else unchanged."""
+    if not isinstance(value, str) or unit in {None, ""}:
+        return value
+    match = re.fullmatch(r"([+-]?\d+(?:[.,]\d+)?)\s*(\D.*)", value.strip())
+
+    def same(a: str) -> bool:
+        return re.sub(r"\W", "", normalized(a)) == re.sub(r"\W", "", normalized(str(unit)))
+
+    return match[1] if match and same(match[2]) else value
+
+
 def parse_datetime(value, *, year: int | None = None, date_system: str | None = None) -> datetime:
     if isinstance(value, bool) or isinstance(value, float) or value is None:
         raise ParseError("date_type", "date requires a source token and date-role evidence")
@@ -191,6 +234,9 @@ STATUSES: dict[str, set[str]] = {
         "da tra hang",
         "tra lai",
         "hang tra ve",
+        "khach mang tra",
+        "khach mang tra lai",
+        "khach tra hang",
     },
     # Active recorded order: revenue/count exclude cancellation and returns.
     # This alias does not certify a physical shipment for future shipping metrics.
@@ -204,6 +250,9 @@ STATUSES: dict[str, set[str]] = {
         "dang gui",
         "dang xu ly",
         "dang van chuyen",
+        "dang ship",
+        "chua giao",
+        "chua giao hang",
     },
 }
 
@@ -214,9 +263,49 @@ def normalize_status(value) -> str:
         if token in labels:
             return status
     aliases = STATUS_ALIASES.get() or {}
-    if token in aliases:
+    # "not_status" (a note that says nothing about the outcome) is no status-column value.
+    if aliases.get(token, "not_status") != "not_status":
         return aliases[token]
     raise ParseError("status_ambiguous", "unknown order status; no default was applied")
+
+
+# Words that make a free-text note possibly about the order's outcome; a note with none of
+# them does not mention a status (rulebook: such an order is completed). "Trả tiền/nợ/trước"
+# is how the customer paid, and a warranty note ("bảo hành") is a ticket kind, not an outcome.
+_PAID = r"(?! (?:tien|no|truoc|sau|ck|chuyen khoan|bang|qua|du|het|gop|coc|mat))"
+_NOTE_CUE = re.compile(
+    r"(?<!\w)(?:tra" + _PAID + r"|huy|hoan|doi|cancel|return|refund|bom|boom|"
+    r"khong (?:lay|nhan)|giao|ship)(?!\w)"
+)
+
+
+def note_status(note) -> str:
+    """Status of an order whose shop writes it in the note column (no status column).
+
+    Empty note or no status wording: completed. A note that is exactly a status word, or
+    contains wording of exactly one status, takes it; model aliases come next. Anything
+    else that mentions an outcome stays ``status_ambiguous`` (never defaulted).
+    """
+    if note is None or not str(note).strip():
+        return "completed"
+    token = normalized(str(note)).strip()
+    for status, labels in STATUSES.items():
+        if token in labels:
+            return status
+    aliases = STATUS_ALIASES.get() or {}
+    if token in aliases:
+        return "completed" if aliases[token] == "not_status" else aliases[token]
+    found = {
+        status
+        for status, labels in STATUSES.items()
+        for label in labels
+        if len(label) > 2 and re.search(r"(?<!\w)" + re.escape(label) + r"(?!\w)" + _PAID, token)
+    }
+    if len(found) == 1:
+        return found.pop()
+    if found or _NOTE_CUE.search(token):
+        raise ParseError("status_ambiguous", "note may state an order status")
+    return "completed"
 
 
 def serial_system(tokens: list[str], declared_end: str | None) -> str | None:

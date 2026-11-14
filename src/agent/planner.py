@@ -89,7 +89,7 @@ Thiếu source/coverage không tự đoán dữ liệu; server preflight quyết
 # silently falls back to a whole-business metric, so abstain before planning.
 UNSUPPORTED_INTENTS = {
     "unit_price": (
-        r"\b(don gia|gia ban)\b|\bgia (mot|1) "
+        r"\b(don gia(?! tri)|gia ban)\b|\bgia (mot|1) "
         r"|\bgia (?:bao nhieu|bao nhiu|bn|bnhiu) (?:tien )?(?:mot|1)\b"
     ),
     "size_quantity": r"\bsize (m|l)\b",
@@ -127,7 +127,9 @@ _LIST_CUES = (
     # Two questions in one sentence, unless a single percentage compares two periods.
     r"^(?!.*(?:%|\bphan tram\b)).*\b" + _ASK + r"\b.*\b" + _ASK + r"\b",
     r"\bva (?:doanh thu |dthu |so don )?(?:cac )?don\b",
-    r"\b(?:top )?(?:[2-9]|10|hai|ba|bon|nam) (?:mat hang|mon|san pham|khach|nhan vien)\b",
+    r"\b(?<!thang )(?<!quy )(?<!tuan )(?<!ngay )"
+    r"(?:top )?(?:[2-9]|10|hai|ba|bon|nam) (?:mat hang|mon|san pham|khach|"
+    r"nhan vien)\b",
     r"\bnhung (?:mat hang|mon|san pham|khach)\b",
 )
 _DATE_CUE = r"\b(?:ngay|thang) nao\b"
@@ -215,6 +217,66 @@ def _guard_unbound_entity(decision: dict, question: Question, context: BusinessC
     return _suppress(decision, question, "guard:unbound_entity", mentioned=name)
 
 
+REWRITE_PROMPT = (
+    "Viết lại câu hỏi dưới đây của chủ cửa hàng sang tiếng Việt chuẩn, có đủ dấu: thay từ "
+    "viết tắt, tiếng lóng, từ địa phương bằng từ phổ thông cùng nghĩa. Giữ nguyên từng chữ của "
+    "mọi số, ngày, tháng, năm, mã, tên mặt hàng, tên khách, tên người. Không thêm, không bớt "
+    'ý. Trả về JSON {"question": "..."}.\n\nCâu hỏi: '
+)
+_NUMBER = re.compile(r"\d+(?:[.,/:-]\d+)*")
+# A capitalised word that does not open the sentence: likely part of a name.
+_NAME = re.compile(r"(?<=[\w,] )[A-ZĐÀ-Ỹ][\w-]*")
+
+
+def faithful_rewrite(original: str, rewritten: str) -> bool:
+    """Every number and name-like word survives verbatim, and no new number appears."""
+    from collections import Counter
+
+    numbers = Counter(_NUMBER.findall(original))
+    if numbers != Counter(_NUMBER.findall(rewritten)):
+        return False
+    words = set(re.findall(r"[\w-]+", rewritten))
+    if not all(name in words for name in _NAME.findall(original)):
+        return False
+    from src.semantics.rulebook import question_plain
+
+    # Relative periods and comparison words must not drift ("hôm qua" -> "hôm nay").
+    def cues(text: str) -> list[str]:
+        return sorted(re.findall(_CUES, question_plain(text)))
+
+    return cues(original) == cues(rewritten)
+
+
+_CUES = (
+    r"\b(?:hom nay|hom qua|hom kia|tuan nay|tuan truoc|thang nay|thang truoc|nam nay|"
+    r"nam ngoai|nam truoc|quy|cung ky|so voi|huy|tra hang|tang|giam|nhat|it nhat|tro len|"
+    r"tren|duoi|top \d+)\b"
+)
+
+
+def rewrite_question(model, question: Question) -> Question | None:
+    """One short model call; ``None`` unless the rewrite keeps every number and name."""
+    from dataclasses import replace
+
+    schema = {
+        "type": "object",
+        "properties": {"question": {"type": "string"}},
+        "required": ["question"],
+        "additionalProperties": False,
+    }
+    prompt = REWRITE_PROMPT + question.question
+    try:
+        record = model.generate([{"role": "user", "content": prompt}], schema, 60, max_tokens=256)
+        if record.get("finish_reason") != "stop":
+            return None
+        text = str(loads(record["text"])["question"]).strip()
+    except (ContractError, OSError, ValueError, KeyError, TypeError):
+        return None
+    if not text or text == question.question or not faithful_rewrite(question.question, text):
+        return None
+    return replace(question, question=text)
+
+
 class LocalPlanner:
     name = "local-planner"
 
@@ -238,10 +300,28 @@ class LocalPlanner:
         from src.agent.rule_ops import answer_by_rule
 
         # Rulebook operators the QueryPlan cannot express answer first, without the model.
-        if self.rule_ops and (ruled := answer_by_rule(question, context)) is not None:
+        ruled = answer_by_rule(question, context) if self.rule_ops else None
+        if ruled is None and self.rule_ops:
+            # Chat/dialect wording no operator recognised: a faithful standard rewrite only.
+            rewritten = rewrite_question(self.model, question)
+            if rewritten is not None:
+                ruled = answer_by_rule(rewritten, context)
+                if ruled is not None:
+                    ruled["plan"]["rewritten_question"] = rewritten.question
+        if ruled is not None:
             if expected := shape_mismatch(question, ruled["answer"]["type"]):
                 return _suppress(ruled, question, "guard:answer_shape", expected=expected)
             return ruled
+        from src.agent.rule_ops import repair_ticket_question
+        from src.semantics.rulebook import question_plain
+
+        if repair_ticket_question(context, question_plain(question.question)):
+            reason = "guard:repair_ticket_rules"
+            return {
+                "answer": {"id": question.id, "type": "abstain"},
+                "plan": {"status": "skipped", "reason": reason, "prompt_version": PROMPT_VERSION},
+                "execution": {"status": "not_performed", "reason": reason},
+            }
         if intent := unsupported_intent(question):
             reason = f"guard:unsupported_intent:{intent}"
             return {

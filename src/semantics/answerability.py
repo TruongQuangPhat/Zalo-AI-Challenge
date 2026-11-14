@@ -652,10 +652,19 @@ def _business_window(context, metric_id, expression, as_of_date, result):
                 raise ContractError("order_history_incomplete")
             if "order_count" in prepared.summary.get("blocking_metrics", []):
                 raise ContractError("dependent_order_quality_issue")
-            # A payment-event extent is not a complete period. Require the
-            # declared full export span to include zero-payment days safely.
+            # A payment-event extent is not a complete period. Every payment belongs to
+            # an exported order, so the orders' first day through the README's declared
+            # end is complete, zero-payment days included.
             if not declared_span:
-                raise ContractError("payment_period_coverage_unknown")
+                if not declared_end:
+                    raise ContractError("payment_period_coverage_unknown")
+                with closing(prepared.connect()) as connection:
+                    first = connection.execute(
+                        "SELECT min(substr(ordered_at,1,10)) FROM orders"
+                    ).fetchone()[0]
+                if first is None or (observed[0] < first):
+                    raise ContractError("payment_period_coverage_unknown")
+                declared_span = (first, declared_end)
         lower, upper = declared_span or observed
         start, end = max(window.start.isoformat(), lower), min(end, upper)
         basis = "README_full_span" if declared_span else "observed_purchase_export_dates_policy"

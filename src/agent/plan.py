@@ -204,7 +204,7 @@ def _metric_cues(question: Question) -> set[str]:
     text = question_plain(question.question)
     cues = {
         r"\b(doanh thu|doanh so|dthu|revenue|tien ban|tien hang|"
-        r"ban duoc (?:tong cong )?bao nhieu tien|"
+        r"ban duoc (?:tong (?:cong )?|tat ca )?bao nhieu tien|"
         r"thu ve bao nhieu tien)\b": "revenue",
         r"\b((so|may|bao nhieu|bao nhiu|bn|bnhiu|dem|tong) (don|bill)|"
         r"don hang duoc bao nhieu)\b": "order_count",
@@ -250,6 +250,24 @@ def _time_text(question: Question) -> str:
     text = re.sub(r"\bthangs\b", "thang", question_plain(question.question))
     text = re.sub(r"\bnawm\b", "nam", text)
     text = re.sub(r"\bquys\b", "quy", text)
+    # Rulebook: "N ngày gần nhất" counts today; "N ngày qua, tính cả hôm nay" says so outright
+    # and its "hôm nay" is the range's end, not a second window.
+    text = re.sub(
+        r"\b(\d+) ngay (?:qua|vua qua|gan day|gan nhat|cuoi(?: cung)?)\s*[,(-]?\s*"
+        r"(?:tinh|ke) ca (?:hom nay|bua nay|hnay)\b\)?",
+        r"\1 ngay gan nhat",
+        text,
+    )
+    text = re.sub(
+        r"\b(?:tu )?dau nam (?:toi|den)(?: het)? (?:gio|nay|chu|bay gio|hom nay|bua nay)\b",
+        "tu dau nam",
+        text,
+    )
+    text = re.sub(r"\b((?:den|toi) het) (?=\d{1,2}/\d{1,2}/\d{4})", r"\1 ngay ", text)
+    if question.as_of_date:
+        last = int(question.as_of_date[:4]) - 1
+        text = re.sub(r"\b(thang|quy) (\d{1,2}) nam (?:ngoai|roi|truoc)\b", rf"\1 \2/{last}", text)
+        text = re.sub(r"\b(thang|quy) (\d{1,2}) nam nay\b", rf"\1 \2/{last + 1}", text)
     year = r"(\d{4}|\d{2})(?![/-]?\d)"
     # T5/2025, Th 11/25, thg7-2026, thang 5-2026, thang 11/25
     month = _period("thang", 12)
@@ -267,9 +285,21 @@ def _time_text(question: Question) -> str:
     return text
 
 
+# "tháng 7" with no year anywhere in the question: rulebook "Tháng M không ghi năm".
+_BARE_MONTH = r"(?<![\d/])\bthang (\d{1,2})\b(?![/-]?\d| nam \d)"
+
+
+def _bare_months(text: str) -> list[re.Match]:
+    if re.search(r"\b\d{4}\b|\b\d{1,2}/\d{2}\b", text):
+        return []
+    return [m for m in re.finditer(_BARE_MONTH, text) if 1 <= int(m[1]) <= 12]
+
+
 def unparsed_time(question: Question) -> bool:
     """Whether a date-like token remains that no finite cue turns into a window."""
     text = _time_text(question)
+    for m in reversed(_bare_months(text)):
+        text = text[: m.start()] + " " + text[m.end() :]
     for pattern in _PARSED_TIME:
         text = re.sub(pattern, " ", text)
     return bool(re.search(_UNPARSED_TIME, text))
@@ -303,6 +333,8 @@ def _literal_windows(question: Question) -> list[dict]:
             events.append((m.start(), {"kind": kind, "year": int(m[2]), field: int(m[1])}))
     for m in re.finditer(r"\b(?:ngay|hom|bua) " + dates + r"\b", text):
         events.append((m.start(), {"kind": "day", "date": iso(m.groups())}))
+    for m in _bare_months(text):
+        events.append((m.start(), {"kind": "month", "month": int(m[1])}))
     for m in re.finditer(r"\b(\d+) ngay gan nhat\b", text):
         events.append((m.start(), {"kind": "last_n_days", "days": int(m[1])}))
     for m in re.finditer(r"\b(truoc tet|tet)(?: nam)? (\d{4})\b", text):
@@ -894,7 +926,9 @@ def _check_question_scope(
                 "capability": "requires_explicit_binding",
             },
         )
-    owners_removed = re.sub(r"\b(cua\s+)?(cua hang|shop|tiem|doanh nghiep)\b", "", text)
+    owners_removed = re.sub(
+        r"\b(cua\s+)?(cua hang|shop|sop|tiem|quan|nha thuoc|doanh nghiep)( minh)?\b", "", text
+    )
     if match := re.search(r"\b(cua|cuar)\s+\w", owners_removed):
         raise ContractError("question_owner_filter_unsupported")
 

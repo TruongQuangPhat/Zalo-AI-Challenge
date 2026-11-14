@@ -7,9 +7,11 @@ import sqlite3
 import time
 from decimal import Decimal, localcontext
 
+from src.agent.debt import method_code
 from src.agent.scanning import failure, scanning
 from src.contracts import validate_answer
 from src.data.catalog import BusinessContext
+from src.data.normalization.values import PURCHASE_RECEIVED
 from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.rulebook import plain
@@ -179,7 +181,8 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                 budget()
                 if created[:10] > end or status == "cancelled":
                     continue
-                if not method or plain(method) not in {
+                method = method_code(method)
+                if not method or method not in {
                     "cash",
                     "transfer",
                     "ewallet",
@@ -189,7 +192,7 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                     "tmdt",
                 }:
                     raise ContractError("order_payment_method_missing_or_unknown")
-                if plain(method) in {"cod", "marketplace", "tmdt"}:
+                if method in {"cod", "marketplace", "tmdt"}:
                     continue
                 if channel is not None:
                     channel_label = plain(channel)
@@ -207,7 +210,7 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                         raise ContractError("debt_sales_channel_policy_unsupported")
                 customer = customer_identity(customer)
                 if metric == "debt_collection":
-                    if plain(method) == "debt":
+                    if method == "debt":
                         for day, amount in collections.get(order, []):
                             if start <= day <= end and day > created[:10]:
                                 add(customer, amount)
@@ -230,7 +233,7 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                 (start, end),
             ):
                 budget()
-                if start <= day[:10] <= end and plain(status) in {"received", "da nhap"}:
+                if start <= day[:10] <= end and plain(status) in PURCHASE_RECEIVED:
                     add(None, scan.number(amount))
         elif metric == "lot_expiry":
             if "lots" in issues:
@@ -252,7 +255,7 @@ def _reduce(context: BusinessContext, plan: dict, check: dict, deadline: float |
                 (selected,),
             ):
                 budget()
-                if purchased[:10] <= end and plain(status) in {"received", "da nhap"}:
+                if purchased[:10] <= end and plain(status) in PURCHASE_RECEIVED:
                     balances[lot] = [expiry, scan.number(quantity)]
             for lot, sold, returned, returned_at, created, status in scan.rows(
                 "SELECT "

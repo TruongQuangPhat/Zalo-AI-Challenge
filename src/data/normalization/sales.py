@@ -7,6 +7,7 @@ import sqlite3
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, replace
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,9 +16,11 @@ from src.data.cache import fingerprint
 from src.data.ingestion import Cell, SourceRow
 from src.data.normalization.values import (
     ParseError,
+    annotation_label,
     cell_value,
     consistent_grouping,
     exact_add,
+    label_cell,
     normalize_status,
     number_evidence,
     parse_date,
@@ -25,6 +28,8 @@ from src.data.normalization.values import (
     parse_money,
     parse_number,
     serial_system,
+    strip_unit,
+    summary_label,
 )
 from src.data.profiling import normalized
 from src.jsonio import ContractError, dumps
@@ -84,6 +89,7 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
         },
         "item": {"ten hang", "ten san pham", "product name"},
         "quantity": {"so luong", "quantity"},
+        "unit": {"don vi tinh", "selling unit"},
         "returned_at": {"ngay tra hang", "return date"},
         "customer": {
             "ten khach",
@@ -142,7 +148,7 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
             sections[filename] = descriptions(section)
         candidates, lookups = [], []
         for candidate in tables:
-            definitions = sections.get(Path(candidate["source_ref"]["file"]).name, {})
+            definitions = readme_section(sections, Path(candidate["source_ref"]["file"]).name, {})
             fields_for_table = mapped_fields(candidate, definitions)
             if {"order_id", "ordered_at", "status"} & fields_for_table.keys():
                 candidates.append((candidate, fields_for_table))
@@ -224,36 +230,73 @@ def sales_mapping(context: BusinessContext) -> SalesMapping:
     return result
 
 
+def readme_section(sections: dict, name, default=None):
+    """README section for a file: its exact name, else one template such as
+    ``BanHang_T<tháng>_<năm>.xlsx`` (each ``<...>`` stands for a run of characters)."""
+    if name in sections:
+        return sections[name]
+    filename = name[0] if isinstance(name, tuple) else name
+    found = [
+        key
+        for key in sections
+        if "<" in (key[0] if isinstance(key, tuple) else key)
+        and (not isinstance(name, tuple) or key[1] == name[1])
+        and re.fullmatch(
+            "".join(
+                ".+?" if part.startswith("<") else re.escape(part)
+                for part in re.split(r"(<[^<>]+>)", key[0] if isinstance(key, tuple) else key)
+            ),
+            filename,
+        )
+    ]
+    return sections[found[0]] if len(found) == 1 else default
+
+
+def _adjustment(context: BusinessContext, item_text: str) -> bool:
+    from src.data.normalization.relational import ADJUSTMENT, adjustment_authority
+
+    return bool(ADJUSTMENT.search(item_text)) and adjustment_authority(context)
+
+
 def _sheet_year(profile: dict) -> int | None:
-    found = set(re.findall(r"(?<!\d)(20\d{2})(?!\d)", profile["source_ref"]["table"]))
+    """Rulebook: a date without a year takes the year of the sheet holding the row.
+
+    The sheet name decides; a sheet without one (or a CSV) takes a single year in its
+    file name. No year anywhere leaves year-less dates unparsed.
+    """
+    ref = profile["source_ref"]
+    found = set(re.findall(r"(?<!\d)(20\d{2})(?!\d)", ref["table"]))
     if len(found) > 1:
         raise ContractError("ambiguous sheet year")
-    return int(next(iter(found))) if found else None
+    if not found:
+        found = set(re.findall(r"(?<!\d)(20\d{2})(?!\d)", Path(ref["file"]).stem))
+    return int(next(iter(found))) if len(found) == 1 else None
 
 
 def _signature(cells: dict[int, Cell]) -> str:
-    # Coordinates/styles locate an export copy but do not make it a different business row.
+    # Coordinates/styles locate an export copy but do not make it a different business row;
+    # neither does padding around a text value ("  SP0006" is the code SP0006).
     return dumps(
         [
-            [position, cell.native_type, cell.raw_value, cell.metadata.get("formula")]
+            [
+                position,
+                cell.native_type,
+                cell.raw_value.strip() if isinstance(cell.raw_value, str) else cell.raw_value,
+                cell.metadata.get("formula"),
+            ]
             for position, cell in sorted(cells.items())
         ]
     )
 
 
 def _summary(row: SourceRow, mapping: SalesMapping) -> bool:
-    candidates = (
-        [row.cells.get(mapping.fields["item"])]
-        if "item" in mapping.fields and mapping.shape != "xlsx_order_lines"
-        else row.cells.values()
-    )
-    return any(
-        cell
-        and re.match(
-            r"^(tong|cong)\s+(ngay|cong|thang|ky)\b", normalized(str(cell.raw_value)).strip()
-        )
-        for cell in candidates
-    )
+    if "item" in mapping.fields and mapping.shape != "xlsx_order_lines":
+        positions = [
+            mapping.fields[f] for f in ["item", "order_id", "ordered_at"] if f in mapping.fields
+        ]
+    else:
+        positions = list(row.cells)
+    return any(summary_label(row.cells[p].raw_value) for p in positions if p in row.cells)
 
 
 def _row_role(row: SourceRow, header: SourceRow, mapping: SalesMapping) -> str:
@@ -261,21 +304,27 @@ def _row_role(row: SourceRow, header: SourceRow, mapping: SalesMapping) -> str:
         return "blank"
     if row.ordinal < header.ordinal:
         return "title"
-    first = min(header.cells)
-    if row.cells.get(first) == header.cells[first] and _signature(row.cells) == _signature(
-        header.cells
-    ):
+    # Cell metadata carries the address, so only the content signature can match a copy.
+    if _signature(row.cells) == _signature(header.cells):
         return "header" if row.ordinal == header.ordinal else "repeated_header"
+    filled = {p: c for p, c in row.cells.items() if c.raw_value not in {None, ""}}
+    # A footnote row ("Ghi chú: số liệu ghi tay") holds nothing but the footnote.
+    if all(annotation_label(c.raw_value) for c in filled.values()):
+        return "annotation"
     if _summary(row, mapping):
-        # A summary sharing an order ID could be a named item; do not silently drop it.
-        return (
-            "unknown"
-            if any(
-                row.cells.get(mapping.fields[f]) and row.cells[mapping.fields[f]].raw_value
-                for f in ["order_id", "ordered_at", "status"]
-            )
-            else "summary"
-        )
+        identity = [
+            row.cells.get(mapping.fields[f])
+            for f in ["order_id", "ordered_at", "status"]
+            if f in mapping.fields
+        ]
+        # A subtotal label in the ID or date column ("Tổng 01/05", "Tổng cộng") is not
+        # identity; a summary sharing a real order ID or date could be a named item.
+        present = [
+            c
+            for c in identity
+            if c and c.raw_value not in {None, ""} and not label_cell(c.raw_value)
+        ]
+        return "unknown" if present else "summary"
     return "data"
 
 
@@ -411,7 +460,10 @@ def _build_sales_source(
                     qty and str(qty.raw_value).lstrip().startswith("-")
                 ):
                     try:
-                        quantity = parse_number(cell_value(qty))
+                        unit = cells.get(mapping.fields.get("unit"))
+                        quantity = parse_number(
+                            strip_unit(cell_value(qty), unit.raw_value if unit else None)
+                        )
                         if not mapping.negative_returns:
                             raise ParseError(
                                 "return_parser_unsupported", "negative quantity role unknown"
@@ -447,10 +499,14 @@ def _build_sales_source(
                             if re.fullmatch(r"\d+(?:\.\d+)?", str(value))
                             else None,
                         )
+                        # A whole serial is a date; only a fraction carries a clock.
                         parsed[field] = (
                             parsed_date.isoformat()
                             if re.search(r"[T ]\d{1,2}:\d{2}", str(value))
-                            or cells[mapping.fields[field]].native_type == "numeric"
+                            or (
+                                cells[mapping.fields[field]].native_type == "numeric"
+                                and parsed_date.time() != datetime.min.time()
+                            )
                             else parsed_date.date().isoformat()
                         )
                     else:
@@ -597,7 +653,11 @@ def _build_sales_source(
                         and cells[mapping.fields["amount"]].native_type == "numeric"
                         else convention,
                     )
-                    if amount < 0 and line_role != "return_item":
+                    item_cell = cells.get(mapping.fields.get("item"))
+                    adjustment = item_cell is not None and _adjustment(
+                        context, normalized(str(item_cell.raw_value)).strip()
+                    )
+                    if amount < 0 and line_role != "return_item" and not adjustment:
                         line_role = "unknown"
                         raise ParseError(
                             "row_role_unknown", "negative amounts require a role parser"
@@ -621,6 +681,8 @@ def _build_sales_source(
                     and context.rules.rules["item_role"].status == "resolved"
                 ):
                     line_role = "service_fee"
+                elif item_text and _adjustment(context, item_text):
+                    line_role = "order_adjustment"
                 elif not item_text or re.search(r"voucher|diem|phi (?:ship|giao)", item_text):
                     line_role = "unknown"
                     issue(

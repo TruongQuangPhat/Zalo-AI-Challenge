@@ -29,7 +29,7 @@ from src.data.catalog import prepare_business
 from src.data.normalization import prepare_facts
 from src.data.split import Question, load_split
 from src.evaluation.scorer import evaluate
-from src.jsonio import ContractError
+from src.jsonio import ContractError, dumps
 from src.semantics.answerability import prepare_semantics
 
 
@@ -143,13 +143,13 @@ def _evaluate(args, propose) -> None:
         for op, count in sorted(counts.items()):
             print(f"{op:20s} answered {count}")
         (args.work_dir / "predictions.jsonl").write_text(
-            "".join(json.dumps(a, ensure_ascii=False) + "\n" for _, _, a in rows)
+            "".join(dumps(a) + "\n" for _, _, a in rows)
         )
         return
     gold = {json.loads(line)["id"]: line for line in args.answers.open()}
     answers, predictions = args.work_dir / "answers.jsonl", args.work_dir / "predictions.jsonl"
     answers.write_text("".join(gold[a["id"]] for _, _, a in rows))
-    predictions.write_text("".join(json.dumps(a, ensure_ascii=False) + "\n" for _, _, a in rows))
+    predictions.write_text("".join(dumps(a) + "\n" for _, _, a in rows))
     verdicts = (
         {d["id"]: d["verdict"] for d in evaluate(answers, predictions)["details"]} if rows else {}
     )

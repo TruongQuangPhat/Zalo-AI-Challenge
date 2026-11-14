@@ -17,21 +17,26 @@ from typing import TYPE_CHECKING
 
 from src.data.cache import fingerprint
 from src.data.ingestion import SourceRow
-from src.data.normalization.sales import _sheet_year, _signature
+from src.data.normalization.sales import _sheet_year, _signature, readme_section
 from src.data.normalization.stock import identity_text
 from src.data.normalization.values import (
     ParseError,
+    annotation_label,
     cell_value,
     consistent_grouping,
+    label_cell,
     normalize_status,
+    note_status,
     number_evidence,
     parse_date,
     parse_datetime,
     parse_money,
     serial_system,
+    summary_label,
 )
 from src.data.profiling import normalized
 from src.jsonio import ContractError, dumps
+from src.semantics.rulebook import plain
 
 if TYPE_CHECKING:
     from src.data.catalog import BusinessContext
@@ -51,6 +56,7 @@ MEANINGS = {
     "quantity": {"so luong", "quantity"},
     "returned_quantity": {"so luong khach tra lai (don vi co ban); lon hon 0: don do co tra hang"},
     "channel": {"kenh ban", "sales channel"},
+    "note": {"ghi chu don", "order note"},
     "clock": {
         "thoi diem tao don",
         "ngay gio tao don",
@@ -95,6 +101,7 @@ LABELS = {
         "sltradvtcoban",
     },
     "channel": {"kenhbanhang", "kenhban", "saleschannel", "nguondon"},
+    "note": {"ghichudon", "ordernote"},
     "clock": {"thoigiantao", "thoigianlap", "ngaygiotao", "createdat", "giotaodon"},
 }
 
@@ -166,17 +173,23 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
     if "thong tin don chi ghi o dau" in text:
         raise ContractError("unrecognized inheritance declaration")
     ledger = "khong ghi ma don" in text or "khong co ma don" in text
+    # Rulebook "Sổ không có cột trạng thái": the note column carries the order status.
+    notes = "note_status" in context.rules.rules
     sources = []
+    unresolved = []
     for p in context.catalog["tables"]:
         if p["read_status"] == "not_read":
             if p["metadata"].get("object_type") == "view":
                 raise ContractError("view dependencies unverified")
             continue
         if p["structure_status"] != "resolved":
-            raise ContractError("unresolved source structure")
+            unresolved.append(p)
+            continue
         name = Path(p["source_ref"]["file"]).name
         table = p["source_ref"]["table"]
-        definitions = sections.get((name, table), sections.get((name, ""), {}))
+        definitions = readme_section(
+            sections, (name, table), readme_section(sections, (name, ""), {})
+        )
         fields = {}
         for field, meanings in MEANINGS.items():
             candidates = [
@@ -219,9 +232,14 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
             and not any(v.startswith("he so: so don vi co ban") for v in definitions.values())
         ):
             raise ContractError("unclassified conversion source")
+        if notes and "status" not in fields and "note" in fields:
+            fields["status_note"] = fields["note"]
+        status = {"status", "status_note"} & fields.keys()
         role = None
         auxiliary_family = None
-        body = section_bodies.get((name, table), section_bodies.get((name, ""), ""))
+        body = readme_section(
+            section_bodies, (name, table), readme_section(section_bodies, (name, ""), "")
+        )
         if _independent_delivery(p, definitions, body):
             role, auxiliary_family = "auxiliary", "delivery_batches"
         elif "mot dot giao hang" in normalized(body):
@@ -231,11 +249,11 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
         elif "file phu, khong chua giao dich ban" in normalized(body):
             # Explicit README authority (also written for accepted model proposals).
             role = "auxiliary"
-        elif {"order_id", "ordered_at", "status"} <= fields.keys():
+        elif status and {"order_id", "ordered_at"} <= fields.keys():
             role = "combined" if {"amount", "item"} <= fields.keys() else "header"
         elif {"order_id", "amount"} <= fields.keys() and ({"product_id", "item"} & fields.keys()):
             role = "detail"
-        elif ledger and {"ordered_at", "status", "amount", "item"} <= fields.keys():
+        elif ledger and status and {"ordered_at", "amount"} <= fields.keys():
             role = "ledger"
         elif "order_id" in fields and "returned_quantity" in fields:
             role = "return_quantity"
@@ -258,6 +276,19 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
             raise ContractError("unclassified source: " + name + "/" + table)
         sources.append(MappedSource(p, fields, role, auxiliary_family))
     roles = {s.role for s in sources}
+    # A small lookup sheet the profiler could not resolve (e.g. an abbreviation list) does
+    # not block sales once complete order sources exist; one that might hold sales does.
+    complete = (
+        "combined" in roles or {"header", "detail"} <= roles or (ledger and "ledger" in roles)
+    )
+    if unresolved and not (
+        complete
+        and all(
+            p["raw_row_count"] <= 200 and not re.search(r"\d", p["source_ref"]["table"])
+            for p in unresolved
+        )
+    ):
+        raise ContractError("unresolved source structure")
     if "combined" in roles and ({"header", "detail"} & roles):
         raise ContractError("overlapping sales representations require reconciliation")
     combined = [s for s in sources if s.role == "combined"]
@@ -273,7 +304,11 @@ def relational_mapping(context: BusinessContext) -> RelationalMapping:
                 re.search(r"_\d+$", Path(s.profile["source_ref"]["file"]).stem) for s in combined
             )
             and "thong tin don lap lai o moi dong" in text
-            and all((Path(s.profile["source_ref"]["file"]).name, "") in sections for s in combined)
+            and all(
+                readme_section(sections, (Path(s.profile["source_ref"]["file"]).name, ""))
+                is not None
+                for s in combined
+            )
         )
         if not declared_parts and not any(
             cue in text
@@ -317,7 +352,7 @@ def data_rows(context: BusinessContext, source: MappedSource):
             if k in source.fields
         ]
         summary = any(
-            re.match(r"^(tong|cong)\s+(cong|ngay|thang|ky)\b", normalized(str(c.raw_value)).strip())
+            summary_label(c.raw_value)
             or (
                 source.role in {"combined", "ledger"}
                 and normalized(str(c.raw_value)).strip() in {"tong", "cong"}
@@ -325,18 +360,26 @@ def data_rows(context: BusinessContext, source: MappedSource):
             )
             for c in row.cells.values()
         )
-        if summary and not any(c and c.raw_value not in {None, ""} for c in identity):
+        # A label in the ID or date column ("Tổng 01/05", "Tổng cộng", "Ghi chú: …") is not
+        # transaction identity.
+        present = [
+            c
+            for c in identity
+            if c and c.raw_value not in {None, ""} and not label_cell(c.raw_value)
+        ]
+        if summary and not present:
             group = {}
             continue
-        annotation = any(
-            normalized(str(c.raw_value)).strip().startswith("ghi chu:") for c in row.cells.values()
-        )
+        annotation = any(annotation_label(c.raw_value) for c in row.cells.values())
         transaction_fields = [
             row.cells.get(source.fields[k])
             for k in ["order_id", "ordered_at", "status", "amount", "quantity"]
             if k in source.fields
         ]
-        if annotation and not any(c and c.raw_value not in {None, ""} for c in transaction_fields):
+        if annotation and not any(
+            c and c.raw_value not in {None, ""} and not label_cell(c.raw_value)
+            for c in transaction_fields
+        ):
             group = {}
             continue
         if not any(
@@ -344,7 +387,18 @@ def data_rows(context: BusinessContext, source: MappedSource):
         ):
             raise ContractError("unclassified nonempty row")
         if source.role == "combined":
-            fields = ["order_id", "ordered_at", "status", "customer_id", "customer"]
+            # Rulebook: a blank cell on a later line of an order equals the first line's cell
+            # for every order-level field (customer, note, status, channel, customer group).
+            fields = [
+                "order_id",
+                "ordered_at",
+                "status",
+                "status_note",
+                "customer_id",
+                "customer",
+                "customer_group",
+                "channel",
+            ]
             oid = value(row, source, "order_id")
             previous_id = group.get(source.fields["order_id"])
             if oid is not None and (previous_id is None or oid != previous_id.raw_value):
@@ -373,12 +427,84 @@ def data_rows(context: BusinessContext, source: MappedSource):
         yield table, row
 
 
+# Invoice adjustments written as lines: voucher, loyalty points, delivery fee (§1: revenue
+# is line amounts, without order discounts or delivery fees).
+ADJUSTMENT = re.compile(
+    r"^(?:voucher|giam gia voucher|dung \d+ diem|tru diem|diem thuong|phi (?:ship|giao(?: hang)?))"
+    r"\b|\b(?:voucher|diem thuong|phi ship|phi giao hang)\b"
+)
+
+
+def adjustment_authority(context: BusinessContext) -> bool:
+    """README or rulebook names vouchers, points or delivery fees as invoice adjustments."""
+    rules = context.rules
+    text = (
+        normalized(context.catalog["readme"])
+        + " "
+        + (normalized(" ".join(str(c) for c in rules.clauses)) if rules is not None else "")
+    )
+    return any(word in text for word in ["voucher", "diem", "phi giao", "phi ship"])
+
+
+_ABBREVIATION = re.compile(r"^(?:ghi tat|viet tat|ten tat|ten viet tat|ky hieu)$")
+_KIND = re.compile(r"^(?:loai|loai hang|nhom|nhom hang)$")
+_FULL_NAME = re.compile(r"^(?:ten hang|ten day du|ten san pham|mat hang|ten mon)$")
+
+
+def abbreviation_lists(context: BusinessContext) -> tuple[dict[str, str], dict[str, str]]:
+    """From a shop sheet whose header names an abbreviation column and a full-name column:
+    identity_text(abbreviation) -> full name, and identity_text(abbreviation or full name)
+    -> item kind when the sheet also has a kind column ("Loại"). Read raw: the profiler may
+    leave such a small lookup sheet unresolved. Conflicting entries are dropped."""
+    found: dict[str, set[str]] = {}
+    kinds: dict[str, set[str]] = {}
+    for profile in context.catalog["tables"]:
+        if profile.get("read_status") not in {"read", "empty"}:
+            continue
+        header = short = full = kind = None
+        try:
+            rows = context.source_table(profile["source_id"]).iter_rows()
+            for n, row in enumerate(rows):
+                texts = {p: plain(str(c.raw_value)) for p, c in row.cells.items() if c.raw_value}
+                if header is None:
+                    short = next((p for p, t in texts.items() if _ABBREVIATION.match(t)), None)
+                    full = next((p for p, t in texts.items() if _FULL_NAME.match(t)), None)
+                    kind = next((p for p, t in texts.items() if _KIND.match(t)), None)
+                    if short is not None and full is not None:
+                        header = n
+                    elif n >= 10:
+                        break
+                    continue
+                a, b = row.cells.get(short), row.cells.get(full)
+                if a and b and str(a.raw_value or "").strip() and str(b.raw_value or "").strip():
+                    abbreviation, name = str(a.raw_value).strip(), str(b.raw_value).strip()
+                    found.setdefault(identity_text(abbreviation), set()).add(name)
+                    k = row.cells.get(kind) if kind is not None else None
+                    if k and str(k.raw_value or "").strip():
+                        for key in (identity_text(abbreviation), identity_text(name)):
+                            kinds.setdefault(key, set()).add(str(k.raw_value).strip())
+        except ContractError:
+            continue
+    names = {k: next(iter(v)) for k, v in found.items() if len(v) == 1 and k}
+    return names, {k: next(iter(v)) for k, v in kinds.items() if len(v) == 1 and k}
+
+
+def abbreviation_table(context: BusinessContext) -> dict[str, str]:
+    return abbreviation_lists(context)[0]
+
+
 def raw_status(row: SourceRow, source: MappedSource):
     """Rejected status token for the issue record (the model may classify it later)."""
     try:
-        return value(row, source, "status")
+        return value(row, source, "status" if "status" in source.fields else "status_note")
     except ParseError:
         return None
+
+
+def row_status(row: SourceRow, source: MappedSource) -> str:
+    if "status" not in source.fields and "status_note" in source.fields:
+        return note_status(value(row, source, "status_note"))
+    return normalize_status(value(row, source, "status"))
 
 
 def value(row: SourceRow, source: MappedSource, key: str, default=None):
@@ -471,6 +597,7 @@ def build_relational(
         date_systems[source.profile["source_id"]] = system
     products = {}
     customers = {}
+    abbreviations, item_kinds = abbreviation_lists(context)
     product_name_codes = {}
     product_alias_codes = {}
     name_policy_matches = Counter()
@@ -480,7 +607,7 @@ def build_relational(
         target = products if s.role == "product" else customers
         keyfield = "product_id" if s.role == "product" else "customer_id"
         for table, row in data_rows(context, s):
-            key = str(value(row, s, keyfield, ""))
+            key = str(value(row, s, keyfield, "")).strip()
             name = str(value(row, s, "item" if s.role == "product" else "customer", ""))
             group_field = "item_group" if s.role == "product" else "customer_group"
             try:
@@ -539,7 +666,7 @@ def build_relational(
                     if re.search(r"\d:\d", str(date_value))
                     else dt.date().isoformat()
                 )
-                status = normalize_status(value(row, s, "status"))
+                status = row_status(row, s)
                 oid = value(row, s, "order_id")
                 if s.role != "ledger" and (not isinstance(oid, str) or not oid.strip()):
                     raise ParseError("missing_order_id", "order key missing")
@@ -710,7 +837,7 @@ def build_relational(
                             if re.search(r"\d:\d", str(raw_date))
                             else dt.date().isoformat()
                         )
-                        status = normalize_status(value(row, source, "status"))
+                        status = row_status(row, source)
                     except ParseError as exc:
                         raw = raw_status(row, source) if exc.code == "status_ambiguous" else None
                         issue(exc.code, row.reference(table), ["revenue", "order_count"], raw)
@@ -728,7 +855,9 @@ def build_relational(
         ref = row.reference(table)
         raw_id = row.identity(table)
         item = value(row, s, "item")
-        product_id = str(value(row, s, "product_id", ""))
+        product_id = str(value(row, s, "product_id", "")).strip()
+        if not product_id and item is not None:
+            item = abbreviations.get(identity_text(str(item)), item)
         codes = product_name_codes.get(identity_text(str(item)), set())
         master = (
             products.get(product_id)
@@ -747,6 +876,9 @@ def build_relational(
         if item is None and master:
             item = master[0]
         group = master[1] if master else value(row, s, "item_group")
+        if group is None and item is not None and not product_id:
+            # The abbreviation sheet's kind column is the shop's own item grouping.
+            group = item_kinds.get(identity_text(str(item)))
         role = "sale_item"
         quantity = value(row, s, "quantity")
         if quantity is not None and str(quantity).lstrip().startswith("-"):
@@ -759,7 +891,8 @@ def build_relational(
                     conn.execute("UPDATE orders SET status='returned' WHERE order_key=?", (key,))
                 else:
                     status = "returned"
-        if not item:
+        if not item and not (mapping.ledger and "item" not in s.fields):
+            # A ledger without an item column records whole tickets, not unknown lines.
             role = "unknown"
             issue("item_role_unknown", ref, ["revenue"])
         name = normalized(str(item)).strip()
@@ -771,11 +904,8 @@ def build_relational(
                 role = "unknown"
                 issue("fee_policy_unknown", ref, ["revenue"])
             group = ""
-        elif re.search(r"voucher|diem thuong|phi giao|phi ship", name):
-            if any(
-                word in normalized(context.catalog["readme"])
-                for word in ["voucher", "diem", "phi giao"]
-            ):
+        elif ADJUSTMENT.search(name):
+            if adjustment_authority(context):
                 role = "order_adjustment"
             else:
                 role = "unknown"
@@ -830,6 +960,7 @@ def build_relational(
             if (
                 any(x.role == "product" and "item_group" in x.fields for x in mapping.sources)
                 or "item_group" in s.fields
+                or item_kinds
             ):
                 if group is None and role != "order_adjustment":
                     group_errors.add("item_group_share")

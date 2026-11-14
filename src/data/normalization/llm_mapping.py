@@ -225,7 +225,7 @@ def build_request(catalog: dict, feedback: list[str] | None = None) -> tuple[str
     return prompt, schema
 
 
-def check_proposal(catalog: dict, proposal: object) -> list[str]:
+def check_proposal(catalog: dict, proposal: object, note_status: bool = False) -> list[str]:
     """Schema conformance plus role/column consistency; empty list means usable."""
     tables = {key: group[0] for key, group in _groups(catalog).items()}
     if not isinstance(proposal, dict) or not isinstance(proposal.get("tables"), dict):
@@ -256,9 +256,10 @@ def check_proposal(catalog: dict, proposal: object) -> list[str]:
         used = [v for v in columns.values() if v not in DECOYS]
         for meaning in sorted({m for m in used if used.count(m) > 1}):
             errors.append(f"{key}: meaning {meaning} assigned to several columns")
-        have = set(used)
+        have = _with_note_status(set(used), note_status)
         required = {
-            "order_lines": [{"ordered_at", "status", "line_net_amount", "item_name"}],
+            "order_lines": [{"ordered_at", "status", "line_net_amount", "item_name"}]
+            + ([{"ordered_at", "status", "line_net_amount"}] if "order_id" not in have else []),
             "order_headers": [{"order_id", "ordered_at", "status"}],
             "order_details": [
                 {"order_id", "line_net_amount", "product_id"},
@@ -310,8 +311,18 @@ def check_proposal(catalog: dict, proposal: object) -> list[str]:
 _CORE = {"order_id", "ordered_at", "status", "line_net_amount", "item_name", "product_id"}
 
 
-def _order_role(have: set[str]) -> str | None:
+def _with_note_status(have: set[str], note_status: bool) -> set[str]:
+    """Rulebook "Sổ không có cột trạng thái": the order note stands in for the status."""
+    return have | {"status"} if note_status and "order_note" in have else have
+
+
+def _order_role(have: set[str], note_status: bool = False) -> str | None:
+    have = _with_note_status(have, note_status)
     if {"ordered_at", "status", "line_net_amount", "item_name"} <= have:
+        return "order_lines"
+    # Rulebook "Bảng không ghi theo đơn": without order IDs each row is one record, so a row
+    # amount needs no item name (a repair-ticket book: one ticket per row).
+    if {"ordered_at", "status", "line_net_amount"} <= have and "order_id" not in have:
         return "order_lines"
     if {"order_id", "ordered_at", "status"} <= have:
         return "order_headers"
@@ -320,7 +331,7 @@ def _order_role(have: set[str]) -> str | None:
     return None
 
 
-def normalize_proposal(catalog: dict, proposal: dict) -> dict:
+def normalize_proposal(catalog: dict, proposal: dict, note_status: bool = False) -> dict:
     """Derive what code can establish itself; the model's column labels stay the evidence.
 
     - An order role is re-derived from the labels (lines/headers/details). A table the model
@@ -351,6 +362,19 @@ def normalize_proposal(catalog: dict, proposal: dict) -> dict:
     result = {}
     for key, entry in tables.items():
         columns = dict(entry["columns"])
+        labels = set(columns.values())
+        # One row = one record (no order IDs): the row's whole amount is its line amount.
+        if (
+            "order_id" not in labels
+            and "ordered_at" in labels
+            and "line_net_amount" not in labels
+            and _with_note_status(labels, note_status) >= {"status"}
+        ):
+            amounts = [
+                c for c, m in columns.items() if m in {"order_payable", "order_merchandise_amount"}
+            ]
+            if len(amounts) == 1:
+                columns[amounts[0]] = "line_net_amount"
         used = [v for v in columns.values() if v not in DECOYS]
         for label, meaning in columns.items():
             if meaning not in _CORE and used.count(meaning) > 1:
@@ -358,7 +382,7 @@ def normalize_proposal(catalog: dict, proposal: dict) -> dict:
         have = set(columns.values())
         role = entry["role"]
         if role in _ORDER_ROLES:
-            role = _order_role(have) or role
+            role = _order_role(have, note_status) or role
         else:
             columns = {
                 c: "other" if m in {"status", "line_net_amount"} else m for c, m in columns.items()
@@ -374,7 +398,8 @@ def normalize_proposal(catalog: dict, proposal: dict) -> dict:
     complete = [
         k
         for k, e in result.items()
-        if e["role"] in _ORDER_ROLES and _order_role(set(e["columns"].values())) == e["role"]
+        if e["role"] in _ORDER_ROLES
+        and _order_role(set(e["columns"].values()), note_status) == e["role"]
     ]
     for key, entry in result.items():
         if entry["role"] in _ORDER_ROLES and key not in complete and complete:
@@ -523,6 +548,20 @@ def verify_facts(connection: sqlite3.Connection, summary: dict, end_hint: str | 
         errors.append("money is not whole VND")
     if sum(values) <= 0:
         errors.append("non-positive revenue")
+    # An order-level amount ("Khách trả", the whole bill) labelled as the line amount repeats
+    # on every line of an order; revenue would then multiply by the line count.
+    multi, repeated = connection.execute(
+        "SELECT count(*), coalesce(sum(n_amounts = 1), 0) FROM ("
+        " SELECT count(DISTINCT net_amount) AS n_amounts FROM order_lines"
+        " WHERE row_role = 'sale_item' AND net_amount IS NOT NULL"
+        " GROUP BY order_key HAVING count(*) >= 2)"
+    ).fetchone()
+    if multi >= 20 and repeated > 0.5 * multi:
+        errors.append(
+            f"{repeated}/{multi} multi-line orders repeat one amount on every line; "
+            "the column labelled line_net_amount is an order-level amount (order total): "
+            "label it order_payable and label the per-line amount column line_net_amount"
+        )
     return errors
 
 
@@ -551,6 +590,7 @@ STATUS_CHOICES = {
     "returned": "đơn khách trả hàng",
     "shipping": "đơn đang giao/đang xử lý, chưa huỷ",
     "unknown": "không chắc chắn",
+    "not_status": "ghi chú không nói gì về kết quả của đơn (đơn hoàn thành)",
 }
 
 
@@ -561,8 +601,10 @@ def build_status_request(values: list[str]) -> tuple[str, dict]:
     )
     choices = "\n".join(f"- {k}: {hint}" for k, hint in STATUS_CHOICES.items())
     prompt = (
-        "Cột trạng thái đơn của một cửa hàng Việt Nam có các giá trị dưới đây. Với mỗi giá "
-        "trị, chọn đúng một trạng thái chuẩn. Không chắc thì chọn `unknown`.\n\n"
+        "Cột trạng thái đơn (hoặc ghi chú đơn, khi sổ không có cột trạng thái) của một cửa "
+        "hàng Việt Nam có các giá trị dưới đây. Với mỗi giá trị, chọn đúng một trạng thái "
+        "chuẩn. Ghi chú không nói về kết quả của đơn thì chọn `not_status`. Không chắc thì "
+        "chọn `unknown`.\n\n"
         f"Trạng thái chuẩn:\n{choices}\n\nVí dụ cách ghi đã biết:\n{examples}\n\n"
         "Các giá trị cần phân loại:\n"
         + "\n".join(f"- {json.dumps(v, ensure_ascii=False)}" for v in values)

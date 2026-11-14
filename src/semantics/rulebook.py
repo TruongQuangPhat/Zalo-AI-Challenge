@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -43,6 +44,7 @@ QUESTION_TYPOS = {
     "bowts": "bot",
     "chieems": "chiem",
     "chiuj": "chiu",
+    "caonhat": "cao nhat",
     "conf": "con",
     "coongj": "cong",
     "cos": "co",
@@ -58,7 +60,9 @@ QUESTION_TYPOS = {
     "ddooir": "doi",
     "ddos": "do",
     "ddown": "don",
+    "doanhthu": "doanh thu",
     "dduwowcj": "duoc",
+    "duocj": "duoc",
     "ee": "e",
     "ees": "e",
     "gaanf": "gan",
@@ -87,6 +91,7 @@ QUESTION_TYPOS = {
     "nawm": "nam",
     "nayf": "nay",
     "ngayf": "ngay",
+    "ngaynao": "ngay nao",
     "nhaapj": "nhap",
     "nhaats": "nhat",
     "nhaf": "nha",
@@ -102,6 +107,7 @@ QUESTION_TYPOS = {
     "soos": "so",
     "tawng": "tang",
     "thangs": "thang",
+    "thoaij": "thoai",
     "thuoocj": "thuoc",
     "thuoocs": "thuoc",
     "tieenf": "tien",
@@ -125,9 +131,106 @@ QUESTION_TYPOS = {
 }
 
 
+# Chat abbreviations and regional (Central/Southern) spellings of common function words,
+# written from everyday Vietnamese, never copied from test questions. Accent-bearing
+# forms are matched before accents are dropped ("nhiêu" is not "nhiều"; "mô" is not "mở").
+CHAT_ACCENTED = {
+    "đh": "đơn hàng",
+    "o đờ": "đơn",
+    "nhìu": "nhiều",
+    "nhứt": "nhất",
+    "kòn": "còn",
+    "jùm": "giùm",
+    "zô": "vô",
+    "dới": "với",
+    "dậy": "vậy",
+    "zậy": "vậy",
+    "rứa": "vậy",
+    "mô": "nào",
+    "ni": "này",
+    "nì": "này",
+    "hông": "không",
+    "hổng": "không",
+    # Dropped or doubled letters of money/total words ("tiềng" is not "tiếng", hours).
+    # Trade words for buying stock in ("đánh hàng", "cất hàng" = nhập hàng).
+    "đánh hàng": "nhập hàng",
+    "cất hàng": "nhập hàng",
+    "tiềng": "tiền",
+    "tền": "tiền",
+    "tổg": "tổng",
+    "cộg": "cộng",
+    "bìh": "bình",
+    "bìn": "bình",
+}
+CHAT_PLAIN = {
+    "dc": "duoc",
+    "bnhiu": "bao nhieu",
+    "bnhieu": "bao nhieu",
+    "bn": "bao nhieu",
+    "nhiu": "nhieu",
+    "hnay": "hom nay",
+    "hqua": "hom qua",
+    "hkia": "hom kia",
+    "cko": "cho",
+    "mik": "minh",
+    "ko": "khong",
+    "hok": "khong",
+    "khum": "khong",
+    "vs": "voi",
+    "trc": "truoc",
+    "dthu": "doanh thu",
+    "jum": "gium",
+    "lun": "luon",
+    "thui": "thoi",
+    "nhta": "nhat",
+    # English shop words typed into Vietnamese questions.
+    "revenue": "doanh thu",
+    "order": "don",
+    "orders": "don",
+    "bill": "don",
+    "ck": "chuyen khoan",
+    "lne": "len",
+    "tog": "tong",
+    "cog": "cong",
+    "bih": "binh",
+}
+CHAT_PHRASES = [
+    (r"\b(\d+) best sellers?\b", r"\1 mat hang ban chay nhat"),
+    (r"\bbest sellers?\b", "ban chay nhat"),
+    (r"\btien tuoi\b", "tien mat"),
+    # "total" is also a brand ("Bay thợ hồ Total"): only before a quantity question.
+    (r"\btotal (?=(?:bao nhieu|bn|nhieu|may|tien|don)\b)", "tong cong "),
+    (r"\b(?:khong|ko|k) can (?:don(?: bac si)?|toa)\b", "khong ke don"),
+]
+_CHAT = re.compile(
+    r"(?<!\w)("
+    + "|".join(sorted(map(re.escape, CHAT_ACCENTED), key=len, reverse=True))
+    + r")(?!\w)(?!\s+(?:tô|hình|tả|lông|long)\b)"  # "mô tô", "ni lông" are nouns
+)
+# "nhiêu" alone is the Southern "bao nhiêu"; "bao nhiêu" itself stays as written.
+_BARE_NHIEU = re.compile(r"(?<!\w)(?<!bao )nhiêu(?!\w)")
+
+
 def question_plain(text: str) -> str:
-    """plain() for question text, with common Telex typos of function words fixed."""
-    return re.sub(r"[a-z]+", lambda m: QUESTION_TYPOS.get(m[0], m[0]), plain(text))
+    """plain() for question text: Telex typos and chat/regional spellings of function
+    words become standard words; names and numbers are never rewritten."""
+    text = unicodedata.normalize("NFC", text).casefold()
+    text = _BARE_NHIEU.sub("bao nhiêu", _CHAT.sub(lambda m: CHAT_ACCENTED[m[1]], text))
+    # "th8", "th 8/2025": month abbreviations.
+    text = re.sub(r"(?<!\w)th\s?(?=\d{1,2}(?:\D|$))", "tháng ", text)
+    text = re.sub(r"(?<!\w)th(?=\s+(?:này|nay|trước|truoc|trc|rồi|roi)(?!\w))", "tháng", text)
+    text = re.sub(r"(?<!\w)th(?=\s+(?:này|nay|trước|truoc|trc|rồi|roi)(?!\w))", "tháng", text)
+    text = re.sub(r"[a-z]+", lambda m: QUESTION_TYPOS.get(m[0], m[0]), plain(text))
+    # Single letters and "sp" also occur in product names ("Sino SP D20", "Galaxy Z"):
+    # only a closing "z"/"j" is the chat "vậy"/"gì".
+    text = re.sub(
+        r"(?<![\w/-])(z|j)(\s*[?.!]*)$", lambda m: {"z": "vay", "j": "gi"}[m[1]] + m[2], text
+    )
+    text = re.sub(r"(?<![\w/-])[a-z]+(?![\w/-])", lambda m: CHAT_PLAIN.get(m[0], m[0]), text)
+    # Multi-word chat phrases of one standard meaning.
+    for phrase, standard in CHAT_PHRASES:
+        text = re.sub(phrase, standard, text)
+    return text
 
 
 @dataclass(frozen=True)

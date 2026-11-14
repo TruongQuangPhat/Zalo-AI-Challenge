@@ -15,10 +15,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.data.cache import fingerprint
-from src.data.normalization.relational import LABELS, MEANINGS, MappedSource, data_rows, token
+from src.data.normalization.relational import (
+    LABELS,
+    MEANINGS,
+    MappedSource,
+    abbreviation_table,
+    data_rows,
+    token,
+)
 from src.data.normalization.sales import SalesMapping, is_walk_in
 from src.data.normalization.stock import identity_text
 from src.data.normalization.values import (
+    PURCHASE_CANCELLED,
+    PURCHASE_RECEIVED,
     cell_value,
     consistent_grouping,
     number_evidence,
@@ -26,6 +35,7 @@ from src.data.normalization.values import (
     parse_datetime,
     parse_money,
     parse_number,
+    strip_unit,
 )
 from src.jsonio import ContractError, dumps
 from src.semantics.rulebook import plain
@@ -83,11 +93,15 @@ CREATE INDEX lot_allocations_line ON lot_allocations(line_key);
 """
 
 EXTRA_MEANINGS = {
-    "snapshot_balance": {"ton kho la ton cuoi ngay cuoi co du lieu, theo don vi co ban"},
+    "snapshot_balance": {
+        "ton kho la ton cuoi ngay cuoi co du lieu, theo don vi co ban",
+        "ton cuoi ngay cuoi co du lieu, theo don vi co ban",
+    },
+    "unit_cost": {"gia von mot don vi ban"},
     "base_quantity": {"so luong da doi ra don vi co ban", "base quantity"},
     "base_unit": {"don vi co ban", "base unit"},
     "unit": {"don vi tinh", "selling unit"},
-    "payable": {"tong tien don", "order payable"},
+    "payable": {"tong tien don", "order payable", "so khach phai tra cho ca don"},
     "payment_method": {
         "hinh thuc thanh toan cua don: cash tien mat, transfer chuyen khoan, "
         "ewallet vi dien tu, cod giao hang thu tien, debt ghi no",
@@ -95,7 +109,12 @@ EXTRA_MEANINGS = {
     },
     "payment_id": {"ma phieu thu", "payment id"},
     "paid_at": {"thoi diem thu", "payment date"},
-    "paid_amount": {"so tien", "payment amount"},
+    "paid_amount": {"so tien", "payment amount", "so tien tra lan do"},
+    # Purchase receipt headers, as shop READMEs describe them.
+    "purchase_id": {"ma phieu nhap"},
+    "purchased_at": {"ngay nhap"},
+    "purchase_amount": {"tong tien phieu nhap", "tong tien cua ca phieu nhap"},
+    "status": {"trang thai phieu nhap"},
 }
 EXTRA_LABELS = {
     "product_id": {"idsp"},
@@ -104,7 +123,7 @@ EXTRA_LABELS = {
     "base_unit": {"donvicoban", "donvicoso", "dvtcoban", "donvi"},
     "unit": {"donvitinh", "dvt", "dvi"},
     "payable": {"tongthanhtoan", "tongtien"},
-    "payment_method": {"phuongthuctt", "hinhthucthanhtoan"},
+    "payment_method": {"phuongthuctt", "hinhthucthanhtoan", "phuongthucthanhtoan"},
     "payment_id": {"maphieuthu", "phieuthu"},
     "paid_at": {"ngaygiothu", "ngaythu", "thoigianthu"},
     "paid_amount": {"sotienthu"},
@@ -137,6 +156,11 @@ def source_fields(context: BusinessContext, profile: dict) -> dict[str, int]:
     definitions = {
         plain(k): plain(v) for k, v in re.findall(r"^\s*-\s+\*\*(.+?)\*\*\s*:\s*(.+)$", body, re.M)
     }
+    # POS READMEs state conventions as sentences: "**Giá trị** là số tiền trả lần đó".
+    # They only add meanings; they never hide a column's label.
+    sentences = {
+        plain(k): plain(v) for k, v in re.findall(r"\*\*([^*\n]+?)\*\* là ([^;.\n]+)", readme)
+    }
     pos = bool(re.search(r"\bpos\b|phan mem ban hang", plain(readme)))
     result = {}
     for key in set(MEANINGS) | set(EXTRA_MEANINGS) | set(EXTRA_LABELS):
@@ -146,6 +170,7 @@ def source_fields(context: BusinessContext, profile: dict) -> dict[str, int]:
             c["position"]
             for c in profile["columns"]
             if definitions.get(plain(c["display_name"])) in meanings
+            or sentences.get(plain(c["display_name"])) in meanings
             or (
                 pos
                 and plain(c["display_name"]) not in definitions
@@ -154,7 +179,145 @@ def source_fields(context: BusinessContext, profile: dict) -> dict[str, int]:
         ]
         if len(candidates) == 1:
             result[key] = candidates[0]
+    if pos:
+        # Keys and dates of a payment, receipt or stock report are named only inside the
+        # table whose amount column the README itself defines.
+        tokens = {token(c["display_name"]): c["position"] for c in profile["columns"]}
+        contextual = {
+            "paid_amount": {
+                "payment_id": {"maphieu", "maphieuthu", "sophieu"},
+                "paid_at": {"thoigian", "ngay", "ngaythu", "thoigianthu"},
+                "order_id": {"mahoadon", "madon", "madonhang"},
+            },
+            "purchase_amount": {
+                "purchase_id": {"manhaphang", "maphieunhap", "sophieunhap"},
+                "purchased_at": {"thoigian", "ngay", "ngaynhap"},
+                "status": {"trangthai"},
+            },
+            "snapshot_balance": {
+                "product_id": {"mahang", "masp", "masanpham"},
+                "base_unit": {"dvt", "donvitinh", "donvi"},
+            },
+        }
+        for anchor, fields in contextual.items():
+            if anchor not in result:
+                continue
+            for key, labels in fields.items():
+                found = [p for t, p in tokens.items() if t in labels]
+                # A stock report's unit column is the base unit (README "theo đơn vị cơ bản").
+                # A payment's or receipt's own time column also reads as an order time.
+                taken = {p for k, p in result.items() if k not in {"unit", "ordered_at"}}
+                if key not in result and len(found) == 1 and found[0] not in taken:
+                    result[key] = found[0]
     return result
+
+
+def conversion_table(context: BusinessContext):
+    """Unit conversions the shop lists: a conversion table (README column meanings or
+    headers "Đơn vị quy đổi / Tỉ lệ quy đổi / Đơn vị cơ bản") or a README list
+    ("- Coca Cola 330ml: 1 thùng = 24 lon").
+
+    Returns (product name -> (base unit, {large unit: base units per large unit}),
+    whether the list holds only items that have a large unit) or None. Keys are
+    identity_text; two base units for one item, two ratios for one unit, a large unit equal
+    to the base or an unreadable ratio make the whole list unusable (None).
+    """
+    raw_readme = context.catalog["readme"]
+    readme = plain(raw_readme)
+    if not re.search(r"quy doi don vi(?:\*\*)?: so luong ghi theo don vi cua dong", readme):
+        return None
+    table: dict[str, tuple[str, dict[str, Decimal]]] = {}
+
+    def add(name, base, large, ratio) -> bool:
+        if ratio <= 0:
+            return False
+        name, base, large = (identity_text(str(v)) for v in (name, base, large))
+        old_base, larges = table.setdefault(name, (base, {}))
+        if old_base != base or larges.get(large, ratio) != ratio or large == base:
+            return False
+        larges[large] = ratio
+        return True
+
+    listed = re.findall(
+        r"^\s*-\s+(.+?):\s*1\s+(.+?)\s*=\s*(\d+(?:[.,]\d+)?)\s+(.+?)\s*$", raw_readme, re.M
+    )
+    for name, large, ratio, base in listed:
+        if not add(name, base, large, parse_number(ratio.replace(",", "."))):
+            return None
+    only_large = bool(listed)
+    sections = re.findall(
+        r"^## Cột trong `([^`]+)`(?:, sheet `([^`]+)`)?\s*\n(.*?)(?=^## |\Z)",
+        raw_readme,
+        re.M | re.S,
+    )
+    headers = {
+        "name": r"ten (?:san pham|hang|mat hang)",
+        "large": r"don vi quy doi",
+        "ratio": r"(?:ti|ty) le quy doi",
+        "base": r"don vi co ban",
+    }
+    meanings = {
+        "name": r"ten (?:hang|mon|san pham)\b.*",
+        "large": r"don vi lon\b.*",
+        "ratio": r"he so: so don vi co ban trong 1 don vi lon",
+        "base": r"don vi co ban",
+    }
+    found = []
+    for profile in context.catalog["tables"]:
+        if profile.get("structure_status") != "resolved":
+            continue
+        file = Path(profile["source_ref"]["file"]).name
+        bodies = [b for f, sh, b in sections if f == file]
+        definitions = {
+            plain(k): plain(v)
+            for body in bodies
+            for k, v in re.findall(r"^\s*-\s+\*\*(.+?)\*\*\s*:\s*(.+)$", body, re.M)
+        }
+        roles: dict[str, list[int]] = {}
+        for column in profile.get("columns", []):
+            name = plain(column["display_name"])
+            for role in headers:
+                meaning = definitions.get(name)
+                if re.fullmatch(headers[role], name) or (
+                    meaning and re.fullmatch(meanings[role], meaning)
+                ):
+                    roles.setdefault(role, []).append(column["position"])
+        if set(roles) == set(headers) and all(len(p) == 1 for p in roles.values()):
+            name_meaning = next(
+                (
+                    definitions.get(plain(c["display_name"]), "")
+                    for c in profile["columns"]
+                    if c["position"] == roles["name"][0]
+                ),
+                "",
+            )
+            found.append((profile, {k: v[0] for k, v in roles.items()}, name_meaning))
+    if len(found) > 1:
+        return None
+    if found:
+        profile, roles, name_meaning = found[0]
+        header = set(profile.get("header_rows", []))
+        for row in context.source_table(profile["source_id"]).iter_rows():
+            if row.row in header or (header and row.row is not None and row.row < min(header)):
+                continue
+            cells = {k: row.cells.get(p) for k, p in roles.items()}
+            raw = {k: (None if c is None else c.raw_value) for k, c in cells.items()}
+            if all(v in {None, ""} for v in raw.values()):
+                continue
+            if any(v in {None, ""} for v in raw.values()):
+                return None
+            try:
+                ratio = parse_number(raw["ratio"])
+            except ContractError:
+                return None
+            if not add(raw["name"], raw["base"], raw["large"], ratio):
+                return None
+        only_large = (
+            only_large
+            or "chi co mat hang co don vi lon" in name_meaning
+            or ("chi co mat hang co don vi lon" in readme)
+        )
+    return (table, only_large) if table else None
 
 
 def build_entities(
@@ -183,6 +346,13 @@ def build_entities(
     namespace = {"split": context.catalog["split"], "business": context.catalog["business_id"]}
     masters = {"product": {}, "customer": {}}
     names = {"product": {}, "customer": {}}
+    # Rulebook: names differing only in writing are the same thing. Accent-free lookup
+    # is a fallback used only when it names exactly one catalog entity.
+    bare = {"product": {}, "customer": {}}
+    abbreviations = abbreviation_table(context)
+    conversions = conversion_table(context)
+    # Items absent from an only-large-unit list: the unit each is sold in (one per item).
+    sold_units: dict[str, dict[str, list[str]]] = {}
 
     def entity(kind, code, name, unit, ref):
         code, name = str(code or "").strip(), str(name or "").strip()
@@ -341,8 +511,9 @@ def build_entities(
             name = get(row, f, "item" if kind == "product" else "customer")
             try:
                 key = entity(kind, code, name, get(row, f, "base_unit"), row.reference(table))
-                masters[kind][str(code)] = key
+                masters[kind][str(code).strip()] = key
                 names[kind].setdefault(identity_text(str(name)), set()).add(key)
+                bare[kind].setdefault(token(str(name)), set()).add(key)
             except ContractError as exc:
                 fail(kind, str(exc))
     orders = dict(conn.execute("SELECT raw_order_id, order_key FROM orders"))
@@ -355,6 +526,10 @@ def build_entities(
                 n, u = get(row, s.fields, "item"), get(row, s.fields, "unit")
                 if n and u:
                     units.setdefault(identity_text(str(n)), set()).add(str(u))
+    # A listed item's base unit is the conversion list's, not the unit it happens to sell in.
+    if conversions:
+        for listed_name, (listed_base, _) in conversions[0].items():
+            units[listed_name] = {listed_base}
     # In code-less flat exports, only a single observed selling unit is a proved
     # base unit. A converted quantity may be ranked without claiming its unit.
     for s in sources:
@@ -369,7 +544,7 @@ def build_entities(
             if s.role in {"combined", "header"}:
                 try:
                     code, name = get(row, f, "customer_id"), get(row, f, "customer")
-                    key = masters["customer"].get(str(code)) if code else None
+                    key = masters["customer"].get(str(code).strip()) if code else None
                     if code and not key:
                         raise ContractError("orphan_customer_code")
                     if not code and name:
@@ -407,11 +582,16 @@ def build_entities(
                 continue
             try:
                 code, name = get(row, f, "product_id"), get(row, f, "item")
-                key = masters["product"].get(str(code)) if code else None
+                if not code and name is not None:
+                    # The shop's own abbreviation list names the full item ("Cáp C").
+                    name = abbreviations.get(identity_text(str(name)), name)
+                key = masters["product"].get(str(code).strip()) if code else None
                 if code and not key:
                     raise ContractError("orphan_product_code")
                 if not code and masters["product"]:
                     candidates = names["product"].get(identity_text(str(name)), set())
+                    if not candidates:
+                        candidates = bare["product"].get(token(str(name)), set())
                     if len(candidates) != 1:
                         raise ContractError("source_product_name_ambiguous_or_unknown")
                     key = next(iter(candidates))
@@ -438,15 +618,8 @@ def build_entities(
                             parsed = money(row, s, "unit_cost") if "unit_cost" in f else None
                             numbers.append(str(parsed) if parsed is not None else None)
                             continue
-                        if field == "sold_quantity" and isinstance(raw, str):
-                            unit = get(row, f, "unit")
-                            match = re.fullmatch(r"([+-]?\d+(?:[.,]\d+)?)\s+(.+)", raw.strip())
-                            if (
-                                match
-                                and unit
-                                and identity_text(match[2]) == identity_text(str(unit))
-                            ):
-                                raw = match[1]
+                        if field == "sold_quantity":
+                            raw = strip_unit(raw, get(row, f, "unit"))
                         position = f.get("quantity" if field == "sold_quantity" else field)
                         cell = row.cells.get(position)
                         convention = (
@@ -463,6 +636,28 @@ def build_entities(
                 # A sold quantity stands in for the base quantity only when the line is sold
                 # in the product's base unit; a case of 24 cans is not one can.
                 unit = get(row, f, "unit") if "unit" in f else None
+                if numbers[0] is None and unit and numbers[1] is not None and conversions:
+                    # README "Quy đổi đơn vị": the line's quantity is in the line's unit.
+                    listed_table, only_large = conversions
+                    item_name = conn.execute(
+                        "SELECT name FROM entities WHERE entity_key=?", (key,)
+                    ).fetchone()[0]
+                    listed = listed_table.get(identity_text(str(item_name)))
+                    sold_unit = identity_text(str(unit))
+                    if listed:
+                        base, larges = listed
+                        if sold_unit == base:
+                            numbers[0] = numbers[1]
+                        elif sold_unit in larges:
+                            numbers[0] = str(Decimal(numbers[1]) * larges[sold_unit])
+                        conn.execute(
+                            "UPDATE entities SET base_unit=? "
+                            "WHERE entity_key=? AND base_unit IS NULL",
+                            (base, key),
+                        )
+                    elif only_large:
+                        sold_units.setdefault(key, {}).setdefault(sold_unit, []).append(line)
+                        numbers[0] = numbers[1]
                 if numbers[0] is None and unit:
                     base_unit = conn.execute(
                         "SELECT base_unit FROM entities WHERE entity_key=?", (key,)
@@ -475,6 +670,19 @@ def build_entities(
                 )
             except ContractError as exc:
                 fail("product", str(exc))
+    # An unlisted item sold in one unit has that unit as its base unit; in two, neither.
+    for key, units in sold_units.items():
+        if len(units) == 1:
+            conn.execute(
+                "UPDATE entities SET base_unit=? WHERE entity_key=? AND base_unit IS NULL",
+                (next(iter(units)), key),
+            )
+        else:
+            for lines in units.values():
+                conn.executemany(
+                    "UPDATE line_items SET base_quantity=NULL WHERE line_key=?",
+                    [(line,) for line in lines],
+                )
     for family, required in [
         ("payments", {"payment_id", "order_id", "paid_at", "paid_amount"}),
         ("purchases", {"purchase_id", "purchased_at", "status", "purchase_amount"}),
@@ -529,7 +737,7 @@ def build_entities(
                         conn.execute("INSERT INTO payments VALUES (?,?,?,?,?)", record)
                     elif family == "purchases":
                         status = str(get(row, f, "status"))
-                        if plain(status) not in {"received", "cancelled", "da nhap", "huy"}:
+                        if plain(status) not in PURCHASE_RECEIVED | PURCHASE_CANCELLED:
                             raise ContractError("purchase_status_unsupported")
                         conn.execute(
                             "INSERT INTO purchases VALUES (?,?,?,?,?)",
@@ -542,7 +750,7 @@ def build_entities(
                             ),
                         )
                     else:
-                        product = masters["product"].get(str(get(row, f, "product_id")))
+                        product = masters["product"].get(str(get(row, f, "product_id")).strip())
                         if product is None:
                             raise ContractError("stock_orphan_product")
                         conn.execute(
@@ -575,7 +783,7 @@ def build_entities(
             ):
                 raise ContractError("stock_representations_require_reconciliation")
             text = plain(context.catalog["readme"])
-            if "ton kho la ton cuoi ngay cuoi co du lieu, theo don vi co ban" not in text:
+            if not re.search(r"\bla ton cuoi ngay cuoi co du lieu, theo don vi co ban\b", text):
                 raise ContractError("snapshot_base_unit_authority_missing")
             dates = re.findall(r"du lieu co den het (\d{1,2}/\d{1,2}/\d{4})", text)
             if len(set(dates)) != 1:
@@ -584,7 +792,7 @@ def build_entities(
             source = snapshots[0]
             seen = set()
             for table, row in data_rows(context, source):
-                product = masters["product"].get(str(get(row, source.fields, "product_id")))
+                product = masters["product"].get(str(get(row, source.fields, "product_id")).strip())
                 if product is None or product in seen:
                     raise ContractError("snapshot_product_key_or_cardinality_invalid")
                 unit = str(get(row, source.fields, "base_unit") or "")
@@ -641,7 +849,7 @@ def build_entities(
             for s in lot_sources:
                 for table, row in data_rows(context, s):
                     f = s.fields
-                    product = masters["product"].get(str(get(row, f, "product_id")))
+                    product = masters["product"].get(str(get(row, f, "product_id")).strip())
                     quantity = parse_number(get(row, f, "received_quantity"), "decimal_dot")
                     if not product or quantity < 0:
                         raise ContractError("lot_product_or_quantity_invalid")

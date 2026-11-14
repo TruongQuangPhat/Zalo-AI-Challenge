@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.data.cache import fingerprint, load_catalog, save_catalog
 from src.data.ingestion import READERS, ReaderOptions, SourceTable
-from src.data.profiling import ProfileOptions, candidate_relations, profile_table
+from src.data.profiling import ProfileOptions, candidate_relations, normalized, profile_table
 from src.data.split import CalendarDay, Split, load_split
 from src.jsonio import ContractError
 from src.semantics.rulebook import RuleProfile, parse_rulebook
@@ -208,6 +208,14 @@ def prepare_business(
         for p in sources
         if Path(p).suffix.casefold() in READERS
     }
+    declared_headers: dict[str, set[str]] = {}
+    section = None
+    for line in readme.splitlines():
+        if line.startswith("#"):
+            match = re.match(r"^## Cột trong `([^`]+)`", line)
+            section = Path(match[1]).name if match else None
+        elif section and (bullet := re.match(r"^\s*-\s+\*\*(.+?)\*\*\s*:", line)):
+            declared_headers.setdefault(section, set()).add(normalized(bullet[1]).strip())
     tables, files, issue_records, key_values = [], [], [], {}
     retained_bytes = 0
     for relative, source in sorted(sources.items()):
@@ -249,7 +257,11 @@ def prepare_business(
                 continue
             try:
                 # Retained relationship evidence shares the same total budget across a business.
-                profile, values = profile_table(descriptor, profile_options)
+                profile, values = profile_table(
+                    descriptor,
+                    profile_options,
+                    frozenset(declared_headers.get(Path(relative).name, ())),
+                )
                 tables.append(profile)
                 size = sum(
                     len(str(k[1]).encode()) + 200 for counts in values.values() for k in counts

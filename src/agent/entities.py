@@ -136,6 +136,9 @@ def business_spec(question: Question) -> dict | None:
     )
     if money_paraphrase:
         text = money_paraphrase["prefix"] + "mua nhieu tien nhat " + money_paraphrase["period"]
+    # Unit prices and purchase-minus-sales differences are not sold quantities.
+    if re.search(r"\b(?:don gia|gia ban|gia nhap|nhap tru|tru (?:so )?ban|chenh lech)\b", text):
+        return None
     nearest_lot = bool(re.search(r"\blo\b.*\bgan het han nhat\b", text))
     if re.search(
         (
@@ -178,10 +181,18 @@ def business_spec(question: Question) -> dict | None:
                     {"kind": "month", "month": int(m), "year": int(y)} for m, y in months
                 ],
             }
-    debt = bool(re.search(r"\b(con no|con nowj|cong no|khach.*no.*nhieu nhat)\b", text))
+    debt = bool(
+        re.search(
+            r"\b(con no|con nowj|cong no|khach.*con thieu|con thieu tien|no chua thu|"
+            r"chua tra het no|no chua tra|khach thieu tien|"
+            r"khach.*no.*nhieu nhat|ai\b.*\bno\b.*nhieu nhat)\b",
+            text,
+        )
+    )
     collection = bool(re.search(r"\b(tra no|thu hoi|tra bot no)\b", text))
     if (debt or collection) and re.search(
-        r"\bkhach (?!hang\b|con\b|no\b|nowj\b|tra\b|mua\b|nao\b|dang\b|chua\b|co\b|nhieu\b|cong\b)",
+        r"\bkhach (?!hang\b|con\b|no\b|nowj\b|tra\b|mua\b|nao\b|dang\b|chua\b|co\b|nhieu\b|"
+        r"cong\b|thieu\b)",
         text,
     ):
         return None
@@ -193,14 +204,18 @@ def business_spec(question: Question) -> dict | None:
         if re.search(r"\b(nhieu nhat|lon nhat)\b", text) and re.search(
             r"\b(kem|moi nguoi|tung nguoi|so no)\b", text
         ):
-            count = re.search(r"\b([1-9]\d?) khach", text)
+            count = re.search(
+                r"\btop ([1-9]\d?)\b|\b(?<!thang )(?<!quy )(?<!tuan )(?<!ngay )([1-9]\d?) khach",
+                text,
+            )
             if not count:
                 return None
-            metric, group, limit, shape = "receivable", "customer", int(count[1]), "table"
+            limit = int(count[1] or count[2])
+            metric, group, shape = "receivable", "customer", "table"
         else:
             metric = (
                 "receivable_customer_count"
-                if re.search(r"\b(so khach|bao nhieu khach|may khach)\b", text)
+                if re.search(r"\b(so khach|bao nhieu khach|may khach|dem (?:cac )?khach)\b", text)
                 else "receivable"
             )
             group, limit, shape = None, None, "number"
@@ -235,7 +250,11 @@ def business_spec(question: Question) -> dict | None:
     else:
         rank = bool(re.search(r"\b(nhat|top)\b", text))
         customer = bool(re.search(r"\bkhach\b", text))
-        count = re.search(r"\b(?:top\s*)?([1-9]\d?) (?:mat hang|hang|mon|khach)", text)
+        count = re.search(
+            r"\b(?<!thang )(?<!quy )(?<!tuan )(?<!ngay )"
+            r"(?:top\s*)?([1-9]\d?) (?:mat hang|hang|mon|khach)",
+            text,
+        )
         if rank and re.search(r"\b(lai gop|loi nhat)\b", text):
             metric, group = "gross_profit", "product"
         elif rank and re.search(
@@ -344,7 +363,11 @@ def _check_business_scope(question: Question, spec: dict, entity: dict | None) -
             # remain scope restrictions; they cannot become a whole-shop total.
             text = re.sub(r"(?:\bcua\s+)?" + _alias_pattern(plain(name)), " ", text)
     text = re.sub(r"\bcua (?:cua hang|shop)\b|\bcua hang\b", " ", text)
-    cardinalities = re.findall(r"\btop\s*(\d+)\b|\b(\d+) (?:mat hang|hang|mon|khach)\b", text)
+    cardinalities = re.findall(
+        r"\btop\s*(\d+)\b|\b(?<!thang )(?<!quy )(?<!tuan )(?<!ngay )"
+        r"(\d+) (?:mat hang|hang|mon|khach)\b",
+        text,
+    )
     if cardinalities:
         requested = int(cardinalities[0][0] or cardinalities[0][1])
         if (

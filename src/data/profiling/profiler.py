@@ -60,8 +60,23 @@ def _key(cell: Cell | None) -> tuple | None:
     return cell.native_type, cell.raw_value
 
 
-def profile_table(table: SourceTable, options: ProfileOptions) -> tuple[dict, dict[int, Counter]]:
-    """All row counts are exact; bounded distinct sets explicitly expose truncation."""
+def profile_table(
+    table: SourceTable, options: ProfileOptions, declared_headers: frozenset[str] = frozenset()
+) -> tuple[dict, dict[int, Counter]]:
+    """All row counts are exact; bounded distinct sets explicitly expose truncation.
+
+    ``declared_headers``: normalized column names the README lists for this file. A row
+    naming at least two of them is header evidence even without generic header words.
+    """
+
+    def score(row: SourceRow) -> int:
+        hits = sum(
+            normalized(str(c.raw_value)).strip() in declared_headers
+            for c in row.cells.values()
+            if c.native_type == "text"
+        )
+        return header_score(row) + (8 if hits >= 2 else 0)
+
     issues, issue_counts = [], Counter()
     accounting = Counter()
     counters: dict[int, Counter] = {}
@@ -88,8 +103,8 @@ def profile_table(table: SourceTable, options: ProfileOptions) -> tuple[dict, di
     declared = table.metadata.get("declared_columns", [])
     header = None
     if not declared:
-        candidates = sorted(early, key=lambda row: (-header_score(row), row.ordinal))
-        if candidates and header_score(candidates[0]) >= 8:
+        candidates = sorted(early, key=lambda row: (-score(row), row.ordinal))
+        if candidates and score(candidates[0]) >= 8:
             header = candidates[0]
         elif any(r.cells for r in early):
             structure = "ambiguous"

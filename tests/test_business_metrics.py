@@ -648,7 +648,9 @@ def test_independent_coverage_does_not_bypass_authority_or_quality(
 
     readme = business_source.root / "data/shop_a/README.md"
     if mutation == "missing_declaration":
-        readme.write_text(readme.read_text().replace("Dữ liệu đầy đủ", "Export được ghi"))
+        # Neither the full span nor the data end is declared.
+        text = readme.read_text().replace("Dữ liệu đầy đủ", "Export được ghi")
+        readme.write_text(text.replace("Dữ liệu có đến hết", "Export ngày"))
     elif mutation == "conflict":
         readme.write_text(readme.read_text() + "\nDữ liệu có đến hết 01/01/2026.")
     else:
@@ -753,3 +755,22 @@ def test_customer_paraphrase_does_not_drop_any_extra_qualifier(business_source, 
         execute_plan(
             business_draft(base, business_source), question(question=qualified), business_source
         )
+
+
+def test_collection_period_without_full_span_starts_at_the_first_order(business_source, tmp_path):
+    from src.semantics.answerability import preflight
+
+    # Only "Dữ liệu có đến hết": payments belong to exported orders, so the period from
+    # the first order day through the declared end is complete.
+    readme = business_source.root / "data/shop_a/README.md"
+    readme.write_text(readme.read_text().replace("Dữ liệu đầy đủ", "Export được ghi"))
+    context = prepare_business(load_split(business_source.root), "shop_a")
+    prepare_facts(context, tmp_path / "end-only")
+    prepare_semantics(context)
+    with context.prepared.connect() as conn:
+        first = conn.execute("SELECT min(substr(ordered_at,1,10)) FROM orders").fetchone()[0]
+    check = preflight(
+        context, "debt_collection", {"kind": "current_month"}, as_of_date="2026-01-10"
+    )
+    assert check["decision"] == "eligible_to_execute"
+    assert check["effective_window"]["start"] == max("2026-01-01", first)
