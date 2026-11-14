@@ -41,7 +41,7 @@ def check_run(data_dir: Path, output: Path) -> dict:
             raise ContractError(f"{row['id']}: executed code needs its output")
     manifest = loads((output / "run_manifest.json").read_text())
     model = (manifest.get("planner_metadata") or {}).get("model") or {}
-    load_seconds = model.get("startup_seconds_including_hash", 0)
+    load_seconds = float(model.get("startup_seconds_including_hash", 0))
     elapsed = [records[i]["elapsed_ms"] / 1000 for i in ids]
     estimate = load_seconds + statistics.fmean(elapsed) * PRIVATE_QUESTIONS
     return {

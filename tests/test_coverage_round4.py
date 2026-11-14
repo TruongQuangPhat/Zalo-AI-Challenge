@@ -37,9 +37,11 @@ def test_note_status_keeps_unclear_payment_wording_ambiguous(note):
         note_status(note)
 
 
-def test_bare_customer_paid_status_column_stays_ambiguous():
+def test_customer_return_in_a_status_column_and_shipping_wording():
+    # Round 5: as a status-column value "Khách trả" is a return (the note stays ambiguous).
+    assert normalize_status("Khách trả") == "returned"
     with pytest.raises(ParseError):
-        normalize_status("Khách trả")
+        normalize_status("Khách trả tiền")
     assert normalize_status("đang ship") == "shipping"
 
 

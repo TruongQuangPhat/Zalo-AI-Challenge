@@ -37,7 +37,7 @@ NOT_UNITS = {"don", "tien", "dot", "ngay", "lan", "bill", "phieu", "khach", "mon
 STOCK = r"\b(?:kho|ton|con (?:lai|bao|may|nhieu)|cuoi ngay|het hom nay)\b"
 DAY_COUNT = r"\b(?:so ngay|may ngay|bao nhieu ngay|bao nhiu ngay|bn ngay|bnhiu ngay|nhieu ngay)\b"
 # "180.000đ" writes the currency letter against the number.
-AMOUNT = r"(\d[\d.,]*)\s*(trieu|tr|k|nghin|ngan)?(?:d\b|\b)"
+AMOUNT = r"(\d[\d.,]*(?:tr\d{1,3})?)\s*(trieu|tr|cu|k|nghin|ngan)?(?:d\b|\b)"
 COMPARATORS = (
     (r"\b(?:tu|dat) " + AMOUNT + r"(?: dong| d| vnd)? tro len\b", ">="),
     (r"\btu " + AMOUNT + r"(?: dong| d| vnd)? tro xuong\b", "<="),
@@ -55,7 +55,74 @@ METHODS = {
 }
 
 
+# Words a whole-shop total may contain besides its period: the wording of the train
+# questions these totals answer, plus fillers. Any other word may name a product, group
+# or condition the shop-wide number would ignore ("Cháo ngao bán mấy nồi").
+SHOP_FRAME = frozenset(
+    (
+        "a ban bao biet binh bua ca check cho co coi cong cua da dau day den do doanh don duoc "
+        "e gan gia gio gium giup ha hang het hoi hom ke la mang may minh moi mot nam nay ngay "
+        "ngoai nhat nhi nhieu qua quan quy rieng roi shop so ta tat thang thu tiem tien tinh "
+        "toi tong tren tri trong trung truoc tu tuan vay ve xem ra mat theo dem de lai len "
+        "tr k d sop wan nha nhe oi anh chi em luon thoi nao gi bo toan dat tong chu bay hien tai "
+        "hum tet am lich sau lien vua cuoi t th q dh roi vao chot chong cac z j"
+    ).split()
+)
+
+
+def _framed(text: str, extra: frozenset[str] = frozenset()) -> bool:
+    from src.semantics.vocabulary import filler_words
+
+    allowed = SHOP_FRAME | filler_words() | extra
+    return all(word in allowed for word in re.findall(r"[a-z]+", text))
+
+
+INDUSTRY_OPS = ("repair", "industry_", "prescription_", "unrecorded_attribute")
+UNCOMPUTED = (
+    r"(?<!\w)(?:đô la|đô-la|đôla|usd|ngoại tệ|tặng kèm|quà tặng|hàng tặng|tiền boa|tiền tip|"
+    r"khuyến mãi|khuyến mại|hãng nào|hãng gì|thương hiệu|nhãn hiệu)(?!\w)"
+)
+# "Từng bên / mỗi bên" asks one value per compared side (methods, channels, shifts).
+SIDES = r"\b(?:tung|moi) ben\b"
+SIDE_OPS = ("method_revenue", "channel_revenue", "shift_", "debt_customer")
+PEOPLE_COUNT = r"\b(?:bao nhieu|may) (?:nguoi|khach|vi khach)\b"
+
+
 def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
+    """Operator answer that also passes the wording, shape and size guards, else None."""
+    from src.agent.entities import entity_words
+    from src.agent.planner import shape_mismatch
+    from src.semantics.vocabulary import unknown_words
+
+    # Known words that still add a condition no operator computes (currency, free gifts).
+    if re.search(UNCOMPUTED, question.question.casefold()):
+        return None
+    decision = _operator_answer(question, context)
+    if decision is None:
+        return None
+    if re.search(SIDES, question_plain(question.question)) and not str(
+        decision["plan"].get("op")
+    ).startswith(SIDE_OPS):
+        return None
+    # A word outside the measured wording may change what is asked: leave it to the model.
+    # Industry books (repair, phone, pharmacy) bind their own trade wording.
+    if not str(decision["plan"].get("op")).startswith(INDUSTRY_OPS) and unknown_words(
+        question.question, entity_words(context)
+    ):
+        return None
+    answer = decision["answer"]
+    if shape_mismatch(question, answer["type"]):
+        return None
+    # A head count cannot exceed the shop's orders; a larger number is a money total.
+    if answer["type"] == "number" and re.search(PEOPLE_COUNT, question_plain(question.question)):
+        with closing(context.prepared.connect()) as conn:
+            orders = conn.execute("SELECT count(*) FROM orders").fetchone()[0]
+        if Decimal(str(answer["answer"])) > orders:
+            return None
+    return decision
+
+
+def _operator_answer(question: Question, context: BusinessContext) -> dict | None:
     from src.agent.plan import unparsed_time
 
     text = question_plain(question.question)
@@ -98,6 +165,7 @@ def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
         _pharmacy,
         _debt,
         _staff,
+        _delivery,
         _purchasing,
         _dead_stock,
         _stockout,
@@ -111,6 +179,7 @@ def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
         _items_in_orders,
         _cancellation,
         _product_ranking,
+        _group_items,
         _group_revenue,
         _rulebook_rankings,
         _purchase_total,
@@ -338,6 +407,13 @@ def _purchasing(question, context, text):
     from src.agent.purchasing import answer
 
     return answer(question, context, text)
+
+
+def _delivery(question, context, text):
+    from src.agent.delivery import answer as delivery_answer
+
+    result = delivery_answer(question, context, text)
+    return None if result is None else (*result, {})
 
 
 def _staff(question, context, text):
@@ -698,6 +774,9 @@ def _unit_quantity(question, context, text):
         rest = text.replace(target, " ")
     else:
         target, rest = None, text
+        # Shop-wide total of a unit: nothing else may narrow it.
+        if not _framed(re.sub(r"\b" + re.escape(unit) + r"\b", " ", rest)):
+            return None
     if re.search(QUALIFIERS, rest):
         return None
     check = _window(question, context)
@@ -722,7 +801,10 @@ def _unit_quantity(question, context, text):
 
 def _amount(match: re.Match) -> Decimal:
     digits, scale = match[1], match[2]
-    if scale in {"trieu", "tr"}:
+    if compact := re.fullmatch(r"(\d+)tr(\d{1,3})", digits):
+        # "3tr7" = 3,7 triệu; "1tr500" = 1,5 triệu.
+        return Decimal(compact[1]) * 1_000_000 + Decimal("0." + compact[2]) * 1_000_000
+    if scale in {"trieu", "tr", "cu"}:
         value = Decimal(digits.replace(".", "").replace(",", ".")) * 1_000_000
     elif scale in {"k", "nghin", "ngan"}:
         value = Decimal(digits.replace(".", "").replace(",", ".")) * 1_000
@@ -799,13 +881,15 @@ def _best_period(question, context, text):
     by_day = re.search(r"\bngay nao\b", text)
     by_month = re.search(r"\bthang nao\b", text)
     if not (by_day or by_month) or not re.search(
-        r"\b(?:cao nhat|nhieu nhat|lon nhat|nhieu tien nhat|dat nhat)\b", text
+        r"\b(?:cao nhat|nhieu nhat|lon nhat|nhieu tien nhat|dat nhat|dat khach nhat|"
+        r"dong khach nhat)\b",
+        text,
     ):
         return None
     count_orders = bool(re.search(r"\b(?:nhieu don|dong khach|dat khach|don nhat)\b", text))
     if not count_orders and not re.search(r"\b(?:doanh thu|dthu|tien)\b", text):
         return None
-    rest = re.sub(r"\b(?:nhieu|cao|lon|nhieu tien|dat) nhat\b", " ", text)
+    rest = re.sub(r"\b(?:nhieu|cao|lon|nhieu tien|dat|dat khach|dong khach) nhat\b", " ", text)
     if re.search(
         r"\b(nhom|khach|ca sang|ca chieu|nhan vien|kenh|tien mat|chuyen khoan|huy|zalo|"
         r"mat hang|mon)\b",
@@ -1203,8 +1287,73 @@ def _group_label(context, text):
     return label, kind
 
 
+def _group_items(question, context, text):
+    """Orders with an item of group X, or the top item inside group X (§1, §3)."""
+    if not re.search(r"\bnhom\b", text) or re.search(
+        GROUP_QUALIFIERS + r"|\bkhach\b|%|\bphan tram\b|\btop\b|\bnhung\b|\bliet ke\b", text
+    ):
+        return None
+    which = re.search(r"\b(?:mat hang|mon|san pham|sp|hang) nao\b", text)
+    count = re.search(r"\b(?:bao nhieu|bnhieu|may|so) don\b", text) and not which
+    by_revenue = which and re.search(
+        r"\b(?:doanh thu|dthu)\b.*\b(?:cao nhat|nhieu nhat|lon nhat)\b|"
+        r"\b(?:thu ve|ban duoc|ban) (?:duoc )?nhieu tien nhat\b",
+        text,
+    )
+    by_quantity = (
+        which
+        and not by_revenue
+        and re.search(r"\bban (?:duoc )?nhieu (?:([a-z0-9]+) )?nhat\b|\bban chay nhat\b", text)
+    )
+    if not (count or by_revenue or by_quantity) or _rank_limit(text):
+        return None
+    found = _group_label(context, text)
+    if found is None or found[1] != "item":
+        return None
+    label = found[0]
+    unit = by_quantity[1] if by_quantity and by_quantity.lastindex else None
+    check = _window(question, context)
+    if check is None:
+        return None
+    answer_type = "number" if count else "string"
+    if isinstance(check, tuple):
+        return _decision("group_items", check, None, answer_type)
+    orders, totals, keys, names, units = set(), defaultdict(Decimal), {}, {}, set()
+    for row in _lines(context, check):
+        order, _, amount, role, product, name, code, base, sold = row[:9]
+        if role != "sale_item" or row[10] is None or plain(row[10]) != label:
+            continue
+        if product is None or name is None:
+            raise ContractError("sale_line_product_unknown")
+        orders.add(order)
+        keys[product], names[product] = (code or name), name
+        units.add(plain(row[12]) if row[12] else None)
+        totals[product] += (
+            Decimal(str(amount or 0))
+            if by_revenue
+            else _base_quantity(base, sold, name, row[12])
+            if by_quantity
+            else Decimal(0)
+        )
+    if not orders:
+        return None
+    if count:
+        return _decision("group_items", check, len(orders), "number", group=label)
+    # "Nhiều kg nhất": every item of the group must be counted in that base unit.
+    if unit and units != {unit}:
+        return None
+    ranked = _ranked(totals, keys, 1)
+    return _decision("group_items", check, names[ranked[0]], "string", group=label)
+
+
 def _group_revenue(question, context, text):
-    """§1: revenue of an item or customer group, or its share of the whole shop."""
+    """§1: revenue of an item or customer group, its share of the whole shop, or the average
+    order value of a customer group (§3 'Giá trị trung bình một đơn')."""
+    aov = re.search(r"\b(?:trung binh|binh quan|tb)\b", text) and re.search(
+        r"\b(?:moi|mot|1|tren 1|tren mot) (?:don|don hang)\b", text
+    )
+    if aov:
+        text = re.sub(r"\b(?:trung binh|binh quan|tb)\b", " ", text)
     if not re.search(r"\bnhom\b", text) or re.search(GROUP_QUALIFIERS, text):
         return None
     if re.search(r"\b(nhat|top|nao|so don|bao nhieu don|may don|khach nao)\b", text):
@@ -1216,6 +1365,8 @@ def _group_revenue(question, context, text):
     if group is None:
         return None
     label, kind = group
+    if aov and (share or kind != "customer"):
+        return None
     check = _window(question, context)
     if check is None:
         return None
@@ -1224,15 +1375,24 @@ def _group_revenue(question, context, text):
         return _decision("group_revenue", check, None, answer_type)
     roles = set(check["contract"].get("row_roles") or {"sale_item", "service_fee"})
     part = whole = Decimal(0)
+    group_orders = set()
     for row in _lines(context, check):
         amount, role, item_group, customer_group = row[2], row[3], row[10], row[11]
+        own = item_group if kind == "item" else customer_group
+        if own is not None and plain(own) == label:
+            group_orders.add(row[0])
         if role not in roles or amount is None:
             continue
         value = Decimal(str(amount))
         whole += value
-        own = item_group if kind == "item" else customer_group
         if own is not None and plain(own) == label:
             part += value
+    if aov:
+        if not group_orders:
+            return None
+        return _decision(
+            "group_revenue", check, _money(part / len(group_orders)), "number", group=label
+        )
     if share:
         if not whole:
             return None
@@ -1254,13 +1414,20 @@ def _customers(context):
 
 # Rulebook rankings (public §3 rows); each fires only when the rulebook defines it.
 RANKINGS = {
-    "customer_loyalty": r"\bkhach(?: hang)? (?:trung thanh|ruot|than thiet) nhat\b",
-    "customer_aov_ranking": r"\bkhach(?: hang)? sop nhat\b",
-    "customer_cancellations": r"\bkhach(?: hang)? (?:hay|de) doi y nhat\b",
-    "product_order_ranking": (
-        r"\b(?:mat hang|hang|mon|san pham)(?: nao)? (?:duoc )?ua chuong nhat\b"
+    "customer_loyalty": (
+        r"\b(?:khach(?: hang)?|ai)(?: la)? (?:trung thanh|ruot|than thiet) nhat\b"
     ),
-    "peak_hour": r"\bgio cao diem\b",
+    "customer_aov_ranking": r"\bkhach(?: hang)? sop nhat\b",
+    "customer_cancellations": (
+        r"\b(?:khach(?: hang)?|ai)(?: la)?(?: khach(?: hang)?)? (?:hay|de) doi y nhat\b"
+    ),
+    "product_order_ranking": (
+        r"\b(?:mat hang|hang|mon|san pham)(?: nao)? (?:duoc )?(?:khach )?ua chuong nhat\b"
+    ),
+    "peak_hour": (
+        r"\bgio cao diem\b|\b(?:dong khach|dong don|nhieu don) nhat (?:vao|dao|luc|la) "
+        r"(?:may|khung) gio\b"
+    ),
 }
 
 
@@ -1293,9 +1460,21 @@ def _rulebook_rankings(question, context, text):
                 )
             ]
         hours = [re.match(r"\d{4}-\d{2}-\d{2}[T ](\d{2}):", t) for t in stamps]
-        if not hours or not all(hours):
-            return None  # an order without a clock cannot be placed in an hour
-        counts = Counter(int(h[1]) for h in hours)
+        if hours and all(hours):
+            counts = Counter(int(h[1]) for h in hours)
+        else:
+            # Rulebook: the hour of order creation; shops keep the clock in order_times.
+            with closing(context.prepared.connect()) as conn:
+                rows = conn.execute(
+                    f"SELECT t.seconds_of_day FROM orders o LEFT JOIN order_times t "
+                    f"USING (order_key) WHERE o.status IN "
+                    f"({','.join('?' for _ in statuses)}) AND substr(o.ordered_at,1,10) "
+                    "BETWEEN ? AND ?",
+                    [*statuses, window["start"], window["end"]],
+                ).fetchall()
+            if not rows or any(s is None for (s,) in rows):
+                return None  # an order without a clock cannot be placed in an hour
+            counts = Counter(int(Decimal(s)) // 3600 for (s,) in rows)
         best = [h for h, n in counts.items() if n == max(counts.values())]
         # The rule names no tie-break between hours: a tie abstains.
         return _decision(rule, check, best[0], "number") if len(best) == 1 else None
@@ -1408,7 +1587,7 @@ def _gross_profit(question, context, text):
 
 def _customer_ops(question, context, text):
     """§3 'Xác định khách': customer rankings and counts; walk-in orders never count."""
-    if not re.search(r"\bkhach\b", text) or re.search(
+    if not re.search(r"\bkhach\b|\bai mua\b", text) or re.search(
         r"\b(nhom|no|nowj|cong no|duong|o duong|mat hang|san pham|vang lai|moi)\b|"
         + GROUP_QUALIFIERS,
         text,
@@ -1665,7 +1844,8 @@ def _price_effect(question, context, text):
 
 AOV = (
     r"\b(?:trung binh|binh quan|tb)\b.*\b(?:moi|mot|1) (?:don|bill|hoa don)\b|"
-    r"\b(?:moi|mot|1) (?:don|bill|hoa don)(?: hang)? (?:trung binh|binh quan|tb)\b"
+    r"\b(?:moi|mot|1) (?:don|bill|hoa don)(?: hang)? (?:trung binh|binh quan|tb)\b|"
+    r"\b(?:trung binh|binh quan|tb) (?:gia tri )?don hang\b"
 )
 
 
@@ -1694,6 +1874,8 @@ def _whole_shop(question, context, text):
     if len(metrics) != 1 or metrics & {"cancelled_order_count"}:
         return None
     metric = next(iter(metrics))
+    if not _framed(text):
+        return None
     _check_question_scope(scoped)
     from src.agent.planner import unsupported_intent
 
@@ -1759,9 +1941,50 @@ def _product_revenue(question, context, text):
     return _decision("product_revenue", check, _money(total), "number", product=product, seen=seen)
 
 
+_CLAIM = r"thang (\d{1,2})/(\d{4}) (?:lai |cung |deu )?cao hon (?:so voi )?thang (\d{1,2})/(\d{4})"
+
+
+def _month_claims(question) -> list[tuple[int, int, int, int]]:
+    from src.agent.plan import _time_text
+
+    return [tuple(map(int, m)) for m in re.findall(_CLAIM, _time_text(question))]
+
+
+def _claimed_rises(question, context, text, claims):
+    """ "T7 cao hơn T6, rồi T8 cao hơn T7, đúng không": every stated month-over-month rise
+    holds (boolean). Only revenue claims between whole months; nothing else in the sentence."""
+    from src.agent.plan import _time_text
+
+    if len(claims) < 2 or not re.search(
+        r"\b(?:dung khong|phai khong|dung vay khong|dung ko|phai ko|dung chua|ha|khong)\s*[?.!]*$",
+        text,
+    ):
+        return None
+    if not re.search(r"\b(?:doanh thu|dthu)\b", text) or re.search(
+        r"\b(nhom|khach|mat hang|ca sang|ca chieu|kenh|don|so luong)\b|" + GROUP_QUALIFIERS, text
+    ):
+        return None
+    rest = re.sub(_CLAIM, " ", _time_text(question))
+    if re.search(r"\d", rest):
+        return None
+    values = {}
+    for m1, y1, m2, y2 in claims:
+        for month, year in ((m1, y1), (m2, y2)):
+            if (year, month) not in values:
+                check = _window(question, context, {"kind": "month", "year": year, "month": month})
+                if not isinstance(check, dict):
+                    return None
+                values[(year, month)] = (_executor_value(context, check, rounded=False), check)
+    holds = all(values[(y1, m1)][0] > values[(y2, m2)][0] for m1, y1, m2, y2 in claims)
+    return _decision("trend", next(iter(values.values()))[1], holds, "boolean")
+
+
 def _trend(question, context, text):
     """Revenue rising in each of three consecutive months (boolean, question order)."""
-    if not re.search(r"\btang lien tuc\b|\bthang sau (?:co )?luon cao hon\b", text):
+    claims = _month_claims(question)
+    if claims:
+        return _claimed_rises(question, context, text, claims)
+    if not re.search(r"\btang lien tuc\b|\bthang sau (?:co |deu )?(?:luon |deu )?cao hon\b", text):
         return None
     if re.search(r"\b(nhom|khach|mat hang|ca sang|ca chieu|kenh)\b", text):
         return None

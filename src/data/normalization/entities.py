@@ -501,6 +501,7 @@ def build_entities(
             "decimal_dot" if cell.native_type in {"numeric", "integer"} else policy["convention"],
         )
 
+    customer_master = any(s.role == "customer" for s in sources)
     for s in sources:
         if s.role not in masters:
             continue
@@ -537,7 +538,7 @@ def build_entities(
             continue
         for table, row in data_rows(context, s):
             f, ref = s.fields, row.reference(table)
-            oid = str(get(row, f, "order_id") or "")
+            oid = str(get(row, f, "order_id") or "").strip()
             order = orders.get(oid)
             if not order:
                 continue
@@ -545,6 +546,10 @@ def build_entities(
                 try:
                     code, name = get(row, f, "customer_id"), get(row, f, "customer")
                     key = masters["customer"].get(str(code).strip()) if code else None
+                    if code and not key and not customer_master:
+                        # No customer list: rulebook §3, each customer code is one customer.
+                        key = entity("customer", code, name, None, ref)
+                        masters["customer"][str(code).strip()] = key
                     if code and not key:
                         raise ContractError("orphan_customer_code")
                     if not code and name:
@@ -664,6 +669,9 @@ def build_entities(
                     ).fetchone()[0]
                     if base_unit and identity_text(str(unit)) != identity_text(base_unit):
                         numbers[1] = None
+                    elif base_unit:
+                        # Sold in the product's own base unit: the quantity is already base.
+                        numbers[0] = numbers[1]
                 conn.execute(
                     "INSERT OR IGNORE INTO line_items VALUES (?,?,?,?,?,?)",
                     (line, key, *numbers, dumps(ref)),
@@ -721,7 +729,7 @@ def build_entities(
                     if amount is None:
                         raise ContractError("business_amount_missing")
                     if family == "payments":
-                        oid = orders.get(str(get(row, f, "order_id")))
+                        oid = orders.get(str(get(row, f, "order_id")).strip())
                         if not oid or amount < 0:
                             raise ContractError("payment_orphan_or_refund_policy_unsupported")
                         payment_id = get(row, f, "payment_id")
@@ -841,7 +849,7 @@ def build_entities(
             for s in sources:
                 if {"order_id", "returned_at"} <= s.fields.keys() and s.role == "return":
                     for _, row in data_rows(context, s):
-                        key = orders.get(str(get(row, s.fields, "order_id")))
+                        key = orders.get(str(get(row, s.fields, "order_id")).strip())
                         at = timestamp(row, s, "returned_at")
                         if not key or (key in returns and returns[key] != at):
                             raise ContractError("lot_return_date_missing_or_conflicting")
@@ -867,7 +875,7 @@ def build_entities(
             for s in allocation_sources:
                 for table, row in data_rows(context, s):
                     f = s.fields
-                    order = orders.get(str(get(row, f, "order_id")))
+                    order = orders.get(str(get(row, f, "order_id")).strip())
                     line = line_numbers.get((order, str(get(row, f, "line_number"))))
                     lot = str(get(row, f, "lot_id"))
                     sold = parse_number(get(row, f, "base_quantity"), "decimal_dot")

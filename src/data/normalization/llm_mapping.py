@@ -331,6 +331,18 @@ def _order_role(have: set[str], note_status: bool = False) -> str | None:
     return None
 
 
+def _order_level(readme: str, header: str) -> bool:
+    """README says the column is written for the whole order ("Bớt: tiền bớt cho cả đơn",
+    "khách, bớt, ghi chú của đơn lặp lại ở mọi dòng")."""
+    word = re.escape(normalized(header).strip())
+    for sentence in re.split(r"[.\n]", normalized(readme)):
+        if re.search(r"(?<!\w)" + word + r"(?!\w)", sentence) and re.search(
+            r"\b(?:cho|cua) ca don\b|\bcua don lap lai\b", sentence
+        ):
+            return True
+    return False
+
+
 def normalize_proposal(catalog: dict, proposal: dict, note_status: bool = False) -> dict:
     """Derive what code can establish itself; the model's column labels stay the evidence.
 
@@ -375,6 +387,23 @@ def normalize_proposal(catalog: dict, proposal: dict, note_status: bool = False)
             ]
             if len(amounts) == 1:
                 columns[amounts[0]] = "line_net_amount"
+        # Rulebook §1: an order's revenue never subtracts an order-level discount. When the
+        # only discount is the order's (README: written for the whole order), the line
+        # amount before it is the line's revenue amount.
+        gross = [c for c, m in columns.items() if m == "line_gross_amount"]
+        readme = catalog.get("readme") or ""
+        # A "line amount" the README writes for the whole order is the order's payable.
+        for column, meaning in list(columns.items()):
+            if meaning == "line_net_amount" and len(gross) == 1 and _order_level(readme, column):
+                columns[column] = "order_payable"
+        labels = set(columns.values())
+        if (
+            "order_id" in labels
+            and "line_net_amount" not in labels
+            and len(gross) == 1
+            and all(_order_level(readme, c) for c, m in columns.items() if m == "discount")
+        ):
+            columns[gross[0]] = "line_net_amount"
         used = [v for v in columns.values() if v not in DECOYS]
         for label, meaning in columns.items():
             if meaning not in _CORE and used.count(meaning) > 1:
@@ -512,12 +541,20 @@ def synthesize_readme(catalog: dict, proposal: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+GROUP_ONLY = {"missing_group_reference"}
+GROUP_ONLY_METRICS = {"item_group_share"}
+
+
 def verify_facts(connection: sqlite3.Connection, summary: dict, end_hint: str | None) -> list[str]:
     """Extra checks for model-mapped facts; train README-mapped shops all pass them."""
     errors = []
-    if summary.get("status") != "ready" or summary.get("blocking_metrics"):
+    # A product missing from the group list blocks only group shares (preflight keeps them
+    # blocked); every other issue rejects the mapping.
+    blocking = set(summary.get("blocking_metrics") or []) - GROUP_ONLY_METRICS
+    issues = {k: v for k, v in (summary.get("issue_counts") or {}).items() if k not in GROUP_ONLY}
+    if summary.get("status") not in {"ready", "blocked"} or blocking:
         errors.append(f"facts not ready: blocking {summary.get('blocking_metrics')}")
-    if summary.get("issue_counts"):
+    if issues:
         errors.append(f"normalization issues: {summary['issue_counts']}")
     rows = connection.execute(
         "SELECT count(*), sum(status='completed'), min(ordered_at), max(ordered_at) FROM orders"
@@ -562,7 +599,59 @@ def verify_facts(connection: sqlite3.Connection, summary: dict, end_hint: str | 
             "the column labelled line_net_amount is an order-level amount (order total): "
             "label it order_payable and label the per-line amount column line_net_amount"
         )
-    return errors
+    return errors + _price_arithmetic(connection, summary)
+
+
+def _cell_numbers(source_values: str) -> set[Decimal]:
+    from src.data.normalization.values import ParseError, parse_money
+
+    numbers = set()
+    for cell in loads(source_values):
+        token = re.sub(r"\s*(?:vnd|vnđ|đ|₫)$", "", str(cell[2]).strip().casefold())
+        if re.fullmatch(r"-?\d{1,3}(?:[.,]\d{3})+", token):
+            token = re.sub(r"[.,]", "", token)
+        # "3,9tr", "1200k": either separator may be the decimal mark of a scaled amount.
+        for convention in (None, "decimal_comma", "decimal_dot"):
+            try:
+                numbers.add(parse_money(token, convention))
+            except (ParseError, InvalidOperation, ValueError):
+                continue
+    return numbers
+
+
+def _price_arithmetic(connection: sqlite3.Connection, summary: dict) -> list[str]:
+    """Quantity x unit price (less a discount) must give the line amount.
+
+    Independent of the labels: when the proposal names a unit price on the sale lines, a
+    line sold in quantity q > 1 for amount a must carry some cell p with q x p = a, or
+    q x p - d = a for a discount cell d. A wrong quantity or amount column breaks this on
+    most lines, and every answer of the shop with it.
+    """
+    tables = ((summary.get("proposal") or {}).get("tables") or {}).values()
+    if not any(
+        t.get("role") == "order_lines" and "unit_price" in (t.get("columns") or {}).values()
+        for t in tables
+    ):
+        return []
+    checked = passed = 0
+    for amount, quantity, source_values in connection.execute(
+        "SELECT l.net_amount, i.sold_quantity, l.source_values FROM order_lines l "
+        "JOIN line_items i USING (line_key) WHERE l.row_role = 'sale_item' "
+        "AND l.net_amount IS NOT NULL AND i.sold_quantity IS NOT NULL"
+    ):
+        quantity, amount = Decimal(quantity), Decimal(amount)
+        if quantity in (0, 1):
+            continue
+        checked += 1
+        cells = _cell_numbers(source_values) - {amount}
+        gross = {quantity * price for price in cells}
+        passed += amount in gross or any(g - d == amount for g in gross for d in cells if 0 < d < g)
+    if checked >= 20 and passed < Decimal("0.95") * checked:
+        return [
+            f"quantity x unit price gives the line amount on only {passed}/{checked} lines; "
+            "the quantity or line_net_amount column is mislabelled"
+        ]
+    return []
 
 
 def request_proposal(

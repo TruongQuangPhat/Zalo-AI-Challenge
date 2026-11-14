@@ -257,11 +257,18 @@ STATUSES: dict[str, set[str]] = {
 }
 
 
+# Status-column values only. In a free-text note "khách trả" may be how the customer paid,
+# so ``note_status`` keeps it ambiguous; as a delivery/order status it is a return.
+COLUMN_STATUSES = {"khach tra": "returned"}
+
+
 def normalize_status(value) -> str:
     token = normalized(str(value)).strip()
     for status, labels in STATUSES.items():
         if token in labels:
             return status
+    if token in COLUMN_STATUSES:
+        return COLUMN_STATUSES[token]
     aliases = STATUS_ALIASES.get() or {}
     # "not_status" (a note that says nothing about the outcome) is no status-column value.
     if aliases.get(token, "not_status") != "not_status":

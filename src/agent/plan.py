@@ -268,6 +268,22 @@ def _time_text(question: Question) -> str:
         last = int(question.as_of_date[:4]) - 1
         text = re.sub(r"\b(thang|quy) (\d{1,2}) nam (?:ngoai|roi|truoc)\b", rf"\1 \2/{last}", text)
         text = re.sub(r"\b(thang|quy) (\d{1,2}) nam nay\b", rf"\1 \2/{last + 1}", text)
+
+    # "tháng 10, 11, 12 năm 2025 lần lượt", "th9, th10, th11/2025": an ascending list of
+    # months shares the written year when the question reads them one by one (three or
+    # more, or "lần lượt"/"nào"); "tháng 7 và tháng 8/2025" alone stays unparsed.
+    def _shared_year(m: re.Match) -> str:
+        months = [int(n) for n in [m[1], *re.findall(r"\d{1,2}", m[2])]]
+        listed = len(months) >= 3 or re.search(r"\b(?:lan luot|nao)\b", text)
+        if not listed or months != sorted(set(months)) or not 1 <= months[0] <= months[-1] <= 12:
+            return m[0]
+        return ", ".join(f"thang {n}/{m[3]}" for n in months)
+
+    text = re.sub(
+        r"\bthang (\d{1,2})((?:\s*(?:,|va)\s*(?:thang )?\d{1,2})+)\s*(?:/|-| nam )(\d{4})\b",
+        _shared_year,
+        text,
+    )
     year = r"(\d{4}|\d{2})(?![/-]?\d)"
     # T5/2025, Th 11/25, thg7-2026, thang 5-2026, thang 11/25
     month = _period("thang", 12)

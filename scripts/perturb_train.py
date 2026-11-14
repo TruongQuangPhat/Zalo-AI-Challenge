@@ -59,6 +59,7 @@ VARIANTS = (
     "no_columns",
     "monthly_csv",
     "status_words",
+    "status_column_words",
     "vn_numbers",
     "short_headers",
     "summary_rows",
@@ -74,6 +75,7 @@ VARIANTS = (
     "abbreviations",
     "footer_rows",
     "phrasing_questions",
+    "trap_questions",
 )
 _BULLET = re.compile(r"^(\s*-\s+\*\*)(.+?)(\*\*\s*:\s*)(.+)$")
 _SECTION = re.compile(r"^## Cột trong `")
@@ -127,6 +129,8 @@ STATUS_SYNONYMS = {
 assert not {
     normalized(w).strip() for words in STATUS_SYNONYMS.values() for w in words
 } & set().union(*STATUSES.values()), "status synonym is vocabulary"
+# Status-column wordings the fixed vocabulary reads without the model (negative index).
+COLUMN_WORDS = {"returned": "Khách trả"}
 _STATUS_HEADER = re.compile(r"trang thai|tinh trang|status|ket qua|xu ly")
 _MONEY_HEADER = re.compile(r"\b(?:tien|gia|tong|cong no|no|amount|price|total)\b")
 _CELL = re.compile(r'<c r="([A-Z]+)(\d+)"([^>]*?)(?:/>|>(.*?)</c>)', re.S)
@@ -270,8 +274,10 @@ def perturb_business(source: Path, target: Path, variant: str) -> dict:
         if new == readme:
             return {"skipped": "no numbered-part sections"}
     written = {}
-    if variant in {"status_words", "vn_numbers"}:
+    if variant in {"status_words", "status_column_words", "vn_numbers"}:
         new, index, changed = readme, int(re.sub(r"\D", "", source.name) or 0), 0
+        if variant == "status_column_words":
+            index = -1
         rewriters = {".csv": rewrite_csv_statuses, ".xlsx": rewrite_xlsx_statuses}
         if variant == "vn_numbers":
             rewriters = {
@@ -302,7 +308,9 @@ def perturb_business(source: Path, target: Path, variant: str) -> dict:
         (target / name).write_bytes(data)
     (target / "README.md").write_text(new, encoding="utf-8")
     return {"readme_changed": new != readme, "files": len(files) + len(written)} | (
-        {"changed_cells": changed} if variant in {"status_words", "vn_numbers"} else {}
+        {"changed_cells": changed}
+        if variant in {"status_words", "status_column_words", "vn_numbers"}
+        else {}
     )
 
 
@@ -314,6 +322,8 @@ def _status_synonym(text, index: int) -> str | None:
     token = normalized(str(text)).strip()
     for status, words in STATUSES.items():
         if token in words:
+            if index < 0:
+                return COLUMN_WORDS.get(status)
             return STATUS_SYNONYMS[status][index % len(STATUS_SYNONYMS[status])]
     return None
 
@@ -627,6 +637,52 @@ def phrasing_question(text: str, index: int, as_of: str) -> tuple[str, list[str]
     return text, used
 
 
+# Conditions no operator computes, appended to a question: the question now asks
+# something else, so any rule answer to it is a wrong answer (the gate expects none).
+TRAPS = [
+    "tính theo từng bên",
+    "của hãng nào",
+    "sau khi trừ thuế",
+    "không kể khách vãng lai",
+    "riêng chi nhánh hai",
+    "theo từng nhân viên",
+    "quy ra đô la",
+    "chỉ tính hàng khuyến mãi",
+    "mỗi kênh bao nhiêu",
+    "trừ phần tặng kèm",
+    "của thương hiệu nào",
+    "tính cả tiền boa",
+]
+
+
+def trap_question(text: str, index: int) -> str:
+    body = text.rstrip(" ?.!")
+    return f"{body}, {TRAPS[index % len(TRAPS)]}{text[len(body) :]}"
+
+
+def trap_split(data_dir: Path, root: Path) -> int:
+    """Every fifth question with a condition appended; answers are the untrapped ones."""
+    root.mkdir(parents=True)
+    for business in sorted((data_dir / "data").iterdir()):
+        for path in business.iterdir():
+            _link(path, root / "data" / business.name / path.name)
+    for name in ["rulebook.md", "calendar.csv"]:
+        _link(data_dir / name, root / name)
+    lines, ids = [], set()
+    for i, line in enumerate((data_dir / "questions.jsonl").open(encoding="utf-8")):
+        if i % 5 == 0:
+            q = json.loads(line)
+            ids.add(q["id"])
+            new = trap_question(q["question"], i // 5)
+            lines.append(json.dumps(q | {"question": new}, ensure_ascii=False) + "\n")
+    (root / "questions.jsonl").write_text("".join(lines), encoding="utf-8")
+    answers = (data_dir / "answers.jsonl").read_text(encoding="utf-8").splitlines(keepends=True)
+    (root / "answers.jsonl").write_text(
+        "".join(a for a in answers if json.loads(a)["id"] in ids), encoding="utf-8"
+    )
+    return len(lines)
+
+
 def phrasing_split(data_dir: Path, root: Path) -> int:
     """Questions in other everyday wording; data, rulebook and answers unchanged."""
     root.mkdir(parents=True)
@@ -710,6 +766,9 @@ def main(argv: list[str] | None = None) -> None:
             continue
         if variant == "phrasing_questions":
             print(f"{variant}: {phrasing_split(data_dir, root)} questions -> {root}")
+            continue
+        if variant == "trap_questions":
+            print(f"{variant}: {trap_split(data_dir, root)} questions -> {root}")
             continue
         protected = _protected_names(data_dir)
         report = {

@@ -124,6 +124,9 @@ _ASK = r"(?:bao nhieu|bao nhiu|bnhiu|bnhieu|bn|nhieu)"
 _LIST_CUES = (
     # "tinh moi loai do uong" means all items, not one value per kind.
     r"\b(lan luot|(?<!tinh )(?<!cong )moi loai|moi ben|tung thang|moi thang)\b",
+    # One value per side/channel/person asked ("từng bên doanh thu bao nhiêu").
+    r"\b(?:theo )?tung (?:ben|kenh|nguoi|nhan vien|khach|nhom|loai|mat hang|mon|ngay|tuan|quy|"
+    r"nam|ca|chi nhanh|cua hang|hang|tho|nha cung cap)\b|\bmoi (?:kenh|nhom|nhan vien)\b",
     # Two questions in one sentence, unless a single percentage compares two periods.
     r"^(?!.*(?:%|\bphan tram\b)).*\b" + _ASK + r"\b.*\b" + _ASK + r"\b",
     r"\bva (?:doanh thu |dthu |so don )?(?:cac )?don\b",
@@ -135,7 +138,10 @@ _LIST_CUES = (
 _DATE_CUE = r"\b(?:ngay|thang) nao\b"
 _WHO_CUE = (
     r"\b(?:ai la|la ai|nguoi nao|nhan vien nao|khach nao|khach hang nao|mat hang nao|"
-    r"mon nao|san pham nao)\b"
+    # "bán không được món nào" counts unsold items; it does not ask which one.
+    r"(?<!duoc )(?<!dc )mon nao|san pham nao|"
+    # "hãng/nhóm/loại/kênh nào" names one; a number cannot answer it.
+    r"(?:hang|nhom|loai|thuong hieu|nhan hieu|kenh|nha cung cap|ncc|tho|dong xe|dong may) nao)\b"
 )
 _ADVICE_CUE = r"\b(?:duoc khong|co nen|nen dung|co sao khong)\s*[?!.]*$"
 

@@ -87,6 +87,34 @@ def _mention_names(path: Path, revision: tuple) -> tuple[str, ...]:
     return tuple(sorted(n for n in names if len(n.split()) >= 2))
 
 
+@lru_cache(maxsize=4)
+def _name_words(path: Path, revision: tuple) -> frozenset[str]:
+    words = set()
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:
+        for name, aliases, unit in conn.execute("SELECT name, aliases, base_unit FROM entities"):
+            for text in (name, unit or "", *loads(aliases)):
+                words.update(re.findall(r"\w+", plain(text)))
+        for table, column in (
+            ("line_groups", "item_group"),
+            ("event_groups", "item_group"),
+            ("order_groups", "customer_group"),
+        ):
+            try:
+                for (value,) in conn.execute(f"SELECT DISTINCT {column} FROM {table}"):
+                    words.update(re.findall(r"\w+", plain(str(value))))
+            except sqlite3.OperationalError:
+                continue
+    return frozenset(words)
+
+
+def entity_words(context: BusinessContext) -> frozenset[str]:
+    """Accentless words of the shop's product, customer, unit and group names."""
+    if not context.prepared or context.prepared.path is None or context.prepared.path.is_symlink():
+        return frozenset()
+    path = context.prepared.path.resolve()
+    return _name_words(path, _catalog_revision(path))
+
+
 def mentioned_entity(context: BusinessContext, question: Question) -> str | None:
     """First source entity or group name the question names, accent-insensitively."""
     if not context.prepared or context.prepared.path is None or context.prepared.path.is_symlink():
@@ -215,7 +243,11 @@ def business_spec(question: Question) -> dict | None:
         else:
             metric = (
                 "receivable_customer_count"
-                if re.search(r"\b(so khach|bao nhieu khach|may khach|dem (?:cac )?khach)\b", text)
+                if re.search(
+                    r"\b(so khach|bao nhieu khach|may khach|dem (?:\w+ ){0,3}khach|"
+                    r"(?:bao nhieu|may) nguoi)\b",
+                    text,
+                )
                 else "receivable"
             )
             group, limit, shape = None, None, "number"

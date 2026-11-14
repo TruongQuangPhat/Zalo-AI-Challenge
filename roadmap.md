@@ -13,6 +13,105 @@
 
 ---
 
+## Coverage round 5: chốt chặn độ chính xác, dev_003/dev_014, dữ liệu public — 16/11/2026
+
+Bản nộp molab `public-submit-r4c` (commit `cdb651e`) được **0,567** trên public: 653 câu trả
+lời = 575 câu theo luật (trùng hoàn toàn bản CPU) + 69 câu dev_003 (model map cột, model
+phân loại "Khách trả" = trả hàng) + 9 câu model planner. Với chấm +1/−1/0 là khoảng 610
+đúng / 43 sai; với chấm chỉ đếm câu đúng là 567 đúng / 86 sai. Train vẫn 0 sai, nên lỗi nằm
+ở cách hỏi và dữ liệu chỉ có ở public. Đọc lại từng câu public bị gắn cờ cho thấy các nguồn
+sai có hệ thống:
+
+- operator trả lời khi câu còn chữ chưa hiểu ("bq", "hãng nào", "từng bên", "đếm dúp các
+  khách … bao nhiêu người" bị trả tổng tiền nợ);
+- câu nêu tên hàng không có trong danh mục ("Cháo ngao bán mấy nồi") bị `_unit_quantity` /
+  `_whole_shop` trả số toàn shop;
+- "sữa bột số 4, gộp mọi hãng" bị đọc theo đơn vị "lon" của mọi hàng.
+
+Đã làm:
+
+- **Chốt chặn "hiểu hết chữ"** (`src/semantics/vocabulary.py`). Mỗi chữ của câu phải thuộc
+  một trong các nhóm sau, không thì operator bỏ trống và model viết lại câu trên molab:
+  - từ vựng câu hỏi đã đo (`question_words.txt`, dựng bằng `scripts/build_question_words.py`
+    chỉ từ câu train và các biến thể của chúng);
+  - từ đệm/khẩu ngữ phổ thông;
+  - từ operator tự nhận nghĩa;
+  - chữ trong tên hàng, khách, nhóm, đơn vị của chính shop.
+
+  Thêm `UNCOMPUTED` (ngoại tệ, hàng tặng kèm).
+- **Câu "toàn shop" chỉ được chứa khung từ đã đo** (`SHOP_FRAME`). Áp cho `_whole_shop` và
+  `_unit_quantity` khi không nêu mặt hàng.
+- **Hình dạng đáp án ngay trong `answer_by_rule`**, cùng `shape_mismatch` như đường
+  `predict.sh`:
+  - "hãng/nhóm/loại/kênh/thợ nào" phải ra string;
+  - "từng bên/từng kênh/mỗi kênh…" phải ra list;
+  - "bán không được món nào" không bị coi là hỏi "món nào".
+- **Đếm người** ("bao nhiêu người/khách") phải ≤ số đơn của shop; "đếm … khách … bao nhiêu
+  người" là đếm khách nợ.
+- **Biến thể `trap_questions`**: 1/5 câu train được chèn thêm một điều kiện không có phép
+  tính nào. Câu bị chèn phải bỏ trống. Biến thể `status_column_words`: "Khách trả" trong cột
+  trạng thái.
+- **Dữ liệu:**
+  - "Khách trả" trong **cột trạng thái** là trả hàng; trong ghi chú tự do vẫn mơ hồ;
+  - shop không có danh sách khách thì mỗi mã khách trên đơn là một khách (dev_007/008);
+  - mã đơn có khoảng trắng thừa khi nối phiếu thu (dev_010 `thanh_toan.csv`);
+  - dòng bán đúng đơn vị cơ bản của mặt hàng thì số lượng đó là số lượng cơ bản (shop map
+    bằng model).
+- **Proposal của model:**
+  - cột "thành tiền dòng" mà README ghi là "cho cả đơn" thì là tiền đơn;
+  - khi giảm giá duy nhất là giảm giá cả đơn, thành tiền trước giảm là tiền dòng (§1 không
+    trừ giảm giá cả đơn);
+  - lỗi chỉ thiếu tham chiếu nhóm hàng không loại cả shop (tỉ trọng nhóm vẫn bị chặn);
+  - kiểm tra số học độc lập: số lượng × đơn giá (− giảm) = thành tiền trên ≥ 95% dòng có số
+    lượng > 1, đọc cả "3,9tr", "1200k".
+
+  Với hai proposal model đã ghi trên molab, dev_014 nay dựng được facts.
+- **Phép tính mới:**
+  - giao nhiều đợt và hạn trả của đơn bán chịu (`src/agent/delivery.py`, đọc sổ theo nghĩa
+    cột README);
+  - số đơn có mặt hàng nhóm X, mặt hàng đứng đầu trong nhóm;
+  - giá trị trung bình một đơn của nhóm khách;
+  - giờ cao điểm theo giờ tạo đơn (`order_times`);
+  - ngày đắt khách, khách trung thành/đổi ý ("ai …");
+  - danh sách tháng dùng chung năm ("tháng 10, 11, 12 năm 2025");
+  - chuỗi khẳng định "T7 cao hơn T6, rồi T8 cao hơn T7, đúng không";
+  - "10 củ", "3tr7".
+- `check_submission`: sửa lỗi `Decimal + float` làm bước kiểm tra trên molab dừng.
+
+Kết quả đo (CPU, chỉ `answer_by_rule`, facts dựng lại toàn bộ với code mới):
+
+| Lượt | r4c | Round 5 |
+|---|---|---|
+| Train gốc (3.000 câu) | 2.769 / 0 sai | **2.783 / 0 sai** |
+| `chat_questions` | 1.975 / 0 | 1.988 / 0 |
+| `phrasing_questions` | 1.584 / 0 | 1.593 / 0 |
+| `trap_questions` (600, phải bỏ trống) | — | 1 câu còn trả lời (trước khi thêm `UNCOMPUTED`/`SIDES`: 17) |
+| Biến thể `status_column_words`, `padded_codes`, `qty_with_unit` | — | 0 sai, 0 mất (+2, +3 câu mới) |
+| `verify_runtime` | 664 test | lint/format đạt, 694 test |
+| Public theo luật (1.000 câu, replay proposal molab) | 575 | **721** |
+
+Public theo shop (round 5 / bản molab r4c gồm cả model):
+
+| Shop | 001 | 002 | 003 | 004 | 005 | 006 | 007 | 008 | 009 | 010 | 011 | 012 | 013 | 014 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Round 5 | 76 | 35 | 88 | 71 | 79 | 84 | 52 | 71 | 20 | 50 | 22 | 36 | 27 | 10 |
+| Molab r4c | 69 | 34 | 69 | 58 | 76 | 83 | 50 | 61 | 20 | 46 | 22 | 36 | 28 | 1 |
+
+Hai câu sai đã biết nay đúng: "bq mỗi đơn" ra trung bình mỗi đơn, "đếm dúp các khách" ra 16
+người. Bốn câu sai đã biết khác bị bỏ trống: hãng nào, từng bên, sữa bột số N gộp mọi hãng,
+Cháo ngao. 19 câu molab đã trả lời nay không còn đáp án theo luật: phần lớn do chốt chặn (từ
+lạ, khung từ) và phần còn lại do model viết lại câu. Trên molab, model vẫn viết lại câu có từ
+lạ rồi chạy luật lại.
+
+**Giới hạn:**
+
+- Public không có nhãn: chưa đo được độ đúng.
+- Mọi lượt đo CPU dùng proposal đã ghi của molab. dev_003, dev_014 vẫn phụ thuộc model trên
+  molab.
+- dev_014 (sổ góp, bảo hành, thu máy cũ ở file riêng) và các luật chỉ có ở public (bỉm,
+  voucher, sửa xe bảng hoa hồng…) chưa làm.
+- Trap chỉ phủ các điều kiện đã liệt kê; cách nói hoàn toàn mới ở private vẫn có thể lọt qua.
+
 ## Coverage round 4c: quy đổi đơn vị, sổ ghi tay, tồn kho, giá — 14/11/2026
 
 Rà soát tiếp các câu train chưa trả lời (354 câu có đáp án). Ưu tiên luật có ở **cả** train
