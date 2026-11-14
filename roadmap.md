@@ -13,6 +13,553 @@
 
 ---
 
+## Coverage round 4c: quy đổi đơn vị, sổ ghi tay, tồn kho, giá — 14/11/2026
+
+Rà soát tiếp các câu train chưa trả lời (354 câu có đáp án). Ưu tiên luật có ở **cả** train
+và public, vì private nhiều khả năng dùng rulebook của public. Không làm luật chỉ có ở
+train (giá bán ngày D, tồn theo đơn vị lớn) và luật chỉ có ở public (không đo được).
+
+- **Quy đổi đơn vị lúc dựng facts** (`entities.conversion_table`). README "Quy đổi đơn
+  vị: số lượng ghi theo đơn vị của dòng…" là điều kiện bắt buộc. Nguồn quy đổi:
+  - bảng `DanhSachQuyDoi` / `DanhMuc`, nhận theo tên cột hoặc theo định nghĩa cột trong
+    README ("đơn vị lớn", "hệ số: số đơn vị cơ bản trong 1 đơn vị lớn");
+  - danh sách trong README ("- Coca Cola 330ml: 1 thùng = 24 lon").
+
+  Cách dùng:
+  - dòng chưa có số lượng quy đổi: đơn vị lớn thì nhân hệ số, đơn vị cơ bản thì giữ;
+  - mặt hàng không có trong danh sách (README: "chỉ có mặt hàng có đơn vị lớn") lấy đơn
+    vị duy nhất nó được bán làm đơn vị cơ bản; bán theo hai đơn vị thì để trống;
+  - mâu thuẫn trong danh sách thì bỏ cả danh sách.
+
+  Nhận ở 24 shop train và 6 shop public. Trước đây biz_103/117 không có dòng nào có số
+  lượng đơn vị cơ bản; nay đủ.
+- **Sổ ghi tay không có mã đơn** (`sales_ledger`; biz_107/113/126). Lấy tên hàng và số lượng
+  quy đổi từ chính dòng nguồn mà mỗi `sales_event` giữ tham chiếu (`src/agent/ledger.py`).
+  Các phép theo mặt hàng có sẵn (doanh thu, số lượng, bán chạy) chạy trên đó. Đơn vị cơ bản
+  của món là đơn vị của các dòng có số lượng bán bằng số lượng quy đổi.
+- **Ngày / tháng cao nhất, ngưỡng theo ngày, % theo tháng** ở sổ không có dòng hàng (sổ ghi
+  tay, xuất chỉ tổng đơn): doanh thu từng ngày lấy từ executor đã kiểm chứng.
+- **Phép tính mới hoặc mở rộng** (đều đo trên câu train có sẵn):
+  - giá trị hàng tồn: tồn hết ngày × giá vốn trong danh mục hàng;
+  - nhập trừ bán, quy về đơn vị câu hỏi bằng bảng quy đổi theo mã ("Mã hàng, ĐVT, Quy
+    đổi", `don_vi_sp`);
+  - hiệu ứng tăng giá khi câu không ghi ngày: tra bảng giá, lấy lần đầu giá tăng lên mức
+    được hỏi;
+  - tổng tiền nhập, nhà cung cấp từ sổ nhập một bảng. Tiền ghi "1tr500", "12,345tr",
+    "12.345.678đ"; ngày dạng số serial đọc theo hệ ngày của workbook;
+  - % doanh thu của một phương thức thanh toán.
+- **Cách hỏi:** total, revenue, order, bill, best seller, tiền tươi, ck, "không cần đơn bác
+  sĩ", "thoaij". Biến thể `phrasing_questions` thêm 6 phép viết lại (1.682 câu).
+  - "total" chỉ đổi thành "tổng cộng" khi đứng ngay trước từ hỏi số lượng hoặc tiền. Lượt
+    đo đầu cho thấy đổi mọi "total" làm hỏng tên hàng "Bay thợ hồ Total 160mm": mất 2 câu
+    (5 câu tính cả biến thể), không câu nào sai. Đã sửa, chấm lại biz_115/117 thì trả lời
+    lại được cả 5.
+
+**Đo trên CPU** (14/11; facts dựng lại 24 shop có quy đổi):
+
+| Lượt | Đúng / sai | Round 4b |
+|---|---|---|
+| Train gốc | **2.769 / 0** | 2.604 |
+| `chat_questions` | 1.975 / 0 | 1.858 |
+| `phrasing_questions` (1.682 câu) | 1.584 / 0 | 1.431 (1.608 câu) |
+
+- Phần thêm ở train gốc (tính trên lượt đo trước khi sửa "total"; sau khi sửa thêm 2):
+  - xếp hạng bán chạy +35, hiệu ứng tăng giá +31, ngày cao nhất +19;
+  - doanh thu và số lượng theo mặt hàng +20, mua hàng +22, giá trị tồn 5;
+  - % theo phương thức 4, huỷ đơn +6, S1 +10.
+- **12 biến thể dữ liệu** (shop mẫu như round 3): cổng bắt được **15 câu sai** ở
+  `abbreviations` (biz_107, sổ ghi tay):
+  - sổ ghi tên viết tắt ("Mì HHTCC"), nhưng `ledger.py` đọc tên thô, không mở rộng theo
+    danh sách viết tắt như bước dựng facts. Nên doanh thu, số lượng và xếp hạng chỉ tính
+    phần dòng viết đủ tên;
+  - đã sửa: mở rộng tên viết tắt bằng `abbreviation_table`; gộp tên chỉ khác cách viết
+    (hoa thường, khoảng trắng, dấu) theo rulebook; hiển thị cách viết có dấu xuất hiện
+    nhiều nhất;
+  - chạy lại `abbreviations`: 0 sai. Chấm lại biz_107/113/126 trên dữ liệu gốc, chat và
+    phrasing: 0 sai.
+
+  Mọi biến thể khác 0 sai, 0 mất. Phần thêm so với v3, round 4b trong ngoặc:
+
+  | Biến thể | Mới | Biến thể | Mới |
+  |---|---|---|---|
+  | `abbreviations` | +71 (+33) | `non_item_rows` | +64 (+57) |
+  | `status_in_notes` | +48 (+19) | `mixed_dates` | +45 (+38) |
+  | `short_headers` | +42 (+33) | `template_names` | +42 (+31) |
+  | `summary_rows` | +36 (+21) | `padded_codes` | +30 (+26) |
+  | `unaccented_names` | +29 (+7) | `footer_rows` | +25 (+12) |
+  | `repeated_headers` | +22 (+9) | `qty_with_unit` | +13 (+5) |
+- `verify_runtime`: lint và format đạt, 664 test đạt.
+
+**Smoke public trên CPU** (replay proposal v3, không có model):
+- 12/14 shop đọc được.
+- Trả lời 575 câu (round 4b: 559), không mất câu nào.
+- Phần thêm: ngày bán nhiều tiền nhất ở shop không có dòng hàng (dev_009, dev_012), hiệu ứng
+  tăng giá không ghi ngày (dev_006), giá trị hàng tồn, "đánh hàng", "không cần đơn bác sĩ",
+  % so với tháng trước.
+- **Chưa làm:**
+  - luật chỉ có ở train (tồn theo đơn vị lớn, giá bán ngày D) hoặc chỉ có ở public (nhà cung
+    cấp chính, giờ cao điểm, ngày làm việc của nhân viên…): không đo được thì không làm;
+  - công nợ ghi trong cột ghi chú (dev_008); lãi ròng (chỉ biz_124 và dev_003 có sổ chi
+    phí).
+
+## Coverage round 4b: shop POS, nhập hàng, hàng ế, so tháng — 14/11/2026
+
+Rà soát tiếp sau round 4: chẩn đoán chốt chặn chữ của câu public còn abstain
+(`.artifacts/r4/guards.py`) và các câu train chưa trả lời. Cùng quy tắc như round 4.
+
+- **Shop POS `DanhSach*.xlsx`** (biz_106, biz_109; báo cáo tồn ở biz_105/108/117/119/120/128):
+  - README ghi quy ước bằng câu ("**Giá trị** là số tiền trả lần đó", "**Cần trả NCC** là
+    tổng tiền của cả phiếu nhập", "**Tồn cuối kỳ** là tồn cuối ngày cuối có dữ liệu, theo
+    đơn vị cơ bản", "**Giá vốn** là giá vốn một đơn vị bán"). `source_fields` đọc các câu
+    này như định nghĩa cột; câu chỉ thêm nghĩa, không che nhãn của cột khác;
+  - mã phiếu, thời gian, mã hoá đơn, mã hàng, ĐVT chỉ được gán trong chính bảng có cột tiền
+    hay cột tồn do README định nghĩa;
+  - phương thức thanh toán viết bằng tiếng Việt ("Tiền mặt", "Ghi nợ", "Thu hộ (COD)") quy
+    về mã chung (`debt.method_code`);
+  - so sánh trường ánh xạ của mọi bảng ở 30 shop train và 14 shop public, trước và sau sửa:
+    chỉ các shop kể trên (và dev_003/004/007/008 ở public) đổi.
+  - biz_106 sau sửa: sổ quỹ 78.673 dòng, phiếu nhập 513, tồn cuối kỳ 50 mặt hàng.
+- **Phép tính mới** (đo trên câu train có sẵn):
+  - giá nhập bình quân theo số lượng nhập trong tháng, chỉ khi rulebook có luật
+    `weighted_purchase_price` (public đã bỏ luật này); nhà cung cấp có tiền nhập cao nhất
+    (`src/agent/purchasing.py`). Nếu cùng tháng mặt hàng được nhập theo đơn vị khác, hoặc
+    trạng thái phiếu lạ, thì abstain;
+  - mặt hàng ế (`dead_stock`), mặt hàng hết hàng cuối ngày (`stockout`): chỉ mặt hàng có
+    sổ tồn; đếm khi kỳ không bị cắt bởi phạm vi dữ liệu;
+  - so % giữa hai tháng ghi rõ ("tháng 3/2026 so với tháng 3/2025"): tháng đứng sau
+    "so (với)" là gốc;
+  - danh sách nhiều tháng ("lần lượt", "từng tháng", "từ 02/2025 tới 04/2025", "3 tháng
+    liền nhau kết thúc ở tháng X") (`month_list`);
+  - tồn kho: câu hỏi "mấy hộp chẵn, mấy cái lẻ", hoặc hỏi theo đơn vị khác đơn vị cơ bản,
+    thì abstain. Lỗi này lộ ra khi đo biz_106 trên bản nháp.
+- **Cách hỏi:**
+  - "180.000đ" (chữ đ dính số); "tiền hàng" và "bán được từ X" trong câu ngưỡng;
+  - "bán được tổng / tất cả bao nhiêu tiền", "tiền bán hàng 7 ngày / của cửa hàng";
+  - chữ dính liền (doanhthu, caonhat, ngaynao, duocj); "lên hay xuống";
+  - "đánh hàng / cất hàng" là nhập hàng;
+  - công nợ: "ai đang nợ nhiều nhất, cho top 3", "khách thiếu tiền", "nợ chưa trả xong".
+  Biến thể `phrasing_questions` thêm 10 phép viết lại tương ứng (1.608 câu).
+- **Đo nhanh:** `.artifacts/r4/prep.py` chỉ dựng facts (không nạp `src/agent`), nên trong
+  lúc dựng vẫn sửa được phần trả lời. Bản nháp `src` trong `.artifacts/r4/pos` dùng để thử
+  thay đổi bước dựng dữ liệu, không ảnh hưởng lượt đang chạy.
+
+**Đo trên CPU** (14/11, code cuối; facts dựng lại đủ 30 shop):
+
+| Lượt | Đúng / sai | Round 4 |
+|---|---|---|
+| Train gốc | **2.604 / 0** | 2.365 |
+| `chat_questions` | 1.858 / 0 | 1.682 |
+| `phrasing_questions` (1.608 câu) | 1.431 / 0 | 1.193 (1.463 câu) |
+
+- So với round 4, không mất câu nào. Phần thêm ở train gốc:
+  - giá nhập bình quân 50; hàng ế 34; danh sách tháng 22; tồn kho 19;
+  - công nợ 63 (số dư 15, số khách nợ 13, thu nợ 12, nợ thêm/trả nợ 15, tuổi nợ 5, nhóm
+    tuổi nợ 3);
+  - so % giữa tháng 14; ngưỡng 12; số lượng bán 8; lãi gộp 5; nhà cung cấp 2;
+    hết hàng 1.
+- **12 biến thể dữ liệu** (shop mẫu như round 3; `.artifacts/r4/run_variants.sh`): tất cả 0 sai,
+  0 mất. Phần thêm so với v3, round 3 trong ngoặc:
+
+  | Biến thể | Mới | Biến thể | Mới |
+  |---|---|---|---|
+  | `non_item_rows` | +57 (+40) | `short_headers` | +33 (+17) |
+  | `mixed_dates` | +38 (+34) | `template_names` | +31 (+29) |
+  | `abbreviations` | +33 (+31) | `padded_codes` | +26 (+16) |
+  | `summary_rows` | +21 (+15) | `status_in_notes` | +19 (+13) |
+  | `footer_rows` | +12 (+11) | `repeated_headers` | +9 (+8) |
+  | `unaccented_names` | +7 (+6) | `qty_with_unit` | +5 (+4) |
+
+- `verify_runtime`: lint và format đạt, 656 test đạt.
+
+**Smoke public trên CPU** (replay proposal v3, không có model):
+- Vẫn 12/14 shop đọc được.
+- Trả lời 559 câu (round 4: 495), không mất câu nào.
+- Phần thêm: so % giữa tháng, danh sách tháng 11, ngưỡng có "đ" dính số hoặc "tiền hàng",
+  hàng ế 4, hết hàng 3, công nợ 9, nhà cung cấp nhập nhiều tiền nhất 2.
+- Đã đọc lại từng câu mới được trả lời: phép tính khớp ý câu hỏi. Đúng hay sai chưa biết
+  (public không có nhãn).
+- **Chưa làm:**
+  - nhập trừ bán, tồn theo đơn vị lớn (cần bảng quy đổi đơn vị);
+  - giá trị hàng tồn;
+  - nhà cung cấp chính theo số phiếu (luật chỉ có ở public, không đo được trên train);
+  - công nợ dạng ghi chú "khách đưa / còn thiếu" (dev_008);
+  - top N theo nhóm, khách từ N đơn ở shop public (cần facts public để chẩn đoán).
+
+## Coverage round 4: trạng thái thường gặp, cách hỏi, công nợ, nhân viên — 14/11/2026
+
+Cùng nhánh `feat/coverage-round2`, cùng quy tắc: luật chung; sửa đổi về đọc dữ liệu hoặc cách
+hỏi có biến thể train tái hiện lỗi; phép tính mới đo trên câu train sẵn có. Public chỉ smoke.
+
+- **Lỗi có thể ra đáp án sai:** "N ngày qua tính cả hôm nay", "N ngày qua (kể cả hôm nay)",
+  "N ngày gần đây kể cả hôm nay" trước đây được hiểu là `today`. Nay đọc là `last_n_days`
+  (rulebook "N ngày gần nhất"). "N ngày qua" không kèm "kể cả hôm nay" vẫn abstain.
+- **Từ vựng trạng thái** (`values.STATUSES`, `note_status`):
+  - nhận "đang ship", "chưa giao" là đang giao; "khách mang trả", "khách trả hàng" là trả;
+  - ghi chú "bảo hành…" là loại phiếu, không phải kết quả đơn (rulebook public: phiếu bảo
+    hành vẫn là một lượt);
+  - "trả tiền/nợ/trước/ck…" là cách khách trả tiền, không phải trả hàng;
+  - "Khách trả" đứng một mình vẫn mơ hồ (trả tiền hay trả hàng), để model phân loại.
+  Biến thể `status_in_notes` thêm các ghi chú này. Trước khi sửa, `note_status` báo
+  `status_ambiguous` cho cả 6 cách ghi.
+- **Cách hỏi.** Biến thể mới `phrasing_questions`: câu train viết lại giữ nghĩa, đáp án giữ
+  nguyên. Có 13 phép viết lại, ghi trong `phrasing.json` của biến thể. Sửa:
+  - `_time_text`: "đầu năm tới giờ/nay"; "đến hết DD/MM/YYYY" không có chữ "ngày";
+    "tháng M năm ngoái/năm rồi/năm nay";
+  - tháng không ghi năm theo luật `missing_year`, chỉ khi cả câu không có năm nào;
+    "tháng 7 và tháng 8/2025" vẫn abstain;
+  - "th này/th trước";
+  - "của quán/sốp/nhà thuốc/… mình" là cả shop;
+  - "tiền bán <kỳ>";
+  - AOV đảo từ ("mỗi đơn bình quân", "1 đơn trung bình");
+  - "1 đơn giá trị" không còn bị coi là đơn giá;
+  - lỗi gõ có dấu (tiềng, tền, tổg, cộg, bìn/bìh) và không dấu (nhta, lne, tog, cog). "Tiếng"
+    (giờ) không bị đổi;
+  - `_growth` nhận "tiền bán", tháng không ghi năm, và "tháng M năm ngoái" so với tháng
+    trước.
+  Trước khi sửa, trên 7 shop: mất 111/132 câu, 0 sai.
+- **Đáp án sai duy nhất lộ ra trong lượt đo:** "tháng 3 khách nào mua nhiều tiền nhất" bị
+  đọc là "top 3 khách". Nay mọi bộ đếm top N bỏ qua số đứng sau tháng/quý/tuần/ngày
+  (`RANK_COUNT`, `business_spec`, `_LIST_CUES`).
+- **Công nợ** (`src/agent/debt.py`, rulebook §4; cùng hợp đồng số dư với executor):
+  - tuổi nợ "quá/hơn N ngày" tính từ ngày đặt;
+  - nhóm tuổi nợ, phải liền nhau từ 0;
+  - nợ thêm / trả nợ của một khách trong kỳ (chỉ đơn ghi nợ);
+  - "còn thiếu", "nợ chưa thu", "đếm khách" là câu hỏi số dư.
+  Thu nợ trong kỳ trước đây luôn abstain (`payment_period_coverage_unknown`) khi README chỉ
+  ghi "có đến hết X". Nay kỳ có dữ liệu là từ ngày đơn đầu tiên tới X, vì mỗi khoản trả đều
+  thuộc một đơn đã xuất.
+- **Nhân viên** (`src/agent/staff.py`):
+  - cột người bán duy nhất của bảng đơn, nối bằng mã đơn;
+  - doanh thu §1 theo mã hoặc tên nhân viên;
+  - người bán giỏi nhất theo doanh thu; hoà thì abstain.
+- **Đo nhanh:** khi chỉ đổi code trả lời, `.artifacts/r4/quick.py` dùng lại facts đã dựng
+  (`PreparedBusiness`). Train gốc, chat và phrasing được gộp vào một split
+  (`.artifacts/r4/combine.py`), nên chỉ dựng dữ liệu một lần.
+
+**Đo trên CPU** (14/11, code cuối; so với lượt v3):
+
+| Lượt | Đúng / sai | Mới so với v3 | Mất |
+|---|---|---|---|
+| Train gốc | 2.365 / 0 (round 3: 2.328) | +439 | 0 |
+| `chat_questions` | 1.682 / 0 (round 3: 1.653) | +315 | 0 |
+| `phrasing_questions` (mới, 1.463 câu) | 1.193 / 0 | +246 | 1 (abstain) |
+| `status_in_notes` (thêm ghi chú mới; biz_102, 107, 111) | 0 sai | +16 (round 3: +13) | 0 |
+
+- Phần thêm ở train gốc so với round 3:
+  - thu nợ trong kỳ 16; nợ thêm/trả nợ theo khách 3; tuổi nợ 3, nhóm tuổi nợ 2;
+  - nhân viên 12 (doanh thu 8, giỏi nhất 4);
+  - S1 +5.
+  Trên cả ba phần: thu nợ 38, nhân viên 31, công nợ mới 18, `growth` +54.
+- `verify_runtime`: lint và format đạt, 647 test đạt. 4 test cũ đã được sửa theo hành vi mới:
+  - tháng không ghi năm nay theo luật `missing_year`;
+  - "khách mang trả" thành từ vựng;
+  - chỉ còn abstain thu nợ khi README không ghi cả ngày cuối.
+- 12 biến thể dữ liệu khác chưa chạy lại vòng này. Thay đổi ở bước dựng dữ liệu chỉ có từ
+  vựng trạng thái, phần đó đo bằng `status_in_notes`.
+
+**Smoke public trên CPU** (replay proposal v3, không có model):
+- 12/14 shop đọc được (round 3: 8/14). Thêm dev_004, 011, 012, 013.
+- Trả lời 495 câu (round 3: 338). Có 1 câu không còn được trả lời: "nhóm thân thiết … bìn quân
+  mỗi đơn". Trước đây "bìn quân" không được nhận nên câu bị trả như doanh thu nhóm; nay câu
+  này abstain.
+- Còn dev_003 ("Khách trả", cố ý để model) và dev_014: proposal v3 bị chốt chặn tiền cấp
+  đơn từ chối, model sẽ đề xuất lại.
+- **Chưa làm:**
+  - nhập hàng theo dòng phiếu (giá nhập bình quân, nhà cung cấp, nhập trừ bán);
+  - phiếu thu, phiếu nhập, tồn của dạng POS `DanhSach*.xlsx` (biz_106/108/109/119/120/128)
+    chưa đọc;
+  - nhiều tháng "lần lượt", top N theo nhóm, hiệu ứng tăng giá không ghi ngày;
+  - "đánh hàng/cất hàng";
+  - khách từ N đơn.
+- Molab: `RUN_ID` `coverage-round4-v1`, `VARIANTS` thêm `phrasing_questions`.
+
+## Rà soát sau round 3: việc còn lại — 13/11/2026
+
+Đo lại trên code cuối: train 1.922 cùng / +399 / 0 sai. Có 4 câu bị mất do vượt giới hạn 15 giây
+của executor khi máy local thiếu RAM; chạy lại riêng từng câu thì đúng. Public, phép tính theo
+luật, không có model: trả lời 338 câu (v3: 218). Ở 8 shop đọc được còn 230/565 câu abstain.
+Nguyên nhân phân loại thô theo câu hỏi (`.artifacts/audit/causes.py`, chỉ để chẩn đoán):
+
+- **Lỗi có thể ra đáp án sai:** "7 ngày qua tính cả hôm nay", "30 ngày qua kể cả hôm nay" bị
+  tách thành `today`. Rulebook: "N ngày gần nhất" là N ngày kể cả hôm nay. Ở public hiện chỉ
+  dev_003 có câu này, và shop đang bị chặn.
+- **Cách hỏi chưa nhận** (khoảng 110 câu ở 8 shop):
+  - "của quán/tiệm/sốp" bị coi là bộ lọc;
+  - "tiền bán tháng…/hôm qua" bị hiểu là "tiền bán <tên hàng>";
+  - "mỗi đơn bình quân" đảo trật tự;
+  - gõ sai: tiềng, tền, trung bih, cao nhta, trở lne;
+  - "dh" không dấu, "củ", "tr" trong ngưỡng tiền;
+  - danh sách tháng "lần lượt…", "3 tháng liền từ T4 tới T6";
+  - so cùng kỳ năm trước ("T4/2025 so T4/2026", "tháng 7 năm ngoái");
+  - tháng không ghi năm (rulebook có luật), "th nay", "đầu năm tới chừ";
+  - hiệu ứng tăng giá ghi "bữa/từ <ngày>", "lên 152k", hoặc không ghi ngày (phải tra lịch sử giá);
+  - top N mặt hàng/khách, ngày đắt khách, "trong nhóm X mặt hàng nào nhất", số đơn có mặt
+    hàng nhóm X, trung bình mỗi đơn của nhóm khách.
+- **Nghiệp vụ chưa có phép tính** (8 shop):
+  - công nợ 26 (tuổi nợ và nhóm tuổi nợ, nợ thêm/trả nợ theo khách, top khách nợ);
+  - nhập hàng 12 ("đánh hàng/cất hàng về", nhà cung cấp chính);
+  - nhân viên 11 (doanh thu theo mã nhân viên, bán giỏi nhất, chăm chỉ nhất);
+  - tồn và hết hàng 8; khách mua từ N đơn và % khách 7; lãi gộp/lãi ròng 5; lô, hạn dùng 3.
+- **Rulebook public khác train:**
+  - thêm báo cáo tiền mặt theo ca, nhà cung cấp chính (theo số phiếu), topping ghi chung ô,
+    size bỉm/số sữa theo danh mục, các luật ngành sửa xe, điện thoại;
+  - đơn trả sau kỳ vẫn bị loại khỏi doanh thu kỳ đặt;
+  - bỏ giá nhập bình quân, tồn theo đơn vị lớn, giá bán ngày D.
+- **6 shop còn chờ model phân loại trạng thái** (dev_003, 004, 011–014; 435 câu). Đo được trên
+  molab.
+- Mỗi sửa đổi về cách hỏi vẫn cần biến thể train: mở rộng `chat_questions`, hoặc thêm biến
+  thể viết lại câu giữ nguyên đáp án.
+
+## Coverage round 3: dòng chân bảng, nhà thuốc, nhập hàng, ca — 13/11/2026
+
+Cùng nhánh `feat/coverage-round2`, cùng quy tắc: luật chung, mỗi sửa đổi đọc dữ liệu có biến
+thể train tái hiện lỗi, phép tính mới đo trên câu train sẵn có.
+
+- **Dòng chân bảng** (smoke public: dev_012, dev_014 còn bị chặn vì `date_format`):
+  - `values.annotation_label` nhận "Ghi chú:", "Chú thích:", "Lưu ý:";
+  - `values.label_cell` = nhãn tổng hoặc chú thích;
+  - ô nhãn nằm ở cột ngày hoặc mã đơn ("Tổng cộng", "Ghi chú: số liệu ghi tay") không còn
+    bị coi là ngày hoặc mã của một đơn (sales `_row_role`, relational `data_rows`);
+  - sales `_summary` xét thêm cột ngày.
+  Biến thể `footer_rows`: cuối mỗi bảng bán thêm "Tổng cộng" kèm tổng tiền, và hai dòng
+  "Ghi chú: …", tất cả ở cột ngày. Code trước khi sửa mất 167/167 câu của mẫu; sau khi sửa
+  giữ 167, thêm 11, 0 sai.
+- **Phản hồi chốt chặn tiền cấp đơn:** khi từ chối, model được bảo rõ là gán cột đó
+  `order_payable` và chọn cột tiền từng dòng làm `line_net_amount`.
+- **Nhà thuốc** (`src/agent/pharmacy.py`), theo hai luật rulebook "Thuốc kê đơn" và "Doanh thu
+  theo hoạt chất":
+  - bảng danh mục thuốc được tìm theo cột (hoạt chất hoặc thành phần chính, cờ kê đơn hoặc
+    bán theo đơn); cột nối là cột có ≥ 95% giá trị trùng mã hàng của shop, không có thì
+    trùng tên;
+  - cờ chỉ nhận TRUE/1/x/có và FALSE/0/trống/không; giá trị khác thì abstain;
+  - doanh thu thuốc kê đơn, hàng không kê đơn (cả "trừ thuốc kê đơn ra… còn lại"), tỉ lệ kê
+    đơn trên doanh thu;
+  - doanh thu theo hoạt chất: khớp đúng chuỗi hoạt chất; thuốc phối hợp là loại riêng.
+- **Phiếu nhập:** README mô tả "mã phiếu nhập", "ngày nhập", "tổng tiền phiếu nhập", "trạng
+  thái phiếu nhập" nay được nhận (`entities.EXTRA_MEANINGS`). Trạng thái phiếu dùng chung
+  `values.PURCHASE_RECEIVED`/`PURCHASE_CANCELLED` (thêm "Đã nhập hàng", "Đã huỷ").
+  `perturb_train.column_fields` nay gộp hai bảng nghĩa thay vì để bảng sau đè bảng trước.
+- **Ca sáng, ca chiều** (`rule_ops._shift_plan`): dựng QueryPlan từ `_single_shift` và
+  `_period_measure` có sẵn của planner, không cần model. Nhận doanh thu hoặc số đơn của một
+  ca, và ca chiều so với ca sáng (chênh lệch hoặc %, mốc theo câu hỏi). Plan chạy qua cùng
+  validator, preflight và executor; đơn không có giờ thì abstain.
+- **Chưa làm:**
+  - tuổi nợ ("đơn đặt quá N ngày"), nợ thêm/trả nợ của một khách: cần thêm bộ lọc mới vào
+    plan, validator và executor;
+  - giá nhập bình quân theo mặt hàng, nhập trừ bán, nhà cung cấp nhập nhiều nhất: facts chưa
+    có dòng phiếu nhập và nhà cung cấp;
+  - doanh thu theo nhân viên;
+  - các mục ngành Q6 đã nêu ở round 2.
+
+**Đo trên CPU** (13/11, code cuối, `eval_rule_ops` so với lượt v3; biến thể chạy trên cùng
+mẫu shop như round 2):
+
+| Lượt | Cùng / mới / sai | Round 2 |
+|---|---|---|
+| Train gốc (30 shop) | 1.926 / +402 / 0 | +212 |
+| `chat_questions` | 1.367 / +286 / 0 | +145 |
+| `footer_rows` (mới) | 167 / +11 / 0 | trước khi sửa: mất 167 |
+| `short_headers` | 304 / +17 / 0 | +17 |
+| `summary_rows` | 234 / +15 / 0 | +15 |
+| `padded_codes` | 198 / +16 / 0 | +16 |
+| `qty_with_unit` | 140 / +4 / 0 | +4 |
+| `repeated_headers` | 133 / +8 / 0 | +8 |
+| `mixed_dates` | 178 / +34 / 0 | +34 |
+| `unaccented_names` | 120 / +6 / 0 | +6 |
+| `status_in_notes` | 221 / +13 / 0 | +13 |
+| `non_item_rows` | 164 / +40 / 0 | +8 |
+| `template_names` | 172 / +29 / 0 | +12 |
+| `abbreviations` | 190 / +31 / 0 | +14 |
+
+- **Train gốc: 2.328 đúng / 0 sai** (v3: 1.926; round 2: 2.138). Phần thêm so với round 2:
+  - nhà thuốc +89: hoạt chất 45, doanh thu kê đơn và không kê đơn 23, tỉ lệ kê đơn 21
+    (đủ 89 câu số và phần trăm về thuốc của train; câu còn lại hỏi liều dùng, đáp án
+    `unanswerable`);
+  - tiền nhập +24 (`purchase_total` 3 → 27);
+  - ca: doanh thu 53, số đơn 24.
+- Lượt đầu của cổng hỏng vì đã sửa `values.py` khi lượt đo đang chạy (module nạp lười, bản cũ
+  và bản mới lẫn nhau). Không phải lỗi code; đã chạy lại toàn bộ.
+- `verify_runtime`: lint và format đạt, 629 tests đạt.
+
+**Smoke public trên CPU** (13/11, code cuối; replay proposal v3, chưa có model phân loại
+trạng thái):
+- **Đọc được, không cần model:** 8/14 shop, 565 câu (như round 2).
+- **Chỉ còn chờ model phân loại chữ trạng thái:** dev_003, 004, 011, 012, 013, 014
+  ("Khách trả", "đang ship", "khách mang trả", "bảo hành…", "chưa giao"). Lỗi `date_format`,
+  `item_role_unknown`, `source_missing` của dev_012 và dev_014 đã hết (đều là dòng chân bảng).
+  dev_014 còn 1 `missing_group_reference` (chỉ chặn tỉ trọng nhóm hàng) và proposal v3 gán
+  "Khách trả" làm tiền dòng; chốt chặn sẽ bắt model đề xuất lại.
+- Nếu model phân loại được: 14/14 shop có facts. Số câu trả lời được vẫn tuỳ phép tính.
+
+## Coverage round 2: đọc thêm shop, hiểu thêm câu hỏi — 12/11/2026
+
+Nhánh `feat/coverage-round2` (từ `f249bb4`). Nguyên nhân được chẩn đoán trên public (chỉ để
+chẩn đoán). Mỗi sửa đổi là luật chung, có biến thể train tái hiện lỗi, đáp án train giữ nguyên.
+
+**Đọc dữ liệu:**
+- **D1:** dòng có ≥ 2 ô trùng tên cột README khai báo cho đúng file đó là header
+  (`profile_table(declared_headers)`).
+- **D3, D4:** `values.summary_label`. Dòng tổng là "tổng/cộng" + ngày/số/"cộng", hoặc từ kỳ
+  (ngày, tháng, kỳ, năm) + số. "Tống Thắng Khánh" không còn bị nhận là dòng tổng. Nhãn
+  "Tổng 01/05" nằm ở cột mã đơn, không có ngày và trạng thái, là dòng tổng (sales và relational).
+- **D5:** bỏ khoảng trắng đầu/cuối của mã khi nối bảng (relational, entities). Khi so dòng
+  trùng (`_signature`), ô chữ cũng bỏ khoảng trắng đầu/cuối.
+- **D6:** `values.strip_unit` ("2 ly" ra 2 khi chữ trùng đơn vị của chính dòng), dùng ở
+  sales (đường số lượng âm) và entities.
+- **D7:** header lặp so theo nội dung (`_signature`). Trước đây so cả toạ độ ô XLSX nên không
+  bao giờ khớp.
+- **D8:** serial Excel nguyên ra ngày, không kèm giờ. Ngày thiếu năm lấy năm theo tên sheet,
+  không có thì theo tên file; vẫn không có thì chặn.
+- **D9:** khi khớp tên có dấu thất bại, khớp bỏ dấu nếu ra đúng một mặt hàng (entities).
+- **D10:** khi rulebook có luật "Sổ không có cột trạng thái", trạng thái lấy từ cột ghi chú
+  (`values.note_status`):
+  - ghi chú trống, hoặc không có chữ nào về kết quả đơn: đơn hoàn thành;
+  - ghi chú có chữ của đúng một trạng thái: lấy trạng thái đó;
+  - còn lại: model phân loại, có thêm lựa chọn `not_status`. `not_status` không bao giờ dùng
+    cho cột trạng thái thật.
+  Thay đổi kèm theo: `llm_mapping` coi `order_note` là trạng thái khi có luật này; relational
+  thêm `note`/`status_note` và cho ghi chú kế thừa trong nhóm dòng của đơn.
+- **D11:** bảng chưa rõ cấu trúc, nhỏ (≤ 200 dòng) và tên sheet không có số, không chặn bảng
+  bán hàng khi đã đủ nguồn đơn. Bảng có header "Ghi tắt" + "Tên hàng" được đọc thô
+  (`relational.abbreviation_lists`):
+  - tên viết tắt ở dòng bán không mã đổi ra tên đầy đủ (relational và entities);
+  - cột "Loại" thành nhóm hàng của dòng (vd. "nhóm máy cũ");
+  - mục mâu thuẫn bị bỏ.
+- **D12:** dòng Voucher, "Dùng n điểm", Phí ship là `order_adjustment` khi README hoặc rulebook
+  nói tới voucher/điểm/phí giao (sales, relational).
+- **Tên file dạng mẫu trong README** (`BanHang_T<tháng>_<năm>.xlsx`): `sales.readme_section`.
+- **Chốt chặn:** `verify_facts` từ chối khi > 50% đơn nhiều dòng (≥ 20 đơn) có cùng một số tiền
+  trên mọi dòng, tức tiền cấp đơn bị gán làm tiền dòng.
+- **D13:** sổ không mã đơn, mỗi dòng một phiếu (luật "Bảng không ghi theo đơn"):
+  - `normalize_proposal` coi tiền cả phiếu là tiền dòng;
+  - vai trò ledger không bắt buộc cột tên hàng.
+- **Kế thừa ô cấp đơn:** kênh và nhóm khách được kế thừa trên các dòng sau của đơn, theo luật
+  "Ô để trống ở các dòng sau…" (dev_013). Train không có bảng dòng hàng nào mang các cột này,
+  nên **không tái hiện được trên train**; cổng train gốc chỉ xác nhận không đổi đáp án.
+
+**Hiểu câu hỏi:**
+- **Q1:** `question_plain` chuẩn hoá viết tắt và phương ngữ:
+  - bảng có dấu: đh, nhìu, nhứt, kòn, mô, ni, rứa…, và "nhiêu" đứng một mình;
+  - bảng không dấu: dc, bnhiu, hnay, dthu, trc…; "th8" thành "tháng 8";
+  - "z"/"j" chỉ đổi khi đứng cuối câu. Đã bỏ "sp", "mk" khỏi bảng vì "Sino SP D20" là tên hàng;
+    lỗi này bắt được trên train gốc.
+  Khi không phép tính nào khớp, `LocalPlanner` nhờ model viết lại câu. Bản viết lại chỉ được
+  dùng khi giữ nguyên mọi số, mọi từ viết hoa (tên riêng) và mọi từ chỉ kỳ hoặc so sánh.
+- **Q2:**
+  - `_growth` nhận "tháng X … tháng trước";
+  - `_group_label` nhận "nhóm khách X".
+- **Q3:** `_rulebook_rankings` (khách trung thành, khách sộp, khách hay đổi ý, mặt hàng được ưa
+  chuộng, giờ cao điểm). Chỉ bật khi rulebook định nghĩa; test bằng dữ liệu giả lập.
+- **Q4:**
+  - `_purchase_total`: tiền nhập trong kỳ, chỉ phiếu `received`/`da nhap`; gặp trạng thái lạ
+    thì abstain;
+  - `_gross_profit`: lãi gộp tổng, không nhận câu xếp hạng;
+  - `_business_plan`: dựng QueryPlan nghiệp vụ từ `business_spec` không cần model (schema đã
+    cố định mọi trường, model chỉ còn chọn thực thể), rồi qua cùng validator, preflight và
+    reducer.
+  `_business_plan` chỉ bật cho các chỉ số đo trên train không có câu sai: công nợ, số khách
+  nợ, thu nợ, tiền nhập, lô sắp hết hạn, tồn kho, lãi gộp xếp hạng. Đo trên 8 shop có công nợ:
+  +64 câu; trong đó 3 câu sai ở `quantity` (đơn giá, nhập trừ bán). `business_spec` giờ loại
+  các câu này, và lỗi đó cũng từng ảnh hưởng đường LLM planner.
+  Nhân viên, ca: chưa làm (train không có dữ liệu).
+- **Q6** (luật ngành; chỉ test bằng dữ liệu giả lập, train không có ngành này):
+  - **Sửa xe** (`src/agent/repair.py`):
+    - đếm phiếu, kể cả bảo hành;
+    - phiếu bảo hành: ghi chú "bảo hành" và tiền 0;
+    - trung bình theo phiếu có thu tiền; tỉ lệ bảo hành;
+    - theo thợ: tên gọi nối danh sách thợ khi tên duy nhất; lượt xe, tiền, hoa hồng, thợ
+      nhiều lượt hoặc nhiều tiền nhất, chăm chỉ nhất;
+    - số xe theo biển số; xe khách quen (≥ 2 phiếu có thu tiền).
+    Ở tiệm sửa xe, mọi câu về phiếu, lượt, thợ, xe đều không qua phép tính chung hay planner:
+    luật ngành định nghĩa khác. Hoà, tên gọi không nối được, dòng xe, việc làm (chữ viết tắt
+    tự do) và bảng hoa hồng đều abstain.
+  - **Điện thoại** (`src/agent/industry.py`): tổng tiền thu máy cũ và tổng khách phải trả của
+    đơn không huỷ, không trả. Cột được tìm theo mô tả README.
+  - **Mẹ và bé:**
+    - tổng voucher, tiền giảm nhờ điểm, phí ship: số dương, chỉ hoá đơn hợp lệ;
+    - khách thành viên mới theo Ngày đăng ký.
+  - Giờ cao điểm hoà giữa hai khung giờ thì abstain.
+  - **Chưa làm:** size bỉm, số sữa, hãng (cần nối danh mục qua "Tên gọi khác" và quy đổi);
+    trả góp, bảo hành máy, dòng máy và hãng điện thoại; topping ghi chung ô.
+- **Q5:** `_unrecorded_attribute` trả `unanswerable` cho các câu hỏi về:
+  - giới tính khách, địa chỉ hoặc đường;
+  - đánh giá chủ quan nhân viên hoặc chất lượng;
+  - kiến thức ngoài dữ liệu.
+  Không trả lời như vậy nếu một cột hoặc README ghi thuộc tính đó, hoặc rulebook định nghĩa.
+
+**Biến thể train mới** (`scripts/perturb_train.py`; sửa dòng XLSX/CSV bằng `Grid`, giữ
+nguyên XML của các ô không đổi):
+
+| Biến thể | Nội dung |
+|---|---|
+| `short_headers` | Header bảng < 8 cột viết tắt; README đổi theo |
+| `summary_rows` | Khách "Tống Thắng …" (tên không có trong câu hỏi/đáp án); dòng "Tổng dd/mm" trong cột mã đơn |
+| `padded_codes` | Mã hàng dính khoảng trắng |
+| `qty_with_unit` | Số lượng ghi "2 ly" |
+| `repeated_headers` | Header lặp sau mỗi 50 dòng |
+| `mixed_dates` | Lẫn serial số, serial dạng chữ, "1 thg 7 2025", "1/7" |
+| `unaccented_names` | Tên hàng bỏ dấu (chỉ khi bỏ dấu vẫn chỉ ra đúng một tên) |
+| `status_in_notes` | Cột trạng thái thành Ghi chú; rulebook thêm đúng câu luật chung của public |
+| `non_item_rows` | Phí ship, Voucher, "Dùng 20 điểm" sau mỗi 7 đơn |
+| `template_names` | Section README của file nhiều phần ghi `X_<phần>.xlsx` |
+| `chat_questions` | 2.129 câu train viết lại bằng khẩu ngữ, dữ liệu giữ nguyên |
+| `abbreviations` | XLSX dòng bán không mã: một nửa dòng ghi tên viết tắt, thêm sheet "Ghi tắt" |
+
+**Đo trên CPU** (`eval_rule_ops`, so với lượt v3; "trước" = code `f249bb4`, một mẫu 2–3 shop
+mỗi biến thể):
+
+| Lượt | Trước: cùng / mất / đổi | Sau: cùng / mới / sai |
+|---|---|---|
+| Train gốc (30 shop) | 1.926 / 0 / 0 | 1.926 / +212 / 0 |
+| `chat_questions` | — | 1.367 / +145 / 0 |
+| `short_headers` | 0 / 304 / 0 | 304 / +17 / 0 |
+| `summary_rows` | 0 / 234 / 0 | 234 / +15 / 0 |
+| `padded_codes` | 14 / 183 / 1 sai | 198 / +16 / 0 |
+| `repeated_headers` | 30 / 103 / 0 | 133 / +8 / 0 |
+| `mixed_dates` | 75 / 103 / 0 | 178 / +34 / 0 |
+| `status_in_notes` | 0 / 221 / 0 | 221 / +13 / 0 |
+| `non_item_rows` | 2 / 162 / 0 | 164 / +8 / 0 |
+| `template_names` | 0 / 172 / 0 | 172 / +12 / 0 |
+| `qty_with_unit` | 140 / 0 / 0 (không tái hiện) | 140 / +4 / 0 |
+| `unaccented_names` | 120 / 0 / 0 (không tái hiện) | 120 / +6 / 0 |
+| `abbreviations` | 0 / 190 / 0 | 190 / +14 / 0 |
+
+- **Train gốc: 2.138 đúng / 0 sai** (v3: 1.926). Số câu đúng tăng theo phép tính:
+  - `whole_shop` +67;
+  - `growth` +34;
+  - `unit_quantity` +19, `product_revenue` +15;
+  - `unrecorded_attribute` +14, `product_ranking` +13, `best_day` +12;
+  - `size_quantity` +9, `purchase_total` +3;
+  - `_business_plan` +22 (công nợ 12, lãi gộp 3, lô hết hạn 3, số khách nợ 2, tồn kho 2);
+  - còn lại +5.
+- **D6 và D9 không tái hiện được** trên mẫu train CPU: bộ map README đã xử lý được. Lỗi public
+  nằm ở nhánh mapping bằng model. Hai sửa đổi được giữ vì không đổi đáp án nào; xác nhận
+  bằng lượt molab có model.
+- **Lượt đầu bắt được 4 lỗi, đã sửa trước lượt cuối:**
+  - "Cộng ngày" ở cột khách bị coi là dòng dữ liệu (dev_001 bị chặn);
+  - "SP" trong tên hàng bị đổi thành "sản phẩm";
+  - lãi gộp trả lời câu xếp hạng;
+  - dòng trùng do xuất file, chỉ khác khoảng trắng, bị tính hai lần.
+- `verify_runtime` (13/11): lint và format đạt, 626 tests đạt (37 test mới trong
+  `tests/test_coverage_round2.py`).
+
+**Smoke public trên CPU** (13/11, code cuối; `.artifacts/diag/diag_public.py`, replay proposal
+v3, chưa có model phân loại trạng thái):
+- **Đọc được, không cần model:** 8/14 shop, 565 câu. Gồm dev_001, 005–008, và ba shop mới là
+  dev_002, dev_009, dev_010.
+- **Chỉ còn chờ model phân loại trạng thái:**
+  - dev_003 ("Khách trả"), dev_004 (chữ giao hàng);
+  - dev_011: ghi chú "khách mang trả";
+  - dev_013: "chưa giao". Lỗi kênh để trống ở các dòng sau của đơn đã hết sau khi thêm kế thừa.
+  Bốn shop này có 322 câu. Nếu model phân loại được, tổng sẽ là 12/14 shop, 887 câu.
+- **Còn bị chặn:**
+  - dev_012 (sổ sửa xe): đã đọc theo đường D13; trạng thái lấy từ ghi chú ("bảo hành, phiếu
+    6/6") chờ model, nhưng còn 18 dòng `date_format` chặn;
+  - dev_014: proposal v3 vẫn chặn (39 dòng không đọc được ngày và loại dòng, 32 trạng thái
+    "khách mang trả"). Chốt chặn tiền cấp đơn sẽ bắt model đề xuất lại khi chạy thật.
+- Lượt molab cần chạy: `RUN_ID = "coverage-round2-v1"` với các biến thể mới, rồi
+  `predict.sh` đủ public.
+
 ## Phương án A: đọc được thêm shop — 11/11/2026
 
 Nhánh `feat/mapping-coverage`. Mỗi lỗi chỉ được sửa khi tái hiện được bằng một biến thể train
