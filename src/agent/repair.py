@@ -11,6 +11,7 @@ import re
 from collections import Counter, defaultdict
 from contextlib import closing
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
@@ -32,6 +33,7 @@ class Ticket:
     mechanic: str | None  # full name from the mechanic list, None if unresolved
     nickname: str
     warranty: bool
+    model: str = ""  # vehicle model as written, plate removed
 
 
 def _sections(readme: str) -> dict[str, dict[str, str]]:
@@ -149,6 +151,7 @@ def tickets(context: BusinessContext) -> tuple[list[Ticket], dict] | None:
                     mechanic=_resolve(nickname, mechanics) if nickname else None,
                     nickname=nickname,
                     warranty=bool(re.search(r"\bbao hanh\b", plain(text(note_at)))) and amount == 0,
+                    model=plain(PLATE.sub(" ", text(plate_at))).strip(),
                 )
             )
     return result, mechanics
@@ -206,7 +209,17 @@ def answer(question: Question, context: BusinessContext, text: str):
         return None  # an unresolved nickname could belong to any mechanic
     commission = re.search(r"\b(?:hoa hong|hue hong)\b", text)
     if re.search(r"\b(?:bang|tung tho|moi tho|cac tho|xep)\b", text):
-        return None  # table layouts are not specified
+        if not (commission and re.search(r"\bbang\b", text)) or named:
+            return None
+        totals = defaultdict(Decimal)
+        for t in rows:
+            totals[t.mechanic] += t.amount
+        # Every listed mechanic worked in the period, so no row is left to guess.
+        if set(totals) != set(mechanics) or any(mechanics[m] is None for m in totals):
+            return None
+        pay = sorted(((m, totals[m] * mechanics[m] / 100) for m in totals), key=lambda x: -x[1])
+        table = {"columns": ["tho", "hoa_hong"], "rows": [[m, _money(v)] for m, v in pay]}
+        return "repair_commission_table", table, "table"
 
     if commission:
         totals = defaultdict(Decimal)
@@ -229,7 +242,7 @@ def answer(question: Question, context: BusinessContext, text: str):
             days[t.mechanic].add(t.day)
         best = _single_best({m: len(d) for m, d in days.items()})
         return ("repair_workdays", best, "string") if best else None
-    if re.search(r"\btho\b", text):
+    if re.search(r"\btho\b", text) or named:
         if named and re.search(r"\b(?:tien|doanh thu|dthu)\b", text):
             return (
                 "repair_mechanic_revenue",
@@ -249,9 +262,10 @@ def answer(question: Question, context: BusinessContext, text: str):
                 best = _single_best(totals)
                 return ("repair_top_revenue", best, "string") if best else None
         return None
+    models = {w for t in all_tickets for w in t.model.split() if len(w) >= 2 and not w.isdigit()}
     if re.search(
         r"\b(?:dong xe|xe [a-z]+ khac nhau|lam gi|thay|sua dien|va|nhot|ruot|bdtq)\b", text
-    ):
+    ) or any(re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", text) for w in models):
         return None  # vehicle models and job wording need the shop's own abbreviations
     if re.search(r"\bbao hanh\b", text):
         if re.search(r"%|\b(?:ti le|ty le|chiem|phan tram)\b", text):
@@ -262,6 +276,26 @@ def answer(question: Question, context: BusinessContext, text: str):
         if re.search(r"\b(?:bao nhieu|may|bn|dem|so)\b", text):
             return "repair_warranty_count", sum(t.warranty for t in rows), "number"
         return None
+    weekday = re.search(
+        r"\b(?:moi|cac ngay|ngay) (thu (?:hai|ba|tu|nam|sau|bay|[2-7])|chu nhat)\b", text
+    )
+    if (
+        weekday
+        and re.search(r"\b(?:trung binh|binh quan|tb)\b", text)
+        and re.search(r"\b(?:luot|phieu)\b", text)
+        and "weekday_average" in context.rules.rules
+    ):
+        names = {"hai": 0, "ba": 1, "tu": 2, "nam": 3, "sau": 4, "bay": 5}
+        word = weekday[1].split()[-1]
+        index = 6 if weekday[1] == "chu nhat" else int(word) - 2 if word.isdigit() else names[word]
+        start, end = date.fromisoformat(window["start"]), date.fromisoformat(window["end"])
+        count = sum(
+            1 for k in range((end - start).days + 1) if (start + timedelta(k)).weekday() == index
+        )
+        hits = sum(1 for t in rows if date.fromisoformat(t.day).weekday() == index)
+        return (
+            ("repair_weekday_average", _percent(Decimal(hits) / count), "number") if count else None
+        )
     if re.search(r"\b(?:trung binh|binh quan|tb)\b", text) and re.search(r"\bphieu\b", text):
         if re.search(r"\bthu \d|\bmoi thu\b|\bngay thu\b", text) or not paid:
             return None

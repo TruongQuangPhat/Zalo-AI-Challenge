@@ -159,3 +159,76 @@ def test_listed_order_level_discount_makes_the_gross_line_amount_revenue():
     assert _order_level(readme, "Bớt")
     assert _order_level(readme, "Khách trả")
     assert not _order_level(readme, "Giảm")
+
+
+@pytest.mark.parametrize(
+    ("name", "model", "brand"),
+    [
+        ("iPhone 16 Pro Max 256GB Titan Đen", "iPhone 16 Pro Max", "Apple"),
+        ("Samsung Galaxy A56 5G 128GB Đen", "Samsung Galaxy A56 5G", "Samsung"),
+        ("Nokia 105 4G", "Nokia 105 4G", "Nokia"),  # 4G is the network, not a capacity
+        ("iPhone 13 128GB cũ 98%", "iPhone 13", "Apple"),
+    ],
+)
+def test_phone_model_and_brand_follow_the_rulebook(name, model, brand):
+    from src.agent.phone import brand_of, model_of
+
+    assert (model_of(name), brand_of(name)) == (model, brand)
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [("19.990.000đ", 19990000), ("19tr990", 19990000), ("20,1tr", 20100000), ("1200k", 1200000)],
+)
+def test_phone_book_money_tokens(raw, value):
+    from src.agent.phone import money
+
+    assert money(raw) == value
+
+
+def test_installment_due_days_and_overdue_amount():
+    from decimal import Decimal
+
+    from src.agent.phone import _overdue, _schedule
+
+    due = _schedule("2025-07-03", 3, 5)
+    assert due == ["2025-08-05", "2025-09-05", "2025-10-05"]
+    contract = {"due": due, "each": Decimal(900000), "payments": [("2025-08-05", Decimal(900000))]}
+    # A period due on the asked day is not overdue yet; one due before it is.
+    assert _overdue(contract, "2025-09-05") == 0
+    assert _overdue(contract, "2025-09-06") == 900000
+    from src.jsonio import ContractError
+
+    with pytest.raises(ContractError):
+        _schedule("2025-01-15", 1, 31)  # no 31 February: the due day is not written
+
+
+@pytest.mark.parametrize(
+    ("text", "installment"),
+    [
+        ("Khách Lan còn thiếu bao nhiêu tiền góp?", True),
+        ("Tháng 6 bán mấy chiếc điện thoại, gộp cả máy mới với máy cũ?", False),
+        ("khach con thieu bao nhieu tien gop", True),
+    ],
+)
+def test_installment_wording_is_told_from_combining(text, installment):
+    from src.agent.phone import installment_question
+
+    assert installment_question(question(question=text), question_plain(text)) is installment
+
+
+@pytest.mark.parametrize(
+    ("text", "windows"),
+    [
+        (
+            "Dịp Tết âm lịch 2026 có doanh thu hơn hay kém 17 ngày trước Tết bao nhiêu %?",
+            [("tet", 2026), ("before_tet", 2026)],
+        ),
+        ("Doanh thu Tết năm nay so với Tết năm ngoái?", [("tet", 2026), ("tet", 2025)]),
+    ],
+)
+def test_tet_wording(text, windows):
+    from src.agent.plan import _literal_windows
+
+    found = _literal_windows(question(question=text, as_of_date="2026-08-05"))
+    assert [(w["kind"], w["year"]) for w in found] == windows

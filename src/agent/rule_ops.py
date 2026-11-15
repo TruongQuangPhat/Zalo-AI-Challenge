@@ -65,7 +65,7 @@ SHOP_FRAME = frozenset(
         "ngoai nhat nhi nhieu qua quan quy rieng roi shop so ta tat thang thu tiem tien tinh "
         "toi tong tren tri trong trung truoc tu tuan vay ve xem ra mat theo dem de lai len "
         "tr k d sop wan nha nhe oi anh chi em luon thoi nao gi bo toan dat tong chu bay hien tai "
-        "hum tet am lich sau lien vua cuoi t th q dh roi vao chot chong cac z j"
+        "hum tet am lich sau lien vua cuoi t th q dh roi vao chot chong cac z j dip nguyen dan"
     ).split()
 )
 
@@ -82,6 +82,8 @@ UNCOMPUTED = (
     r"(?<!\w)(?:đô la|đô-la|đôla|usd|ngoại tệ|tặng kèm|quà tặng|hàng tặng|tiền boa|tiền tip|"
     r"khuyến mãi|khuyến mại|hãng nào|hãng gì|thương hiệu|nhãn hiệu)(?!\w)"
 )
+BRAND_WORDS = r"hãng nào|hãng gì|thương hiệu|nhãn hiệu"
+BRAND_OPS = {"baby_milk_brand", "baby_diaper_share", "phone_brand_share"}
 # "Từng bên / mỗi bên" asks one value per compared side (methods, channels, shifts).
 SIDES = r"\b(?:tung|moi) ben\b"
 SIDE_OPS = ("method_revenue", "channel_revenue", "shift_", "debt_customer")
@@ -94,11 +96,14 @@ def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
     from src.agent.planner import shape_mismatch
     from src.semantics.vocabulary import unknown_words
 
-    # Known words that still add a condition no operator computes (currency, free gifts).
-    if re.search(UNCOMPUTED, question.question.casefold()):
-        return None
     decision = _operator_answer(question, context)
     if decision is None:
+        return None
+    # Known words that still add a condition no operator computes (currency, free gifts).
+    # A brand is a condition only for operators that do not compute one.
+    uncomputed = re.findall(UNCOMPUTED, question.question.casefold())
+    brand_op = str(decision["plan"].get("op")) in BRAND_OPS
+    if any(not (brand_op and re.fullmatch(BRAND_WORDS, w)) for w in uncomputed):
         return None
     if re.search(SIDES, question_plain(question.question)) and not str(
         decision["plan"].get("op")
@@ -113,6 +118,8 @@ def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
     answer = decision["answer"]
     if shape_mismatch(question, answer["type"]):
         return None
+    if not _before_tet_days_match(question, context):
+        return None
     # A head count cannot exceed the shop's orders; a larger number is a money total.
     if answer["type"] == "number" and re.search(PEOPLE_COUNT, question_plain(question.question)):
         with closing(context.prepared.connect()) as conn:
@@ -120,6 +127,23 @@ def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
         if Decimal(str(answer["answer"])) > orders:
             return None
     return decision
+
+
+def _before_tet_days_match(question: Question, context: BusinessContext) -> bool:
+    """ "N ngày trước Tết": the rulebook's "trước Tết" has as many days as Tết itself, so a
+    stated N must equal that length."""
+    stated = re.search(r"\b(\d+) ngay (?:ngay )?truoc tet\b", question_plain(question.question))
+    if not stated:
+        return True
+    windows = [w for w in _literal_windows(question) if w["kind"] == "before_tet"]
+    if len(windows) != 1:
+        return False
+    check = preflight(context, "revenue", windows[0], as_of_date=question.as_of_date)
+    window = check.get("effective_window")
+    if not window:
+        return False
+    days = (date.fromisoformat(window["end"]) - date.fromisoformat(window["start"])).days + 1
+    return days == int(stated[1])
 
 
 def _operator_answer(question: Question, context: BusinessContext) -> dict | None:
@@ -162,6 +186,8 @@ def _operator_answer(question: Question, context: BusinessContext) -> dict | Non
         }
     for operator in (
         _industry_amounts,
+        _phone,
+        _baby,
         _pharmacy,
         _debt,
         _staff,
@@ -185,6 +211,7 @@ def _operator_answer(question: Question, context: BusinessContext) -> dict | Non
         _purchase_total,
         _gross_profit,
         _customer_ops,
+        _tet_growth,
         _growth,
         _month_list,
         _price_effect,
@@ -217,6 +244,20 @@ def _industry_amounts(question, context, text):
     from src.agent.industry import answer as industry_answer
 
     result = industry_answer(question, context, text)
+    return None if result is None else (*result, {})
+
+
+def _phone(question, context, text):
+    from src.agent.phone import answer as phone_answer
+
+    result = phone_answer(question, context, text)
+    return None if result is None else (*result, {})
+
+
+def _baby(question, context, text):
+    from src.agent.baby import answer as baby_answer
+
+    result = baby_answer(question, context, text)
     return None if result is None else (*result, {})
 
 
@@ -1644,6 +1685,44 @@ def _customer_ops(question, context, text):
             "customer", check, _percent(Decimal(qualified) * 100 / len(orders)), "percent"
         )
     return _decision("customer", check, qualified, "number")
+
+
+def _tet_growth(question, context, text):
+    """Revenue change in % of Tết against "trước Tết" (§2) or against last year's Tết."""
+    windows = [w for w in _literal_windows(question) if w["kind"] in {"tet", "before_tet"}]
+    if len(windows) != 2 or len(_literal_windows(question)) != 2:
+        return None
+    if not re.search(r"%|\bphan tram\b", text) or not re.search(
+        r"\b(?:tang|giam|thay doi|hon hay kem|cao hay thap|chenh)\b", text
+    ):
+        return None
+    if re.search(
+        r"\b(nhom|khach|ca sang|ca chieu|nhan vien|kenh|tien mat|chuyen khoan|cod|huy|"
+        r"tra hang|don tra|trung binh|binh quan|moi ngay|top|ngoai tru|khong tinh|rieng|"
+        r"qua dien thoai|tai quay|zalo|nhap|ton|con lai|gia ban|don gia|lai|loi|mat hang|"
+        r"san pham|mon|so don|so luong)\b",
+        text,
+    ):
+        return None
+    if not re.search(r"\b(?:doanh thu|dthu|tien ban|ban duoc)\b", text):
+        return None
+    kinds = sorted(w["kind"] for w in windows)
+    if kinds == ["before_tet", "tet"]:
+        if windows[0]["year"] != windows[1]["year"]:
+            return None
+        base = next(w for w in windows if w["kind"] == "before_tet")
+        current = next(w for w in windows if w["kind"] == "tet")
+    elif kinds == ["tet", "tet"] and abs(windows[0]["year"] - windows[1]["year"]) == 1:
+        base, current = sorted(windows, key=lambda w: w["year"])
+    else:
+        return None
+    checks = [_window(question, context, w) for w in (current, base)]
+    if any(not isinstance(c, dict) for c in checks):
+        return None
+    now, before = (_executor_value(context, c, rounded=False) for c in checks)
+    if not before or before <= 0:
+        return None
+    return _decision("tet_growth", checks[0], _percent((now - before) * 100 / before), "percent")
 
 
 def _growth(question, context, text):

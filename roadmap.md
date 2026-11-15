@@ -13,6 +13,65 @@
 
 ---
 
+## Coverage round 5b: luật chỉ có ở public (điện thoại, mẹ và bé, sửa xe), Tết — 15/11/2026
+
+Làm trong lúc molab chạy bản `d25cbe8`. Các luật này không có nhãn train. Mỗi phép tính
+được kiểm chứng theo ba cách:
+
+- test trên dữ liệu tổng hợp;
+- tính lại bằng một bộ đọc xlsx độc lập (zipfile + XML, không dùng code ingestion) — 5/5 số
+  khớp: phí ship và bỉm size L của dev_013, thu máy cũ và tiền góp quá hạn ở hai mốc của
+  dev_014;
+- đọc lại từng câu public được trả lời.
+
+- **`src/agent/books.py`**: đọc sổ nguồn theo tên cột (dùng header catalog đã nhận cho bảng
+  header 2 dòng). Dòng trùng y hệt chỉ bỏ ở bảng ghi theo đơn: sổ bán dev_014 lặp dòng, facts
+  cũng bỏ, và "Khách trả" chỉ khớp khi bỏ. Bảng không ghi theo đơn tính mọi dòng (rulebook).
+- **`src/agent/phone.py`** (chỉ shop có cột IMEI và rulebook có luật điện thoại):
+  - số máy mới/cũ/tất cả, theo dòng máy hoặc mặt hàng; tỉ trọng máy mới theo tiền, theo hãng;
+  - top N dòng máy (hoà ở ranh giới thì bỏ trống); giá trung bình một máy; mặt hàng bán chạy;
+  - tiền thu máy cũ (sổ riêng hoặc cột sổ bán) và % đơn có thu máy cũ;
+  - khách phải trả (tổng, trung bình): phải khớp thành tiền − bớt − thu máy cũ của từng đơn;
+  - trả góp: còn chưa góp (kể cả chưa tới hạn), số kỳ tới hạn, tiền và số khách quá hạn;
+  - công nợ gộp sổ nợ và sổ góp (tổng, số khách, tuổi nợ);
+  - bảo hành: số lượt, tỉ lệ theo quý, dòng máy nhiều lượt nhất, máy bán tháng X đã quay lại.
+
+  Phân biệt "góp" với "gộp" theo chữ có dấu.
+- **`src/agent/baby.py`** (shop có danh mục Nhóm/Hãng/Số-Size):
+  - bỉm theo size/hãng (số bịch, % trên tổng bịch bỉm tã);
+  - sữa bột số N (số lon gộp hãng, hãng bán nhiều lon nhất);
+  - voucher, điểm, phí ship;
+  - thành viên mới;
+  - doanh thu và tỉ trọng nhóm của danh mục, kênh sàn TMĐT. Doanh thu cả shop từ sổ phải bằng
+    doanh thu facts.
+- **Sửa xe:**
+  - bảng hoa hồng xếp giảm dần, chỉ khi mọi thợ trong danh sách đều có phiếu trong kỳ;
+  - trung bình lượt xe mỗi ngày thứ X (chia cho số ngày thứ X, kể cả ngày không có phiếu);
+  - thợ được nêu tên không kèm chữ "thợ";
+  - **sửa câu sai**: "bao nhiêu xe Air Blade khác nhau" trước trả tổng mọi xe (366). Nay câu
+    nêu tên dòng xe bỏ trống, vì ô Xe ghi tắt dòng xe ("ab", "alpha", "ex") mà dữ liệu không
+    cho căn cứ để gộp.
+- **Tết:** "Tết âm lịch / Nguyên đán / năm nay / năm ngoái", "N ngày trước Tết" (N phải bằng độ
+  dài kỳ Tết theo lịch âm), `_tet_growth`. Train: +3 câu gốc, +2 chat, +1 phrasing, 0 sai.
+- Cue danh sách "mỗi tháng" không còn khớp "máy **mới tháng** này", "đăng ký **mới tháng**".
+
+Kết quả (CPU, `answer_by_rule`):
+
+| Lượt | Round 5 (`d25cbe8`) | Round 5b |
+|---|---|---|
+| Train gốc | 2.783 / 0 sai | **2.789 / 0 sai** |
+| Chat / phrasing | 1.988 / 1.593, 0 sai | 1.991 / 1.594, 0 sai |
+| Trap (600) | 1 câu còn trả lời | 1 |
+| `verify_runtime` | 694 test | lint/format đạt, 708 test |
+| Public theo luật | 721 | **817** |
+
+Public theo shop: 001 76 · 002 35 · 003 91 · 004 71 · 005 79 · 006 86 · 007 52 · 008 71 ·
+009 20 · 010 50 · 011 37 · 012 40 · 013 51 · 014 58.
+
+Giới hạn: phần lớn câu mới (dev_011–014) thuộc luật chỉ có ở public. Độ đúng dựa vào kiểm
+chứng chéo và đọc lại, không có nhãn. Câu theo dòng xe, theo việc trong ô "Làm gì" và mặt
+hàng không có trong danh mục vẫn bỏ trống.
+
 ## Coverage round 5: chốt chặn độ chính xác, dev_003/dev_014, dữ liệu public — 16/11/2026
 
 Bản nộp molab `public-submit-r4c` (commit `cdb651e`) được **0,567** trên public: 653 câu trả

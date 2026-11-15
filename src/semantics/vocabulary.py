@@ -37,7 +37,9 @@ FILLERS = (
 # Words an operator binds by itself (rulebook terms, trade abbreviations): understood.
 OPERATOR_WORDS = (
     "sộp trung thành đổi ý ưa chuộng chăm chỉ đắt khách cao điểm ncc nhà cung cấp hsd "
-    "hạn dùng đứt chốt kênh thương mại điện tử sàn dưới vượt tối thiểu nhỏ hãng chiếc"
+    "hạn dùng đứt chốt kênh thương mại điện tử sàn dưới vượt tối thiểu nhỏ hãng chiếc "
+    "máy điện thoại đt cũ mới phụ kiện góp trả góp kỳ hạn quá chậm bảo hành lượt dòng thu "
+    "hợp đồng imei đóng xếp nhận bỉm tã bịch size voucher ship phí điểm thành viên đăng ký nb"
 ).split()
 
 _WORD = re.compile(r"\w+")
@@ -80,6 +82,8 @@ def unknown_words(question: str, names: Collection[str] = ()) -> list[str]:
     unknown = []
     # "cao hay thấp hơn" asks the signed change; "thấp nhất" (a lowest) is not understood.
     question = re.sub(r"(?i)\bcao hay (?:thấp|thap)\b", "cao hay", question)
+    # "xếp từ cao xuống thấp" orders a ranking; it is not "lowest".
+    question = re.sub(r"(?i)\bcao xuống (?:thấp|thap)\b", "cao xuống", question)
     for token in question_tokens(question):
         bare = normalized(token)
         if bare in names:

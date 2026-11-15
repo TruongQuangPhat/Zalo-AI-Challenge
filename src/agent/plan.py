@@ -269,6 +269,21 @@ def _time_text(question: Question) -> str:
         text = re.sub(r"\b(thang|quy) (\d{1,2}) nam (?:ngoai|roi|truoc)\b", rf"\1 \2/{last}", text)
         text = re.sub(r"\b(thang|quy) (\d{1,2}) nam nay\b", rf"\1 \2/{last + 1}", text)
 
+    # Tết: "Tết âm lịch / Nguyên đán / cổ truyền 2026", "Tết năm nay / năm ngoái".
+    text = re.sub(r"\btet (?:am lich|nguyen dan|co truyen)\b", "tet", text)
+    if question.as_of_date:
+        this_year = int(question.as_of_date[:4])
+        text = re.sub(r"\btet nam nay\b", f"tet {this_year}", text)
+        text = re.sub(r"\btet nam (?:ngoai|truoc|trc|roi)\b", f"tet {this_year - 1}", text)
+    # "17 ngày (ngay) trước Tết" next to one dated Tết is the rulebook's "trước Tết" of that year.
+    years = set(re.findall(r"\btet(?: nam)? (\d{4})\b", text))
+    if len(years) == 1:
+        text = re.sub(
+            r"\b(?:\d+ ngay )?(?:ngay )?truoc tet\b(?!(?: nam)? \d{4})",
+            f"truoc tet {years.pop()}",
+            text,
+        )
+
     # "tháng 10, 11, 12 năm 2025 lần lượt", "th9, th10, th11/2025": an ascending list of
     # months shares the written year when the question reads them one by one (three or
     # more, or "lần lượt"/"nào"); "tháng 7 và tháng 8/2025" alone stays unparsed.

@@ -123,7 +123,8 @@ _ASK = r"(?:bao nhieu|bao nhiu|bnhiu|bnhieu|bn|nhieu)"
 # Question wording that fixes the answer shape regardless of the plan.
 _LIST_CUES = (
     # "tinh moi loai do uong" means all items, not one value per kind.
-    r"\b(lan luot|(?<!tinh )(?<!cong )moi loai|moi ben|tung thang|moi thang)\b",
+    # "máy mới tháng này" is not "mỗi tháng" once accents are dropped.
+    r"\b(lan luot|(?<!tinh )(?<!cong )moi loai|moi ben|tung thang|(?<!may )moi thang)\b",
     # One value per side/channel/person asked ("từng bên doanh thu bao nhiêu").
     r"\b(?:theo )?tung (?:ben|kenh|nguoi|nhan vien|khach|nhom|loai|mat hang|mon|ngay|tuan|quy|"
     r"nam|ca|chi nhanh|cua hang|hang|tho|nha cung cap)\b|\bmoi (?:kenh|nhom|nhan vien)\b",
@@ -151,6 +152,9 @@ def shape_mismatch(question: Question, answer_type: str) -> str | None:
     from src.semantics.rulebook import question_plain
 
     text = question_plain(question.question)
+    raw = question.question.casefold()
+    if "mới" in raw and "mỗi" not in raw:
+        text = text.replace("moi thang", "moi_thang")  # "mới tháng", not "mỗi tháng"
     if answer_type in {"abstain", "unanswerable"}:
         return None
     if any(re.search(p, text) for p in _LIST_CUES):
