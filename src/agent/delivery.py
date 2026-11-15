@@ -100,7 +100,9 @@ def answer(question: Question, context: BusinessContext, text: str):
     """(op, value, type) for a delivery-batch or due-date count, or None."""
     batches = re.search(r"\bdot\b", text) and re.search(r"\b(?:giao|cho|xe)\b", text)
     due = re.search(r"\b(?:ngay phai tra|han (?:phai )?tra|han thanh toan)\b", text)
-    if not (batches or due) or re.search(r"\b(?:nhom|khach|nhan vien|%|phan tram)\b", text):
+    # "giao cho khách" is who receives the delivery, not a customer condition.
+    scoped = re.sub(r"\bcho khach(?: hang)?\b", " ", text)
+    if not (batches or due) or re.search(r"\b(?:nhom|khach|nhan vien|%|phan tram)\b", scoped):
         return None
     if not context.prepared or context.prepared.path is None:
         return None
@@ -136,7 +138,8 @@ def _batches(question, text, rows, orders, today):
         # "Số đợt giao trong tháng X": batches whose delivery day falls in month X.
         if not re.search(r"\b" + ASK + r" dot\b|\bso dot\b|\bdot (?:giao )?hang\b", text):
             return None
-        if re.search(r"\b(?:tro len|it nhat|mat hang|thung|bao|cay|vien|kg)\b", text):
+        # A unit ("bao" xi măng) counts goods, not batches; "bao nhiêu" asks the count.
+        if re.search(r"\b(?:tro len|it nhat|mat hang|thung|bao(?! nhieu)|cay|vien|kg)\b", text):
             return None
         return "delivery_batches", sum(_in_month(d, month) for d in days.values()), "number"
     # Orders placed in month X (by the end of today) and what has been delivered for them.

@@ -38,6 +38,22 @@ ROLES = {
 }
 
 
+# README meaning of a column that holds a role under another header.
+ROLE_MEANINGS = {
+    "receipt": r"^(?:ma|so) phieu nhap\b|^ma (?:don )?nhap hang\b",
+    "date": r"^ngay nhap\b|^(?:ngay|thoi gian) (?:nhap kho|lap phieu nhap)\b",
+    "status": r"^trang thai (?:phieu|nhap)\b",
+    "note": r"^ghi chu\b",
+    "supplier": r"^(?:ma |ten )?nha cung cap\b",
+    "code": r"^ma (?:hang|san pham)\b",
+    "name": r"^ten (?:hang|san pham|mat hang)\b",
+    "unit": r"^don vi (?:nhap|tinh)\b",
+    "quantity": r"^so luong nhap\b",
+    "price": r"^(?:don )?gia nhap\b",
+    "total": r"^(?:thanh tien|tien nhap)\b",
+}
+
+
 def _header(name: str) -> str:
     return plain(re.sub(r"(?<=[a-z])(?=[A-Z])", " ", str(name)))
 
@@ -48,12 +64,12 @@ def _tables(context: BusinessContext) -> list[dict]:
     for profile in context.catalog["tables"]:
         if profile.get("structure_status") != "resolved":
             continue
+        from src.agent.books import role_columns
+
         roles: dict[str, list[int]] = {}
-        for column in profile.get("columns", []):
-            name = _header(column["display_name"])
-            for role, pattern in ROLES.items():
-                if re.fullmatch(pattern, name):
-                    roles.setdefault(role, []).append(column["position"])
+        for role, pattern in ROLES.items():
+            if positions := role_columns(context, profile, pattern, ROLE_MEANINGS[role]):
+                roles[role] = positions
         if "receipt" not in roles:
             continue
         if any(len(positions) != 1 for positions in roles.values()):
@@ -156,8 +172,8 @@ def _number(raw) -> Decimal:
             raise ContractError("purchase_number_not_exact")
         return Decimal(int(raw))
     token = re.sub(r"\s*(?:đ|d|vnd|dong)$", "", str(raw).strip().casefold())
-    if re.fullmatch(r"\d{1,3}(?:,\d{3})+|\d{1,3}(?:\.\d{3})+", token):
-        return Decimal(re.sub(r"[.,]", "", token))
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+|\d{1,3}(?:\.\d{3})+|\d{1,3}(?: \d{3})+", token):
+        return Decimal(re.sub(r"[., ]", "", token))
     # "12,345tr": before a million/thousand suffix the comma can only mark the fraction.
     convention = "decimal_comma" if re.fullmatch(r"\d+,\d+\s*(?:tr|trieu|k)", token) else None
     try:

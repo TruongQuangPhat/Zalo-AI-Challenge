@@ -39,10 +39,20 @@ def drug_catalog(context: BusinessContext) -> tuple[str, dict[str, tuple[str | N
             c["position"]: plain(re.sub(r"(?<=[a-z])(?=[A-Z])", " ", c["display_name"]))
             for c in profile.get("columns", [])
         }
-        ingredient = [
-            p for p, n in columns.items() if re.search(r"\bhoat chat\b|\bthanh phan chinh\b", n)
-        ]
-        flag = [p for p, n in columns.items() if re.search(r"\bke don\b|\bban theo don\b", n)]
+        from src.agent.books import role_columns
+
+        ingredient = role_columns(
+            context,
+            profile,
+            r".*\b(?:hoat chat|thanh phan chinh)\b.*",
+            r"\bhoat chat\b|\bthanh phan chinh\b",
+        )
+        flag = role_columns(
+            context,
+            profile,
+            r".*\b(?:ke don|ban theo don)\b.*",
+            r"\b(?:thuoc )?ke don\b|\bban theo don\b",
+        )
         if len(ingredient) == 1 and len(flag) == 1:
             with_flags.append((profile, columns, ingredient[0], flag[0]))
     if len(with_flags) != 1:

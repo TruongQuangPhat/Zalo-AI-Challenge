@@ -12,7 +12,7 @@ from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError, dumps, loads
 
-PROMPT_VERSION = "planner-v15"
+PROMPT_VERSION = "planner-v16"
 SYSTEM = """Lập QueryPlan JSON theo schema; không trả số đáp án, SQL hoặc code.
 Giữ mọi điều kiện. Ngoài scope/schema: uncertainties=["unsupported_scope_or_operator"].
 Trong scope thì uncertainties=[]; không ghi uncertainty chỉ vì không có raw rows.
@@ -233,10 +233,17 @@ def _guard_unbound_entity(decision: dict, question: Question, context: BusinessC
 
 
 REWRITE_PROMPT = (
-    "Viết lại câu hỏi dưới đây của chủ cửa hàng sang tiếng Việt chuẩn, có đủ dấu: thay từ "
-    "viết tắt, tiếng lóng, từ địa phương bằng từ phổ thông cùng nghĩa. Giữ nguyên từng chữ của "
-    "mọi số, ngày, tháng, năm, mã, tên mặt hàng, tên khách, tên người. Không thêm, không bớt "
-    'ý. Trả về JSON {"question": "..."}.\n\nCâu hỏi: '
+    "Viết lại câu hỏi dưới đây của chủ cửa hàng sang tiếng Việt chuẩn, có đủ dấu: sửa lỗi gõ "
+    "và lỗi chính tả (sai hoặc thiếu dấu, gõ Telex còn sót, sai phụ âm đầu, thiếu chữ, dính "
+    "chữ), thay từ viết tắt, tiếng lóng, từ địa phương bằng từ phổ thông cùng nghĩa. Giữ "
+    "nguyên từng chữ của mọi số, ngày, tháng, năm, mã, tên mặt hàng, tên khách, tên người. "
+    "Không thêm, không bớt ý.\n"
+    "Ví dụ:\n"
+    '- "dthu th5 tiệm mik dc bn z" -> "Doanh thu tháng 5 của tiệm mình được bao nhiêu '
+    'vậy?"\n'
+    '- "sô đơn tuân trc tăng hay giam mây %" -> "Số đơn tuần trước tăng hay giảm mấy %?"\n'
+    '- "khach hang nao mua nhieu nhat thang 3" -> "Khách hàng nào mua nhiều nhất tháng 3?"\n'
+    'Trả về JSON {"question": "..."}.\n\nCâu hỏi: '
 )
 _NUMBER = re.compile(r"\d+(?:[.,/:-]\d+)*")
 # A capitalised word that does not open the sentence: likely part of a name.

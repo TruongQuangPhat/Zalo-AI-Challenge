@@ -26,13 +26,47 @@ from contextlib import closing
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
-from src.agent.books import money
-from src.agent.books import table as _table
+from src.agent.books import money, table
 from src.agent.purchasing import _day
 from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.rulebook import plain
+
+# Standard column -> README meaning of a column that holds it under another header.
+ALIASES = {
+    "ghi tat": r"^(?:ten |ma )?(?:ghi tat|viet tat)\b",
+    "ten hang": r"^ten (?:day du|hang|may|san pham)\b",
+    "loai": r"^loai(?: hang| may)?\b",
+    "gia thu": r"^gia (?:thu|thu mua|mua lai)\b|^tien thu may",
+    "tru vao (stt so ban)": r"\btru vao\b.*\b(?:don|stt|so thu tu)\b",
+    "stt": r"^(?:so thu tu|stt)(?: cua)? don\b",
+    "thu may cu": r"^(?:tien )?(?:thu|tru) may cu\b",
+    "thanh tien": r"^thanh tien\b",
+    "khach tra": r"^(?:so )?tien khach (?:tra|dua|thanh toan)\b",
+    "bot": r"^(?:tien )?(?:bot|giam)\b.*\bdon\b",
+    "ngay nhan": r"^ngay (?:nhan|tiep nhan)\b",
+    "imei": r"\bimei\b|^so serial\b",
+    "may": r"^(?:ten |dong )?may\b",
+    "tra truoc": r"^(?:tien |so tien )?tra truoc\b",
+    "so ky": r"^so ky\b",
+    "gop/thang": r"^(?:tien )?gop (?:moi|mot|hang) (?:thang|ky)\b|^tien moi ky\b",
+    "ngay gop": r"^ngay (?:gop|dong gop|tra gop)\b",
+    "da gop": r"^(?:so tien |tien )?(?:da gop|gop ky)\b",
+    "han gop (ngay)": r"^(?:ngay )?han gop\b",
+    "gia": r"^gia (?:may|ban)\b",
+    "ngay": r"^ngay (?:mua|ban|lap don)\b",
+    "khach": r"^(?:ten )?khach(?: hang)?\b",
+    "no": r"^(?:so tien )?(?:con no|tien no|no)\b",
+    "da tra": r"^(?:so tien )?(?:da tra|tra no)\b",
+    "ngay tra": r"^ngay tra(?: no)?\b",
+    "ghi chu": r"^ghi chu\b",
+}
+
+
+def _table(context, required: set[str], keep: set[str] | None = None):
+    return table(context, required, keep, aliases=ALIASES)
+
 
 RULES = ("phone_tradein", "phone_model_brand")
 KINDS = {"may moi": "new", "may cu": "used", "phu kien": "accessory"}

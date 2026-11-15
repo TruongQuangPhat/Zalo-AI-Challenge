@@ -21,12 +21,34 @@ from collections import defaultdict
 from contextlib import closing
 from decimal import ROUND_HALF_UP, Decimal
 
-from src.agent.books import money, table
+from src.agent.books import money
+from src.agent.books import table as _book
 from src.agent.purchasing import _day
 from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.rulebook import plain
+
+# Standard column -> README meaning of a column that holds it under another header.
+ALIASES = {
+    "ten hang": r"^ten (?:hang|san pham|mat hang)\b",
+    "ten goi khac": r"^ten (?:goi )?khac\b|^bi danh\b",
+    "nhom": r"^nhom(?: hang)?\b",
+    "hang": r"^(?:hang|hang san xuat|thuong hieu)\b",
+    "so / size": r"^(?:so|size)\b.*\b(?:sua|bim|size|tuoi)\b",
+    "dvt": r"^(?:don vi co ban|don vi tinh|dvt)\b",
+    "quy doi": r"^quy doi\b",
+    "hd": r"^(?:so|ma) (?:hoa don|hd|don)\b",
+    "tt": r"^thanh tien\b",
+    "sl": r"^so luong\b",
+    "ngay dang ky": r"^ngay dang ky\b",
+    "kenh": r"^kenh(?: ban)?\b",
+}
+
+
+def table(context, required: set[str], keep: set[str] | None = None):
+    return _book(context, required, keep, aliases=ALIASES)
+
 
 PRODUCT_COLUMNS = {"ten hang", "nhom", "hang", "so / size", "dvt"}
 DIAPERS = "bim ta"

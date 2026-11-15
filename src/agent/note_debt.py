@@ -14,11 +14,26 @@ from contextlib import closing
 from datetime import date
 from decimal import Decimal
 
-from src.agent.books import table
+from src.agent.books import table as _book
 from src.data.catalog import BusinessContext
 from src.data.split import Question
 from src.jsonio import ContractError
 from src.semantics.rulebook import plain
+
+# Standard column -> README meaning of a column that holds it under another header.
+ALIASES = {
+    "bill": r"^(?:ma|so) (?:don|hoa don|bill)\b",
+    "note": r"^ghi chu(?: cua don)?\b",
+    "thanh toan bang": r"^(?:hinh thuc|phuong thuc) thanh toan\b",
+    "tong tien": (
+        r"^(?:so tien )?khach (?:can|phai) tra\b|^tong (?:tien )?(?:thanh toan|phai tra)\b"
+    ),
+}
+
+
+def table(context, required: set[str], keep: set[str] | None = None):
+    return _book(context, required, keep, aliases=ALIASES)
+
 
 PAID = r"\b(?:da tra du|tra het|tra du|ck du|chuyen khoan du|da thanh toan|tra het roi)\b"
 OWED = (

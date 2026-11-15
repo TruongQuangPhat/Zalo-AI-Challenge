@@ -20,7 +20,7 @@ from src.contracts import validate_answer
 from src.data.catalog import BusinessContext
 from src.data.normalization.values import PURCHASE_CANCELLED, PURCHASE_RECEIVED
 from src.data.split import Question
-from src.jsonio import ContractError
+from src.jsonio import ContractError, loads
 from src.semantics.answerability import preflight
 from src.semantics.rulebook import plain, question_plain
 
@@ -233,6 +233,7 @@ def _operator_answer(question: Question, context: BusinessContext) -> dict | Non
         _month_list,
         _price_effect,
         _trend,
+        _day_sale_price,
         _product_revenue,
         _whole_shop,
     ):
@@ -337,7 +338,7 @@ def _day_balances(question, context, expression):
 
 def _catalog_costs(context) -> dict[str, Decimal]:
     """Product code -> cost of one base unit from the product list ("Giá vốn"), else {}."""
-    from src.agent.purchasing import _header, _number
+    from src.agent.purchasing import _number
     from src.data.normalization.entities import source_fields
 
     found = []
@@ -347,11 +348,14 @@ def _catalog_costs(context) -> dict[str, Decimal]:
         fields = source_fields(context, profile)
         if "product_id" not in fields or "order_id" in fields or "purchase_id" in fields:
             continue
-        cost = [
-            c["position"]
-            for c in profile.get("columns", [])
-            if re.fullmatch(r"gia von(?: hang| hien tai)?", _header(c["display_name"]))
-        ]
+        from src.agent.books import role_columns
+
+        cost = role_columns(
+            context,
+            profile,
+            r"gia von(?: hang| hien tai)?",
+            r"^gia von(?: (?:mot|1) don vi(?: co ban)?| hien tai)?\b",
+        )
         if len(cost) == 1:
             found.append((profile, fields["product_id"], cost[0]))
     if len(found) != 1:
@@ -2041,22 +2045,30 @@ def _growth(question, context, text):
 def _price_increase_day(context, product: str, target: Decimal) -> date | None:
     """First day the price list raises ``product`` to ``target`` (rulebook "Hiệu ứng tăng
     giá": a raise is a new price above the one before; the first raise to a price counts)."""
-    from src.agent.purchasing import _header, _number
+    from src.agent.books import role_columns
+    from src.agent.purchasing import _number
 
+    # Role -> (header pattern, README meaning pattern).
     roles = {
-        "date": r"ngay ap dung",
-        "price": r"gia moi|gia ban le",
-        "old": r"gia cu",
-        "code": r"ma (?:san pham|hang hoa|h\.? ?hoa|hang|sp)",
-        "name": r"ten ?hang|san pham|ten san pham|ten hang hoa|item",
+        "date": (r"ngay ap dung", r"^ngay (?:ap dung|doi gia|thay doi gia|bat dau)\b"),
+        "price": (r"gia moi|gia ban le", r"^gia (?:moi|ban moi|ap dung)\b"),
+        "old": (r"gia cu", r"^gia (?:cu|truoc)\b"),
+        "code": (
+            r"ma (?:san pham|hang hoa|h\.? ?hoa|hang|sp)",
+            r"^ma (?:hang|san pham|hang hoa)\b",
+        ),
+        "name": (
+            r"ten ?hang|san pham|ten san pham|ten hang hoa|item",
+            r"^ten (?:hang|san pham|mat hang)\b",
+        ),
     }
     tables = []
     for profile in context.catalog["tables"]:
         found: dict[str, list[int]] = {}
-        for column in profile.get("columns", []):
-            for role, pattern in roles.items():
-                if re.fullmatch(pattern, _header(column["display_name"])):
-                    found.setdefault(role, []).append(column["position"])
+        for role, (header, meaning) in roles.items():
+            positions = role_columns(context, profile, header, meaning)
+            if positions:
+                found[role] = positions
         if {"date", "price"} <= found.keys() and ({"code", "name"} & found.keys()):
             if all(len(v) == 1 for v in found.values()):
                 tables.append((profile, {k: v[0] for k, v in found.items()}))
@@ -2245,6 +2257,103 @@ def _whole_shop(question, context, text):
         return None
     value = _executor_value(context, check)
     return _decision("whole_shop", check, int(value), "number", metric=metric)
+
+
+def _day_sale_price(question, context, text):
+    """Rulebook "Giá bán X ngày D" (only when the split's rulebook defines it): the unit
+    price written on X's sale lines of orders placed on D, for one base unit, before the
+    line discount, over every status. Lines that disagree leave the question unanswered."""
+    from src.agent.books import role_columns
+    from src.data.normalization.entities import source_fields
+
+    rules = context.rules.rules if context.rules is not None else {}
+    if "day_sale_price" not in rules or not re.search(r"\b(?:gia ban|don gia|gia)\b", text):
+        return None
+    if re.search(r"\b(?:nhap|von|binh quan|trung binh|tang gia|len gia|doi gia|lai|loi)\b", text):
+        return None
+    dates = set(re.findall(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", text))
+    if len(dates) != 1 or not re.search(r"\b(?:mot|1|moi)\s+\w+", text):
+        return None
+    products = [name for name, _ in _products(context) if len(name.split()) >= 2 and name in text]
+    if not products:
+        return None
+    product = max(products, key=len)
+    d, m, y = next(iter(dates))
+    day = date(int(y), int(m), int(d)).isoformat()
+    if day > question.as_of_date:
+        return None
+    check = _window(question, context, {"kind": "day", "date": day})
+    if not isinstance(check, dict):
+        return None
+    # Unit-price column of each sales table, by header or README meaning.
+    price_at = {}
+    for profile in context.catalog["tables"]:
+        fields = source_fields(context, profile)
+        if not {"item", "quantity"} <= fields.keys():
+            continue
+        found = role_columns(
+            context,
+            profile,
+            r"don gia(?: ban)?|gia ban(?: le)?|gia 1 dv|gia mot dv|gia|unit price",
+            r"^(?:don )?gia(?: ban)?(?: le)?(?: (?:mot|1) don vi(?: ban)?)?$|^don gia\b",
+        )
+        if len(found) == 1:
+            ref = profile["source_ref"]
+            price_at[(ref["file"], ref["table"])] = found[0]
+    if not price_at:
+        return None
+    prices = set()
+
+    def readings(raw) -> set[Decimal]:
+        """The cell as a VND amount under either grouping convention."""
+        token = str(raw).strip()
+        found = set()
+        if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", token):
+            found.add(Decimal(token.replace(",", "")))
+        if re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?", token):
+            found.add(Decimal(token.replace(".", "").replace(",", ".")))
+        try:
+            found.add(money(token))
+        except ContractError:
+            pass
+        return found
+
+    sql = (
+        "SELECT l.source_values,i.base_quantity,i.sold_quantity,i.source_ref,e.name,"
+        "l.net_amount FROM orders o "
+        "JOIN order_lines l USING(order_key) JOIN line_items i USING(line_key) "
+        "JOIN entities e ON e.entity_key=i.product_key "
+        "WHERE l.row_role='sale_item' AND substr(o.ordered_at,1,10)=?"
+    )
+    from src.agent.books import money
+
+    with closing(context.prepared.connect()) as conn:
+        for values, base, sold, ref, name, net in conn.execute(sql, (day,)):
+            if plain(name) != product:
+                continue
+            ref = loads(ref)
+            position = price_at.get((ref["file"], ref["table"]))
+            cells = {c[0]: c[2] for c in loads(values)} if values else {}
+            if position is None or cells.get(position) in {None, ""} or not base or not sold:
+                return None
+            sold, base = Decimal(str(sold)), Decimal(str(base))
+            # The reading consistent with the line amount: price × quantity covers the
+            # amount after a line discount below half.
+            amount = Decimal(str(net)) if net is not None else None
+            fits = {
+                p
+                for p in readings(cells[position])
+                if amount is None or (p * sold >= amount and p * sold <= 2 * amount)
+            }
+            if len(fits) != 1:
+                return None
+            prices.add(fits.pop() * sold / base)
+    if len(prices) != 1:
+        return None
+    price = prices.pop()
+    if price != price.to_integral_value():
+        return None
+    return _decision("day_sale_price", check, int(price), "number", product=product)
 
 
 def _product_revenue(question, context, text):

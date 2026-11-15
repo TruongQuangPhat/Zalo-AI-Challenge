@@ -119,3 +119,82 @@ def test_typo_repair_keeps_names_and_conditions():
     text = "Doanh thu hôm nay so với hôm qua chênh lệch tuyệt đối bao nhiêu?"
     assert repaired(text, is_known) == text
     assert repaired("tíh tới hôm nay kác khách", is_known) == "tính tới hôm nay các khách"
+
+
+def _book_context(columns: dict[str, str], rows: list[list]):
+    """One resolved sheet whose README describes each column."""
+    cell = SimpleNamespace
+    readme = "## Cột trong `So.xlsx`, sheet `Sheet1`\n" + "".join(
+        f"- **{header}**: {meaning}\n" for header, meaning in columns.items()
+    )
+    headers = list(columns)
+    source_rows = [
+        SimpleNamespace(
+            row=1, cells={i: cell(raw_value=h, native_type="str") for i, h in enumerate(headers)}
+        )
+    ] + [
+        SimpleNamespace(
+            row=n + 2, cells={i: cell(raw_value=v, native_type="str") for i, v in enumerate(values)}
+        )
+        for n, values in enumerate(rows)
+    ]
+    profile = {
+        "source_id": "s1",
+        "read_status": "read",
+        "structure_status": "resolved",
+        "header_rows": [1],
+        "source_ref": {"file": "data/shop/So.xlsx", "table": "Sheet1"},
+        "columns": [{"position": i, "display_name": h} for i, h in enumerate(headers)],
+    }
+    source = SimpleNamespace(metadata={}, iter_rows=lambda: iter(source_rows))
+    return SimpleNamespace(
+        catalog={"business_id": f"shop{id(rows)}", "readme": readme, "tables": [profile]},
+        source_table=lambda _: source,
+    )
+
+
+def test_book_columns_bind_by_readme_meaning_under_other_headers():
+    from src.agent.books import table
+    from src.agent.phone import ALIASES
+
+    context = _book_context(
+        {"Giá mua lại": "giá thu máy cũ của khách", "Đơn số": "tiền trừ vào đơn có số thứ tự này"},
+        [["1.500.000", "12"]],
+    )
+    [(rows, _)] = table(context, {"gia thu", "tru vao (stt so ban)"}, aliases=ALIASES)
+    assert rows[0]["gia thu"][0] == "1.500.000"
+    assert rows[0]["tru vao (stt so ban)"][0] == "12"
+    # Without aliases the book is not found: the headers differ.
+    assert table(context, {"gia thu", "tru vao (stt so ban)"}) == []
+
+
+def test_book_column_meaning_matched_twice_is_not_bound():
+    from src.agent.books import table
+    from src.agent.phone import ALIASES
+
+    context = _book_context(
+        {"Giá A": "giá thu máy cũ", "Giá B": "giá thu máy cũ (lần 2)", "STT": "trừ vào đơn số"},
+        [["1", "2", "3"]],
+    )
+    assert table(context, {"gia thu", "tru vao (stt so ban)"}, aliases=ALIASES) == []
+
+
+@pytest.mark.parametrize(("raw", "value"), [("33 917", 33917), ("1 250 000", 1250000)])
+def test_space_grouped_thousands_are_read_as_money(raw, value):
+    from decimal import Decimal
+
+    from src.agent.books import money
+    from src.agent.purchasing import _number
+
+    assert _number(raw) == money(raw) == Decimal(value)
+
+
+def test_role_columns_accept_a_readme_meaning_under_another_header():
+    from src.agent.books import role_columns
+    from src.agent.staff import SELLER, SELLER_MEANING
+
+    context = _book_context(
+        {"NV phụ trách": "mã nhân viên bán", "Shipper": "nhân viên giao hàng"}, [["NV1", "S1"]]
+    )
+    [profile] = context.catalog["tables"]
+    assert role_columns(context, profile, SELLER.pattern, SELLER_MEANING) == [0]

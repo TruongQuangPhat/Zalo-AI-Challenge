@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 from decimal import Decimal, InvalidOperation
+from pathlib import PurePath
 
 from src.data.catalog import BusinessContext
 from src.data.normalization.values import ParseError, parse_money
@@ -21,10 +22,12 @@ ORDER_HEADERS = {"stt", "hd", "so hd", "ma don", "so don", "ma hoa don"}
 def money(raw) -> Decimal:
     """Shop money tokens: 19.990.000đ, 19tr990, 20,1tr, 120k, 3000k, 1200000."""
     token = re.sub(r"\s*(?:vnd|vnđ|đ|₫)$", "", str(raw).strip().casefold())
-    if re.fullmatch(r"-?\d{1,3}(?:\.\d{3})+", token) or re.fullmatch(
-        r"-?\d{1,3}(?:,\d{3}){2,}", token
+    if (
+        re.fullmatch(r"-?\d{1,3}(?:\.\d{3})+", token)
+        or re.fullmatch(r"-?\d{1,3}(?:,\d{3}){2,}", token)
+        or re.fullmatch(r"-?\d{1,3}(?: \d{3})+", token)
     ):
-        token = re.sub(r"[.,]", "", token)
+        token = re.sub(r"[., ]", "", token)
     for convention in (None, "decimal_comma", "decimal_dot"):
         try:
             return parse_money(token, convention)
@@ -122,18 +125,85 @@ def _read_table(context: BusinessContext, profile, keep: frozenset[str] | None =
     return (set(header.values()), found_rows, epoch) if header else None
 
 
-def table(context, required: set[str], keep: set[str] | None = None):
+_SECTION = re.compile(r"^## Cột trong `([^`]+)`(?:, sheet `([^`]+)`)?")
+_BULLET = re.compile(r"^\s*-\s+\*\*(.+?)\*\*\s*:\s*(.+)$")
+
+
+def column_meanings(context: BusinessContext, profile) -> dict[str, str]:
+    """Plain header -> plain README meaning for one table ("## Cột trong `file`[, sheet]")."""
+    readme = context.catalog.get("readme") or ""
+    name = PurePath(profile["source_ref"]["file"]).name
+    sheet = profile["source_ref"].get("table")
+    sections: dict[tuple[str, str | None], dict[str, str]] = {}
+    current = None
+    for line in readme.splitlines():
+        if line.startswith("#"):
+            match = _SECTION.match(line)
+            current = (match[1], match[2]) if match else None
+            if current:
+                sections.setdefault(current, {})
+        elif current and (bullet := _BULLET.match(line)):
+            sections[current][plain(bullet[1])] = plain(bullet[2])
+    return sections.get((name, sheet)) or sections.get((name, None)) or {}
+
+
+def role_columns(context, profile, header: str, meaning: str) -> list[int]:
+    """Positions of the columns whose plain header fully matches ``header`` or whose README
+    meaning matches ``meaning``."""
+    meanings = column_meanings(context, profile)
+    found = []
+    for column in profile.get("columns", []):
+        name = plain(re.sub(r"(?<=[a-z])(?=[A-Z])", " ", str(column["display_name"])))
+        described = meanings.get(plain(str(column["display_name"])), "")
+        if re.fullmatch(header, name) or (described and re.search(meaning, described)):
+            found.append(column["position"])
+    return found
+
+
+def _renames(context, profile, aliases: dict[str, str]) -> dict[str, str]:
+    """Actual plain header -> standard name, for standard names the table lacks: the one
+    column whose README meaning matches the alias. A column claimed twice is not renamed."""
+    headers = {plain(str(c["display_name"])) for c in profile.get("columns", [])}
+    meanings = column_meanings(context, profile)
+    claims: dict[str, list[str]] = {}
+    for standard, pattern in aliases.items():
+        if standard in headers:
+            continue
+        hits = [h for h in headers if h not in aliases and re.search(pattern, meanings.get(h, ""))]
+        if len(hits) == 1:
+            claims.setdefault(hits[0], []).append(standard)
+    return {actual: names[0] for actual, names in claims.items() if len(names) == 1}
+
+
+def table(
+    context,
+    required: set[str],
+    keep: set[str] | None = None,
+    aliases: dict[str, str] | None = None,
+):
     """Rows of the tables holding every required column; other tables are never read.
-    ``keep`` limits the stored columns (with the required ones) for large books."""
-    kept = frozenset(keep | required) if keep is not None else None
+    ``keep`` limits the stored columns (with the required ones) for large books.
+
+    ``aliases`` maps a standard column name to a pattern over the README meaning of a
+    column: a table without that header but with exactly one column so described has the
+    column read under the standard name (a shop that heads "Giá thu" as "Giá mua lại")."""
     found = []
     for profile in context.catalog["tables"]:
         if profile.get("read_status") not in {"read", "empty"}:
             continue
+        resolved = _profile_headers(profile) is not None
+        renames = _renames(context, profile, aliases) if aliases and resolved else {}
+        back = {standard: actual for actual, standard in renames.items()}
+        need = {back.get(n, n) for n in required}
+        kept = frozenset({back.get(n, n) for n in keep} | need) if keep is not None else None
         known = _profile_headers(profile)
-        if known is not None and not required <= known:
+        if known is not None and not need <= known:
             continue
         result = _read(context, profile, kept)
-        if result is not None and required <= result[0]:
-            found.append((result[1], result[2]))
+        if result is None or not need <= result[0]:
+            continue
+        rows = result[1]
+        if renames:
+            rows = [{renames.get(k, k): v for k, v in row.items()} for row in rows]
+        found.append((rows, result[2]))
     return found

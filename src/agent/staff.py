@@ -13,6 +13,7 @@ import re
 from contextlib import closing
 from decimal import Decimal
 
+from src.agent.books import role_columns
 from src.data.catalog import BusinessContext
 from src.jsonio import ContractError
 from src.semantics.rulebook import plain
@@ -20,6 +21,13 @@ from src.semantics.rulebook import plain
 SELLER = re.compile(
     r"^(?:nguoi ban(?: hang)?|nhan vien(?: ban(?: hang)?)?|ma (?:nv|nhan vien)(?: ban)?|"
     r"nv ban|nv)$"
+)
+
+
+# README meaning of a seller column under any header ("NV phụ trách: mã nhân viên bán").
+SELLER_MEANING = (
+    r"^(?:ma |ten )?(?:nhan vien|nguoi) ban(?: hang)?\b|"
+    r"^(?:ma )?nhan vien(?! giao| ship| van chuyen| kho)\b"
 )
 
 
@@ -36,7 +44,7 @@ def sellers(context: BusinessContext) -> dict[str, str]:
         if profile.get("structure_status") != "resolved":
             continue
         columns = {c["position"]: _header(c["display_name"]) for c in profile.get("columns", [])}
-        seller = [p for p, n in columns.items() if SELLER.match(n)]
+        seller = role_columns(context, profile, SELLER.pattern, SELLER_MEANING)
         if len(seller) != 1:
             continue
         header = set(profile.get("header_rows", []))
