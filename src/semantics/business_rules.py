@@ -136,7 +136,6 @@ EXECUTION = {
 
 
 # Reviewed full-clause signatures, not source-file hashes or split defaults.
-# See docs/rulebook-authority.md for source/line/hash and execution limitations.
 # Canonical parameters are independent of the finite wording recognizer.
 CATALOGUE = {
     "precedence": {

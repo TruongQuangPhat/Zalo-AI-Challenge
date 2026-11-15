@@ -1,4 +1,4 @@
-"""Bounded QueryPlan grammar and authoritative enrichment (roadmap appendix E)."""
+"""Bounded QueryPlan grammar and authoritative enrichment."""
 
 from __future__ import annotations
 

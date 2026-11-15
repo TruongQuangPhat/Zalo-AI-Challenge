@@ -170,7 +170,7 @@ cd - && sha256sum -c training_code/model.sha256
 ## Build
 
 ```bash
-docker build --platform linux/amd64 -t zaic2026_datamate_datamate:final .
+docker build --platform linux/amd64 -t zaic2026_datamate_fithcmus-7:final .
 ```
 
 The image is based on `vllm/vllm-openai:v0.10.1.1`. It contains `/code/predict.sh`,
@@ -183,7 +183,7 @@ docker run --rm --gpus '"device=0,1"' --network none --shm-size=16g \
   --entrypoint bash \
   -v /path/to/test_split:/data:ro \
   -v /path/to/output:/result \
-  zaic2026_datamate_datamate:final /code/predict.sh
+  zaic2026_datamate_fithcmus-7:final /code/predict.sh
 ```
 
 `predict.sh` takes no arguments. It reads `/data` and writes `/result/submission.jsonl` and
