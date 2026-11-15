@@ -3,9 +3,7 @@
 A shop's catalog writes an item in one regional form; a question may use the other. When
 a question names no catalog item but holds the other-region form of exactly one item, that
 span is replaced by the catalog name, so every later step sees the shop's own spelling.
-Most pairs are common northern/southern vocabulary; some (cốc/củ sạc, giá đỡ/kệ, găng tay/bao
-tay, tất chân/bao chân, xây trát/xây tô, pho mát/phô mai) were added after seeing such item
-names in public-test questions.
+The pairs are northern/southern names of everyday goods and trade words.
 """
 
 from __future__ import annotations

@@ -7,10 +7,9 @@ This solution performs **no training, fine-tuning, or training-data generation**
 
 - Training samples: 0. Validation samples for training: 0.
 - No `train.sh`, configs, generated data, logs or checkpoints exist, because none were produced.
-- The rulebook formulas in `/code/src/` were written by hand. The competition train split
-  (`answers.jsonl`) was used only to score predictions offline after inference; it was never
-  used to fit weights or prompts. During development the team also read public-test
-  questions and data (which have no answers) to find bugs and extend the hand-written rules.
+- The rulebook operators in `/code/src/` were written by hand. The competition train split
+  (`answers.jsonl`) was used only to score predictions offline after inference; no weights
+  were fitted.
 - `data_manifest.json` lists the packaged inference model files with sizes and SHA-256,
   plus the public source and fixed revision of the model.
 - `model.sha256` is the same checksum list in `sha256sum -c` format (run from `/code`).

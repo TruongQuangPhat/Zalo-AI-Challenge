@@ -1,4 +1,4 @@
-"""Mother-and-baby shop rules of the public rulebook ("Mẹ và bé").
+"""Mother-and-baby shop rules of the rulebook ("Mẹ và bé").
 
 The product list (columns "Tên hàng", "Tên gọi khác", "Nhóm", "Hãng", "Số / Size", "ĐVT",
 "Quy đổi") gives each item its group, brand, size and base unit. Sale lines and the invoice

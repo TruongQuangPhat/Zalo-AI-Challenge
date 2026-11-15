@@ -171,7 +171,7 @@ PURCHASE_MONEY = r"\bnhap(?: hang)?\b.*\b(?:tong|ton|chi|het)?\s*(?:bao nhieu|bn
 
 
 def _main_supplier(question, context, text):
-    """Public rule "Nhà cung cấp chính": most purchase receipts in the period, cancelled
+    """Rulebook "Nhà cung cấp chính": most purchase receipts in the period, cancelled
     receipts left out; equal counts go to the smaller code (rulebook "Bằng nhau")."""
     from src.agent.plan import _literal_windows
     from src.agent.rule_ops import _decision, _window

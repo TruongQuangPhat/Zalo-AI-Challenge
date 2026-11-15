@@ -1611,7 +1611,7 @@ def _customers(context):
         }
 
 
-# Rulebook rankings (public §3 rows); each fires only when the rulebook defines it.
+# Rulebook rankings (§3 rows); each fires only when the rulebook defines it.
 RANKINGS = {
     "customer_loyalty": (
         r"\b(?:khach(?: hang)?|ai)(?: la)? (?:trung thanh|ruot|than thiet) nhat\b"

@@ -1,4 +1,4 @@
-"""Phone-shop rules of the public rulebook ("Cửa hàng điện thoại").
+"""Phone-shop rules of the rulebook ("Cửa hàng điện thoại").
 
 Devices, models and brands come from prepared sale lines whose item resolves through the
 shop's own abbreviation sheet (columns "Ghi tắt", "Tên hàng", "Loại": máy mới, máy cũ, phụ

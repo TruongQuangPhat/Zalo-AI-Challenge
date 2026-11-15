@@ -1,94 +1,102 @@
 # Zalo AI Challenge 2026 — DataMate
 
-Một Docker image chứa toàn bộ giải pháp, theo *Docker Submission Guide — DataMate*. Đường
-chạy duy nhất:
+One Docker image holds the whole solution, following the *DataMate Docker Submission Guide*.
+There is a single run path:
 
 `/code/predict.sh → src.cli predict → LocalModel (vLLM, Qwen3-14B) + LocalPlanner → run_inference`
 
 ## Approach
 
-1. **Đọc dữ liệu.** Đọc `/data/rulebook.md`, `calendar.csv`, `questions.jsonl` và
-   CSV/XLSX/SQLite + README của từng `data/<business_id>/`. Mỗi business được chuẩn bị một
-   lần thành `facts.sqlite` (dòng bán, đơn, khách, thanh toán, tồn kho, nhập hàng, lô) có
-   lineage và số Decimal chính xác:
-   - nghĩa cột lấy từ README của shop;
-   - README thiếu hoặc không khớp: Qwen3-14B đề xuất nghĩa cột (JSON theo schema), đề xuất
-     chỉ được dùng khi qua kiểm tra số học, ngày và trạng thái;
-   - trạng thái đơn lạ: model phân loại về hoàn thành / huỷ / trả / đang giao.
-2. **Trả lời câu hỏi** (`src/agent/planner.py`):
-   - chuẩn hoá câu hỏi: chữ chat, lỗi gõ, tên món viết theo phương ngữ Bắc/Nam được đổi về
-     tên trong danh mục;
-   - **phép tính theo rulebook** (`src/agent/rule_ops.py` và các module ngành): mỗi phép là
-     một hàm Python cố định, có chốt chặn về từ ngữ, hình dạng đáp án và điều kiện chưa tính;
-   - không phép nào nhận: model viết lại câu theo cách nói chuẩn rồi thử lại;
-   - vẫn không: model lập *QueryPlan* JSON (guided decoding), plan được kiểm tra theo
-     rulebook/README rồi thực thi bằng hàm cố định (`src/agent/execution.py`,
-     `src/agent/business_execution.py`) trên SQLite read-only.
-3. **Chọn đáp án.** Kết quả được định dạng đúng type (number/percent/string/date/boolean/
-   list/table). Không đủ chắc chắn thì trả `abstain`; chỉ trả `unanswerable` khi rulebook
-   hoặc dữ liệu cho thấy shop không ghi thông tin được hỏi.
+1. **Reading the data.** The run reads `/data/rulebook.md`, `calendar.csv`,
+   `questions.jsonl` and the CSV/XLSX/SQLite files plus README of every `data/<business_id>/`.
+   Each business is prepared once into `facts.sqlite` (sale lines, orders, customers,
+   payments, stock, purchases, lots) with source lineage and exact Decimal values:
+   - column meanings come from the shop README;
+   - when the README is missing or does not match the files, Qwen3-14B proposes column
+     meanings as schema-constrained JSON; a proposal is used only after arithmetic, date and
+     status checks pass;
+   - unknown order-status labels are classified by the model as completed, cancelled,
+     returned or in delivery.
+2. **Answering a question** (`src/agent/planner.py`):
+   - the question is normalised: chat spellings, typing errors, and item names written in
+     another regional form are mapped to standard words and catalog names;
+   - **rulebook operators** (`src/agent/rule_ops.py` and the industry modules) are tried
+     first. Each is a fixed Python function, guarded on wording, answer shape and
+     conditions it does not compute;
+   - if no operator applies, the model rewrites the question in standard wording and the
+     operators are tried again;
+   - otherwise the model writes a JSON *QueryPlan* (guided decoding). The plan is validated
+     against the rulebook and README, then executed by fixed functions
+     (`src/agent/execution.py`, `src/agent/business_execution.py`) on read-only SQLite.
+3. **Choosing the answer.** Results are formatted to the required type (number, percent,
+   string, date, boolean, list, table). Without enough certainty the answer is `abstain`;
+   `unanswerable` is returned only when the rulebook or data show the shop does not record
+   what is asked.
 
-Model không tự tính số và không sinh code tự do: mọi con số đến từ hàm Python có sẵn. Không
-hard-code đáp án hay logic theo question/business ID.
+The model never computes numbers and never writes free-form code: every value comes from a
+packaged Python function. There are no hard-coded answers and no logic keyed on question or
+business IDs.
 
 ## Models
 
-| Trường | Giá trị |
+| Field | Value |
 |---|---|
-| Model | Qwen3-14B (BF16 safetensors, không quantize, không fine-tune) |
-| Nguồn public | https://huggingface.co/Qwen/Qwen3-14B |
-| Revision cố định | `40c069824f4251a91eefaf281ebe4c544efd3e18` |
-| Ngày phát hành gốc | 29/04/2025 (repo tạo 27/04/2025), trước 26/10/2026 |
+| Model | Qwen3-14B (BF16 safetensors, not quantized, not fine-tuned) |
+| Public source | https://huggingface.co/Qwen/Qwen3-14B |
+| Fixed revision | `40c069824f4251a91eefaf281ebe4c544efd3e18` |
+| Original release date | 2025-04-29 (repository created 2025-04-27), before 2026-10-26 |
 | License | Apache-2.0 (`/code/models/qwen3-14b/LICENSE`) |
-| Số tham số | 14,77B (≤ 15B); không có model phụ |
-| Vị trí trong image | `/code/models/qwen3-14b/` (8 shard safetensors, tokenizer, config) |
+| Parameters | 14.77B (≤ 15B); no other model |
+| Location in the image | `/code/models/qwen3-14b/` (8 safetensors shards, tokenizer, config) |
 
-Runtime: `vllm==0.10.1.1` trên base image `vllm/vllm-openai:v0.10.1.1` (PyTorch
-2.7.1+cu128, hỗ trợ RTX 5090). Mặc định cố định trong `src/cli.py` và `src/agent/local.py`:
+Runtime: `vllm==0.10.1.1` on the base image `vllm/vllm-openai:v0.10.1.1` (PyTorch
+2.7.1+cu128, RTX 5090 support). Fixed defaults in `src/cli.py` and `src/agent/local.py`:
 
-- 2 GPU (`tensor_parallel_size=2`), `NCCL_P2P_DISABLE=1` và `nvidia-nccl-cu12==2.27.7` theo
-  Dockerfile mẫu của hướng dẫn;
-- `max_model_len` 16384, `gpu_memory_utilization` 0,85;
-- greedy (temperature 0), seed 0, guided JSON decoding, tối đa 256/384 token mỗi plan;
-- 120 s mỗi câu, 900 s cho load model.
+- 2 GPUs (`tensor_parallel_size=2`), with `NCCL_P2P_DISABLE=1` and
+  `nvidia-nccl-cu12==2.27.7` as in the guide's reference Dockerfile;
+- `max_model_len` 16384, `gpu_memory_utilization` 0.85;
+- greedy decoding (temperature 0), seed 0, guided JSON decoding, at most 256/384 output
+  tokens per plan;
+- 120 s per question, 900 s for model loading.
 
-Chế độ thinking của Qwen3 tắt (`enable_thinking=False`) vì grammar JSON không cho phép, nên
-log ghi `thinking: null`; raw response của model nằm trong `plan` của log.
+Qwen3 thinking mode is disabled (`enable_thinking=False`) because the JSON grammar does not
+allow it, so logs record `thinking: null`; the raw model response is kept in the log's `plan`.
 
 ## Data
 
-- Inference chỉ dùng input của split được mount vào `/data`.
-- Không có training, fine-tuning hay sinh dữ liệu; số mẫu train/validation: 0/0. Chi tiết
-  ở `training_code/README.md` và `training_code/data_manifest.json`.
-- Phép tính theo rulebook do đội viết tay. Căn cứ: rulebook, README và dữ liệu của bộ train
-  (có `answers.jsonl`, chỉ dùng để chấm offline sau inference). Trong lúc phát triển, đội cũng
-  đã đọc câu hỏi và dữ liệu public test (không có nhãn) để tìm lỗi và mở rộng luật. Không
-  có đáp án nào được ghi cứng; mọi đáp án được tính từ dữ liệu lúc chạy.
+- Inference reads only the split mounted at `/data`.
+- No training, fine-tuning or data generation was performed; train/validation samples: 0/0.
+  See `training_code/README.md` and `training_code/data_manifest.json`.
+- The rulebook operators are hand-written from the rulebook, the shop READMEs and the
+  provided train split. The train answers (`answers.jsonl`) are used only to score
+  predictions offline after inference.
 
 ## Input/output
 
 - `/data` (read-only): `questions.jsonl`, `rulebook.md`, `calendar.csv`, `data/<business_id>/`.
-- `/result/submission.jsonl`: một typed answer mỗi câu, ghi và fsync ngay theo thứ tự input.
-- `/result/logs/<n>_<id>.json`: một record mỗi câu, gồm `id`, `answer`, `elapsed_ms`,
-  `thinking`, `code` (hàm Python đã gọi), `inputs`, `output`, cùng plan và execution chi tiết.
+- `/result/submission.jsonl`: one typed answer per question, written and fsynced in input
+  order.
+- `/result/logs/<n>_<id>.json`: one record per question with `id`, `answer`, `elapsed_ms`,
+  `thinking`, `code` (the Python function called), `inputs`, `output`, plus the detailed plan
+  and execution.
 - `/result/run_manifest.json`, `catalogs/`, `prepared/<business>/facts.sqlite`: identity,
-  tiến độ, thời gian và dữ liệu đã chuẩn hoá.
+  progress, timing and the prepared data.
 
-## Layout trong image
+## Layout in the image
 
 ```
 /code/
-├── predict.sh            # entry point, chạy không cần tham số
+├── predict.sh            # entry point, runs without arguments
 ├── README.md
 ├── requirements.txt
 ├── src/                  # inference code (standard library + vLLM)
 ├── models/qwen3-14b/     # weights, tokenizer, config
-└── training_code/        # README (không training), data_manifest.json, model.sha256
+└── training_code/        # README (no training), data_manifest.json, model.sha256
 ```
 
-## Build, kiểm tra và nộp
+## Build, check and submit
 
-Tải weights một lần vào `models/` (bị gitignore), rồi kiểm tra checksum:
+Download the weights once into `models/` (git-ignored) and verify the checksums:
 
 ```bash
 R=40c069824f4251a91eefaf281ebe4c544efd3e18
@@ -101,7 +109,7 @@ done
 cd - && sha256sum -c training_code/model.sha256
 ```
 
-Build và kiểm tra layout (team name viết thường thay cho `datamate`):
+Build and inspect the layout (replace `datamate` with the lowercase team name):
 
 ```bash
 docker build --platform linux/amd64 -t zaic2026_datamate_datamate:final .
@@ -109,7 +117,8 @@ docker image inspect -f '{{.Os}}/{{.Architecture}} {{.Size}}' zaic2026_datamate_
 docker run --rm --network none --entrypoint "" zaic2026_datamate_datamate:final find /code -maxdepth 2
 ```
 
-Chạy bằng đúng lệnh chấm (2 GPU, không mạng, input read-only, shm 16 GiB; output mới mỗi lần):
+Run with the scoring command (two GPUs, no network, read-only input, 16 GiB shared memory;
+use a fresh output directory each time):
 
 ```bash
 docker run --rm --gpus '"device=0,1"' --network none --shm-size=16g \
@@ -119,11 +128,12 @@ docker run --rm --gpus '"device=0,1"' --network none --shm-size=16g \
   zaic2026_datamate_datamate:final /code/predict.sh
 ```
 
-Trước khi nộp, kiểm tra: chạy hết không lỗi; `submission.jsonl` đủ câu; mỗi câu có log với
-`id`, `answer`, `elapsed_ms`, `thinking`; `load + thời gian trung bình mỗi câu × 500 ≤ 6 giờ`;
-hai lần chạy cho cùng đáp án.
+Before submitting, check that the run finishes without errors, `submission.jsonl` covers
+every question, every question has a log with `id`, `answer`, `elapsed_ms` and `thinking`,
+`model loading + average time per question × 500 ≤ 6 hours`, and two runs give the same
+answers.
 
-Export và nộp:
+Export and submit:
 
 ```bash
 set -o pipefail
@@ -132,5 +142,6 @@ pigz -dc zaic2026_datamate_datamate.tar.gz | wc -c      # uncompressed .tar byte
 md5sum zaic2026_datamate_datamate.tar.gz > zaic2026_datamate_datamate.tar.gz.md5
 ```
 
-Upload `.tar.gz`, gửi link, file `.md5` và kích thước `.tar` không nén cho BTC. Không đổi
-tên archive sau khi tạo MD5; tải lại từ link trên máy khác và chạy `md5sum -c` trước khi gửi.
+Upload the `.tar.gz` and send its link, the `.md5` file and the uncompressed `.tar` size to
+the organizers. Do not rename the archive after creating the MD5; download it from the link
+on another machine and run `md5sum -c` before sending.
