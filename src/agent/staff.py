@@ -58,20 +58,59 @@ def sellers(context: BusinessContext) -> dict[str, str]:
             and sum(text(r, p) in codes for r in rows) >= 0.95 * len(rows)
         ]
         if len(joins) == 1:
-            found.append((rows, joins[0], seller[0], text))
-    if len(found) != 1:
+            found.append((rows, joins[0], seller[0], text, (columns[joins[0]], columns[seller[0]])))
+    # One sales book, possibly split into parts (one file or sheet per year) of one layout.
+    if not found or len({f[4] for f in found}) != 1:
         return {}
-    rows, join, seller, text = found[0]
     result: dict[str, str] = {}
-    for row in rows:
-        order, who = text(row, join), text(row, seller)
-        if not order:
-            continue
-        if not who:
-            raise ContractError("order_seller_missing")
-        if result.setdefault(order, who) != who:
-            raise ContractError("order_seller_conflict")
+    for rows, join, seller, text, _ in found:
+        for row in rows:
+            order, who = text(row, join), text(row, seller)
+            if not order:
+                continue
+            if not who:
+                raise ContractError("order_seller_missing")
+            if result.setdefault(order, who) != who:
+                raise ContractError("order_seller_conflict")
     return result
+
+
+def staff_names(context: BusinessContext, codes: set[str]) -> dict[str, str]:
+    """Full name -> seller code from a list with one name per code; {} unless it covers
+    every recorded code."""
+    for profile in context.catalog["tables"]:
+        if profile.get("structure_status") != "resolved":
+            continue
+        rows = list(context.source_table(profile["source_id"]).iter_rows())
+        header = set(profile.get("header_rows", []))
+        rows = [r for r in rows if r.row not in header]
+        positions = [c["position"] for c in profile.get("columns", [])]
+
+        def values(position, rows=rows):
+            return [
+                str(r.cells[position].raw_value).strip()
+                for r in rows
+                if position in r.cells and r.cells[position].raw_value not in {None, ""}
+            ]
+
+        for code_at in positions:
+            column = values(code_at)
+            if not column or not codes <= set(column) or len(set(column)) != len(column):
+                continue
+            for name_at in positions:
+                if name_at == code_at:
+                    continue
+                pairs = {
+                    str(r.cells[code_at].raw_value).strip(): str(r.cells[name_at].raw_value).strip()
+                    for r in rows
+                    if code_at in r.cells and name_at in r.cells
+                }
+                names = [pairs.get(c, "") for c in codes]
+                if all(len(n.split()) >= 2 and not re.search(r"\d", n) for n in names) and len(
+                    set(map(plain, names))
+                ) == len(names):
+                    return {pairs[c]: c for c in codes}
+    return {}
 
 
 def answer(question, context: BusinessContext, text: str):
@@ -98,6 +137,9 @@ def answer(question, context: BusinessContext, text: str):
     names = {plain(v): v for v in set(staff.values())}
     if len(names) != len(set(staff.values())):
         return None
+    # A staff list naming each recorded seller code lets the question use the name.
+    for name, code in staff_names(context, set(staff.values())).items():
+        names.setdefault(plain(name), code)
     wanted = None
     if not best:
         named = [

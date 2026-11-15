@@ -167,6 +167,7 @@ def business_spec(question: Question) -> dict | None:
     # Unit prices and purchase-minus-sales differences are not sold quantities.
     if re.search(r"\b(?:don gia|gia ban|gia nhap|nhap tru|tru (?:so )?ban|chenh lech)\b", text):
         return None
+    text = re.sub(r"\bcan date (?:nhat|nhut)\b", "gan het han nhat", text)
     nearest_lot = bool(re.search(r"\blo\b.*\bgan het han nhat\b", text))
     if re.search(
         (
@@ -396,8 +397,8 @@ def _check_business_scope(question: Question, spec: dict, entity: dict | None) -
             text = re.sub(r"(?:\bcua\s+)?" + _alias_pattern(plain(name)), " ", text)
     text = re.sub(r"\bcua (?:cua hang|shop)\b|\bcua hang\b", " ", text)
     cardinalities = re.findall(
-        r"\btop\s*(\d+)\b|\b(?<!thang )(?<!quy )(?<!tuan )(?<!ngay )"
-        r"(\d+) (?:mat hang|hang|mon|khach)\b",
+        r"\btop\s*(\d+)\b|\b(?<!thang )(?<!quy )(?<!tuan )(?<!ngay )(?<![\d/])"
+        r"(\d+) (?:mat hang|hang|mon|khach)\b",  # "7/2025 hàng nào" is a date, not top 2025
         text,
     )
     if cardinalities:

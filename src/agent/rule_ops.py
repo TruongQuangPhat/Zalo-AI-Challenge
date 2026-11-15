@@ -35,7 +35,7 @@ QUALIFIERS = (
 NOT_UNITS = {"don", "tien", "dot", "ngay", "lan", "bill", "phieu", "khach", "mon", "nguoi"}
 # Snapshot questions ("trong kho còn mấy…") belong to stock, not sold quantity.
 STOCK = r"\b(?:kho|ton|con (?:lai|bao|may|nhieu)|cuoi ngay|het hom nay)\b"
-DAY_COUNT = r"\b(?:so ngay|may ngay|bao nhieu ngay|bao nhiu ngay|bn ngay|bnhiu ngay|nhieu ngay)\b"
+DAY_COUNT = r"\b(?:so|may|bao nhieu|bao nhiu|bn|bnhiu|nhieu) (?:ngay|bua)\b"  # "bữa" is a day
 # "180.000đ" writes the currency letter against the number.
 AMOUNT = r"(\d[\d.,]*(?:tr\d{1,3})?)\s*(trieu|tr|cu|k|nghin|ngan)?(?:d\b|\b)"
 COMPARATORS = (
@@ -84,6 +84,13 @@ UNCOMPUTED = (
 )
 BRAND_WORDS = r"hãng nào|hãng gì|thương hiệu|nhãn hiệu"
 BRAND_OPS = {"baby_milk_brand", "baby_diaper_share", "phone_brand_share"}
+PER_GROUP = {
+    r"\b(?:theo )?(?:tung|moi) nhan vien\b": ("staff",),
+    r"\b(?:theo )?(?:tung|moi) khach\b": ("debt_customer", "business_receivable", "note_debt_top"),
+    r"\b(?:theo )?(?:tung|moi) kenh\b": ("channel",),
+    r"\b(?:theo )?(?:tung|moi) ca\b": ("shift",),
+    r"\b(?:theo )?(?:tung|moi) chi nhanh\b": ("branch",),
+}
 # "Từng bên / mỗi bên" asks one value per compared side (methods, channels, shifts).
 SIDES = r"\b(?:tung|moi) ben\b"
 SIDE_OPS = ("method_revenue", "channel_revenue", "shift_", "debt_customer")
@@ -109,6 +116,12 @@ def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
         decision["plan"].get("op")
     ).startswith(SIDE_OPS):
         return None
+    # "theo từng nhân viên / khách / kênh / ca": one value per member of that grouping.
+    for cue, ops in PER_GROUP.items():
+        if re.search(cue, question_plain(question.question)) and not str(
+            decision["plan"].get("op")
+        ).startswith(ops):
+            return None
     # A word outside the measured wording may change what is asked: leave it to the model.
     # Industry books (repair, phone, pharmacy) bind their own trade wording.
     if not str(decision["plan"].get("op")).startswith(INDUSTRY_OPS) and unknown_words(
@@ -189,6 +202,8 @@ def _operator_answer(question: Question, context: BusinessContext) -> dict | Non
         _phone,
         _baby,
         _pharmacy,
+        _note_debt,
+        _lots,
         _debt,
         _staff,
         _delivery,
@@ -251,6 +266,20 @@ def _phone(question, context, text):
     from src.agent.phone import answer as phone_answer
 
     result = phone_answer(question, context, text)
+    return None if result is None else (*result, {})
+
+
+def _lots(question, context, text):
+    from src.agent.lots import answer as lots_answer
+
+    result = lots_answer(question, context, text)
+    return None if result is None else (*result, {})
+
+
+def _note_debt(question, context, text):
+    from src.agent.note_debt import answer as note_answer
+
+    result = note_answer(question, context, text)
     return None if result is None else (*result, {})
 
 
@@ -706,40 +735,54 @@ def _money(value: Decimal) -> int:
 UNRECORDED = {
     "customer_gender": (
         r"\b(?:khach|khach hang|nguoi mua) (?:nu|nam(?! \d| nay| truoc| ngoai| roi| qua| sau))\b",
-        r"gioi tinh|gender|\bphai\b|\bnam nu\b",
+        r"gioi tinh|gender|\bphai\b|\bnam nu\b|\bnamnu\b",
+        r"gioi tinh|gender",
     ),
     "customer_address": (
-        r"\b(?:o|nha o|tai) duong [a-z]|\bdia chi\b",
-        r"dia chi|address|duong|phuong|khu vuc",
+        r"\b(?:o|nha o|tai) duong [a-z]|\bdia chi\b|\bkhach duong [a-z]|"
+        r"\bkhach o (?!lai\b|day\b)[a-z]+ [a-z]+\b.*\bkhach o [a-z]+ [a-z]+",
+        r"dia chi|address|duong|phuong|khu vuc|\baddr\b",
+        r"dia chi|address",
     ),
     "staff_judgement": (
         r"\b(?:lanh nghe|tay nghe|tan tam|le phep|chu dao|quy men|duoc khen|hay khen|"
         r"khen|nhiet tinh|than thien|kho tinh nhat|de thuong)\b",
         r"danh gia|khen|rating|review|feedback|tay nghe",
+        r"danh gia|khen|rating|review|feedback|tay nghe",
     ),
     "subjective_quality": (
-        r"\b(?:ngon nhat|chat luong (?:tot|cao) nhat|uy tin nhat|dang tin nhat)\b",
-        r"danh gia|rating|review|chat luong|ngon",
+        r"\b(?:ngon nhat|chat luong (?:tot|cao) nhat|uy tin nhat|dang tin nhat)\b|"
+        r"\bnha cung cap (?:uy tin|dang tin cay)\b|\bkhach (?:hang )?trung thuc nhat\b",
+        r"danh gia|rating|review|chat luong|ngon|uy tin|tin cay|trung thuc",
+        r"danh gia|rating|review|chat luong|ngon|uy tin|tin cay|trung thuc",
     ),
     "outside_knowledge": (
         r"\b(?:nen uong|ba bau|lieu dung|tac dung phu|uong (?:moi|mot) lan|"
         r"(?:dung|uong) duoc khong|chong chi dinh)\b",
+        r"lieu dung|huong dan|chi dinh|cach dung",
         r"lieu dung|huong dan|chi dinh|cach dung",
     ),
 }
 
 
 def _unrecorded_attribute(context: BusinessContext, text: str) -> str | None:
+    """Rulebook §7: the shop never records what the question needs (columns are the
+    evidence; the README counts only with an explicit phrase)."""
     catalog = getattr(context, "catalog", None) or {}
     columns = " ".join(
         plain(c["display_name"]) for t in catalog.get("tables", []) for c in t.get("columns", [])
     )
-    sources = columns + " " + plain(catalog.get("readme", ""))
+    readme = plain(catalog.get("readme", ""))
     rules = context.rules
     rulebook = plain(" ".join(str(c) for c in rules.clauses)) if rules is not None else ""
-    for reason, (cue, evidence) in UNRECORDED.items():
+    for reason, (cue, in_columns, in_readme) in UNRECORDED.items():
         found = re.search(cue, text)
-        if found and not re.search(evidence, sources) and found[0] not in rulebook:
+        if (
+            found
+            and not re.search(in_columns, columns)
+            and not re.search(in_readme, readme)
+            and found[0] not in rulebook
+        ):
             return reason
     return None
 
@@ -1400,7 +1443,10 @@ def _group_revenue(question, context, text):
     if re.search(r"\b(nhat|top|nao|so don|bao nhieu don|may don|khach nao)\b", text):
         return None
     share = bool(re.search(r"%|\b(?:phan tram|ti trong|ty trong|chiem|dong gop|phan cua)\b", text))
-    if not share and not re.search(r"\b(?:doanh thu|dthu|tien|revenue|thu duoc|ban duoc)\b", text):
+    if not share and not re.search(
+        r"\b(?:doanh thu|dthu|tien|revenue|thu duoc|ban duoc)\b" + (r"|\bgia tri\b" if aov else ""),
+        text,
+    ):
         return None
     group = _group_label(context, text)
     if group is None:
@@ -1560,8 +1606,14 @@ def _rulebook_rankings(question, context, text):
 
 def _purchase_total(question, context, text):
     """§5 'Tiền nhập hàng trong kỳ': purchase receipts dated in the period, not cancelled."""
+    from src.agent.purchasing import PURCHASE_MONEY
+
     if not re.search(r"\bnhap\b", text) or not re.search(
-        r"\b(?:tong (?:tien|gia tri)|tien (?:hang )?nhap|het " + ASK + r" tien|gia tri)\b", text
+        r"\b(?:tong (?:tien|gia tri)|tien (?:hang )?nhap|het "
+        + ASK
+        + r" tien|gia tri)\b|"
+        + PURCHASE_MONEY,
+        text,
     ):
         return None
     if re.search(r"\b(binh quan|trung binh|nha cung cap|ncc|tru|ban|mat hang|nhom|lo|han)\b", text):
@@ -1732,7 +1784,9 @@ def _growth(question, context, text):
     ):
         return None
     if not re.search(
-        r"\b(?:tang|giam|hon hay kem|thay doi|cao hay thap|len hay xuong|len xuong)\b", text
+        r"\b(?:tang|giam|hon hay kem|hon kem|chenh|thay doi|cao hay thap|len hay xuong|"
+        r"len xuong)\b",
+        text,
     ):
         return None
     if re.search(
@@ -1755,8 +1809,12 @@ def _growth(question, context, text):
         )
     # "tháng 4 năm ngoái" names the month; only "cùng kỳ năm trước/ngoái" is the comparison.
     named = re.sub(r"\b(?:thang|quy) \d{1,2} nam (?:ngoai|roi|truoc)\b", " ", text)
-    last_year = re.search(r"\b(?:cung ky|cung thang) nam (?:truoc|ngoai)\b|\bnam ngoai\b", named)
-    previous = re.search(r"\b(?:thang|th)(?: lien)? (?:truoc|trc|roi)\b|\bcung ky thang\b", text)
+    last_year = re.search(
+        r"\b(?:cung ky|cung thang) nam (?:truoc|ngoai|roi|trc)\b|\bnam ngoai\b", named
+    )
+    previous = re.search(
+        r"\b(?:thang|th)(?: lien| ngay)? (?:truoc|trc|roi)\b|\bcung ky thang\b", text
+    )
     # "tháng này ... cùng kỳ tháng trước": the previous month is the comparison, not a window.
     kinds = sorted(e["kind"] for e in expressions)
     if previous and kinds == ["current_month", "previous_month"]:

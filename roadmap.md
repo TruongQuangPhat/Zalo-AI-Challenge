@@ -13,6 +13,59 @@
 
 ---
 
+## Coverage round 5c: sau điểm public 0,668 — 15/11/2026
+
+Bản r5 (`d25cbe8`) được **0,668** với 734 câu trả lời. So với r4c (0,567, 653 câu), chỉ cách
+chấm +1/−1 mới khớp mức tăng: khoảng **701 đúng / 33 sai**, và 88 câu thêm mới gần như đều
+đúng. Molab trả đúng 721 câu theo luật như bản chạy CPU, cộng 13 câu do model. Hai câu
+model nhiều khả năng sai: "lời thật sau khi trừ chi phí" (ra doanh thu) và một câu tăng giá
+ra 0. Planner nay bỏ trống các ý này (`whole_shop_profit` mở rộng, `price_effect`).
+
+Đã làm, mỗi mục đo trên train và/hoặc tính lại bằng đường độc lập (xlsx/csv/sqlite đọc trực
+tiếp):
+
+- **Nhân viên:**
+  - sổ bán chia nhiều file/năm cùng bố cục được gộp (dev_003, dev_008);
+  - tên nhân viên nối qua danh sách mã–tên (dev_006; khớp 92.899.900 sau khi bỏ dòng trùng
+    theo §8).
+- **Nhập hàng:**
+  - cue "nhập hàng tổng/tốn/chi/hết bao nhiêu tiền";
+  - ngày serial trong CSV chỉ đọc theo hệ 1900 khi cùng phiếu có ngày chữ khớp (dev_007).
+
+  4 shop khớp tính độc lập.
+- **Tăng trưởng:** "chênh", "hơn kém", "cùng tháng/kỳ năm rồi", "tháng ngay trước đó", "từ đầu
+  tháng / mùng 1 tới hết hôm nay".
+- "Mấy **bữa** …", "10 củ", "riêng hôm nay", "doanh thu đạt bao nhiêu".
+- **Nhóm khách trên dòng đơn** khi shop không có danh sách khách (dev_007/008; khách lẻ không
+  thuộc nhóm nào). AOV nhóm khách nhận "giá trị trung bình 1 đơn".
+- **Nợ ghi trong Note** (`src/agent/note_debt.py`, dev_008): chỉ khi README nói ghi chú là tình
+  trạng tại ngày cuối dữ liệu và câu hỏi đúng ngày đó. Gồm tổng nợ, số khách, top N, tuổi nợ;
+  tổng các nhóm tuổi = tổng nợ.
+- **Lô** (`src/agent/lots.py`): số lô và danh sách hàng còn tồn hết hạn trong khoảng (train
+  biz_123 đúng). Tiền vốn lô chưa làm.
+- **Xếp hạng lãi gộp:**
+  - sửa lỗi "7/**2025 hàng** nào" bị đọc thành top 2025;
+  - "cận date nhất" = gần hết hạn nhất.
+
+  dev_006 khớp tính độc lập.
+- **Nhà cung cấp chính** (nhiều phiếu nhập nhất, hoà theo mã).
+- **Không trả lời được:** bằng chứng tách cột/README ("phải hàng" không còn là cột "phái",
+  "Đường Biên" không còn là địa chỉ). Thêm NCC "uy tín/đáng tin cậy", "khách trung thực nhất".
+- **Chốt chặn:**
+  - "theo từng nhân viên/khách/kênh/ca" chỉ cho operator tính theo nhóm đó (bắt câu trap
+    còn lọt);
+  - "trong những khách" không còn là cue danh sách;
+  - thêm lỗi gõ và từ đệm.
+- **`books.py`:** chỉ đọc bảng có đủ cột; với sổ lớn chỉ giữ cột cần. dev_008 từ hơn 40 phút /
+  2,3 GB còn 45 giây / 157 MB cho các câu nợ.
+
+Kết quả:
+
+- train gốc **2.802 / 0 sai**, chat 1.999 / 0, phrasing 1.596 / 0, trap 1/600 → 0 sau chốt
+  chặn theo nhóm;
+- `verify_runtime` 719 test;
+- public theo luật **881** (r5b 817).
+
 ## Coverage round 5b: luật chỉ có ở public (điện thoại, mẹ và bé, sửa xe), Tết — 15/11/2026
 
 Làm trong lúc molab chạy bản `d25cbe8`. Các luật này không có nhãn train. Mỗi phép tính

@@ -225,6 +225,7 @@ _PARSED_TIME = (
     r"\btu (?:ngay )?" + DATES + r" (?:den|toi)(?: het)? (?:ngay )?" + DATES,
     r"\b(?:thang|quy) \d{1,2}(?:/| nam )\d{4}\b",
     r"\b(?:ngay|hom|bua) " + DATES + r"\b",
+    r"\b(?:ke tu|tinh tu|tu|truoc|sau) " + DATES + r"\b",  # "30 ngày kể từ 18/10/2025"
     r"\btu (?:ngay )?1/1\b",  # year-to-date wording, read with "nam nay"/"dau nam"
     r"\b\d+ ngay gan nhat\b",
     r"\b(?:truoc tet|tet)(?: nam)? \d{4}\b",
@@ -264,6 +265,13 @@ def _time_text(question: Question) -> str:
         text,
     )
     text = re.sub(r"\b((?:den|toi) het) (?=\d{1,2}/\d{1,2}/\d{4})", r"\1 ngay ", text)
+    # "từ đầu tháng / từ mùng 1 (tháng này) tới hết hôm nay" is this month to date.
+    text = re.sub(
+        r"\btu (?:dau thang|mung 1|mong 1|ngay 1)(?: thang nay)? (?:den|toi)(?: het)? "
+        r"(?:hom nay|hnay|bua nay|nay)\b",
+        "thang nay",
+        text,
+    )
     if question.as_of_date:
         last = int(question.as_of_date[:4]) - 1
         text = re.sub(r"\b(thang|quy) (\d{1,2}) nam (?:ngoai|roi|truoc)\b", rf"\1 \2/{last}", text)

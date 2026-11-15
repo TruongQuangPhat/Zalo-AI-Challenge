@@ -6,6 +6,7 @@ fact build does. Tables are read once per shop.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from decimal import Decimal, InvalidOperation
 
@@ -35,50 +36,104 @@ def money(raw) -> Decimal:
 _CACHE: dict[tuple, list] = {}
 
 
-def rows(context: BusinessContext):
-    """(headers, rows, epoch) of every source table, read once per shop."""
-    key = (context.catalog["business_id"], id(context))
+def _profile_headers(profile) -> set[str] | None:
+    """Plain column names the catalog resolved, or None when the header is unresolved."""
+    if profile.get("structure_status") == "resolved" and profile.get("header_rows"):
+        return {plain(str(c["display_name"])) for c in profile["columns"]}
+    return None
+
+
+class _Kind:
+    """The part of a source cell the book readers use: its native type."""
+
+    __slots__ = ("native_type",)
+
+    def __init__(self, native_type):
+        self.native_type = native_type
+
+
+def _read(context: BusinessContext, profile, keep: frozenset[str] | None = None):
+    """(headers, rows, epoch) of one table, cached per shop, table and kept columns."""
+    key = (context.catalog["business_id"], id(context), profile["source_id"], keep)
     if key not in _CACHE:
-        if len(_CACHE) > 4:
+        if len(_CACHE) > 64:
             _CACHE.clear()
-        _CACHE[key] = list(read_rows(context))
+        _CACHE[key] = _read_table(context, profile, keep)
     return _CACHE[key]
 
 
+def rows(context: BusinessContext):
+    """(headers, rows, epoch) of every readable source table."""
+    found = []
+    for profile in context.catalog["tables"]:
+        if profile.get("read_status") in {"read", "empty"}:
+            result = _read(context, profile)
+            if result is not None:
+                found.append(result)
+    return found
+
+
 def read_rows(context: BusinessContext):
-    """(headers, rows, epoch); rows map plain header -> (raw, cell)."""
+    return rows(context)
+
+
+def _read_table(context: BusinessContext, profile, keep: frozenset[str] | None = None):
+    """(headers, rows, epoch); rows map plain header -> (raw value, cell kind). With
+    ``keep``, a row holds only those columns (an exact repeat is still judged on all)."""
+    source = context.source_table(profile["source_id"])
+    epoch = source.metadata.get("date_system")
+    header, found_rows, seen = None, [], set()
+    last_header = None
+    if _profile_headers(profile) is not None:
+        # The catalog already resolved the (possibly two-row) header.
+        header = {c["position"]: plain(str(c["display_name"])) for c in profile["columns"]}
+        last_header = max(profile["header_rows"])
+    by_order = None
+    for row in source.iter_rows():
+        cells = {p: c for p, c in row.cells.items() if c.raw_value not in {None, ""}}
+        if last_header is not None and row.row is not None and row.row <= last_header:
+            continue
+        if header is None:
+            names = {p: plain(str(c.raw_value)) for p, c in cells.items()}
+            if len(names) >= 3 and len(set(names.values())) == len(names):
+                header = names
+            continue
+        if by_order is None:
+            by_order = bool(set(header.values()) & ORDER_HEADERS)
+        # An exact repeat of an order row is one row (as the fact build keeps it); a book
+        # not kept by order counts every row (rulebook "Bảng không ghi theo đơn").
+        if by_order:
+            digest = hashlib.blake2b(
+                repr(
+                    sorted((header[p], str(c.raw_value)) for p, c in cells.items() if p in header)
+                ).encode(),
+                digest_size=16,
+            ).digest()
+            if digest in seen:
+                continue
+            seen.add(digest)
+        values = {
+            header[p]: (c.raw_value, _Kind(c.native_type))
+            for p, c in cells.items()
+            if p in header and (keep is None or header[p] in keep)
+        }
+        if values:
+            found_rows.append(values)
+    return (set(header.values()), found_rows, epoch) if header else None
+
+
+def table(context, required: set[str], keep: set[str] | None = None):
+    """Rows of the tables holding every required column; other tables are never read.
+    ``keep`` limits the stored columns (with the required ones) for large books."""
+    kept = frozenset(keep | required) if keep is not None else None
+    found = []
     for profile in context.catalog["tables"]:
         if profile.get("read_status") not in {"read", "empty"}:
             continue
-        source = context.source_table(profile["source_id"])
-        epoch = source.metadata.get("date_system")
-        header, rows, seen = None, [], set()
-        last_header = None
-        if profile.get("structure_status") == "resolved" and profile.get("header_rows"):
-            # The catalog already resolved the (possibly two-row) header.
-            header = {c["position"]: plain(str(c["display_name"])) for c in profile["columns"]}
-            last_header = max(profile["header_rows"])
-        for row in source.iter_rows():
-            cells = {p: c for p, c in row.cells.items() if c.raw_value not in {None, ""}}
-            if last_header is not None and row.row is not None and row.row <= last_header:
-                continue
-            if header is None:
-                names = {p: plain(str(c.raw_value)) for p, c in cells.items()}
-                if len(names) >= 3 and len(set(names.values())) == len(names):
-                    header = names
-                continue
-            values = {header[p]: (c.raw_value, c) for p, c in cells.items() if p in header}
-            key = tuple(sorted((k, str(v[0])) for k, v in values.items()))
-            # An exact repeat of an order row is one row (as the fact build keeps it); a book
-            # not kept by order counts every row (rulebook "Bảng không ghi theo đơn").
-            by_order = bool(set(header.values()) & ORDER_HEADERS)
-            if values and not (by_order and key in seen):
-                seen.add(key)
-                rows.append(values)
-        if header:
-            yield set(header.values()), rows, epoch
-
-
-def table(context, required: set[str]):
-    found = [(r, epoch) for headers, r, epoch in rows(context) if required <= headers]
+        known = _profile_headers(profile)
+        if known is not None and not required <= known:
+            continue
+        result = _read(context, profile, kept)
+        if result is not None and required <= result[0]:
+            found.append((result[1], result[2]))
     return found

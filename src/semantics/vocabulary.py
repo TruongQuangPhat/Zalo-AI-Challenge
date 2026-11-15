@@ -32,14 +32,15 @@ FILLERS = (
     "sốp shop wan quán wán tiệm kả cả kó có cũa của kủa mí mấy chừ bây giờ đạ đã "
     "mùng mồng giua giữa giựa xo so sánh dảm giảm báng bná bnhui bnhiu tóp hagn hàng "
     "wa qa qua thì là thôi rồi đấy toàn bộ tổng mất đem dề về mang lại mội mỗi "
-    "set ngưỡng nguog mùa hè đó nè nhóe rơi vào"
+    "set ngưỡng nguog mùa hè đó nè nhóe rơi vào tách muộn sổ cũng đều nhờ tốn"
 ).split()
 # Words an operator binds by itself (rulebook terms, trade abbreviations): understood.
 OPERATOR_WORDS = (
     "sộp trung thành đổi ý ưa chuộng chăm chỉ đắt khách cao điểm ncc nhà cung cấp hsd "
     "hạn dùng đứt chốt kênh thương mại điện tử sàn dưới vượt tối thiểu nhỏ hãng chiếc "
     "máy điện thoại đt cũ mới phụ kiện góp trả góp kỳ hạn quá chậm bảo hành lượt dòng thu "
-    "hợp đồng imei đóng xếp nhận bỉm tã bịch size voucher ship phí điểm thành viên đăng ký nb"
+    "hợp đồng imei đóng xếp nhận bỉm tã bịch size voucher ship phí điểm thành viên đăng ký nb "
+    "chính"
 ).split()
 
 _WORD = re.compile(r"\w+")

@@ -102,8 +102,12 @@ UNSUPPORTED_INTENTS = {
     ),
     # Shop-wide profit; product rankings by gross profit have their own operator.
     "whole_shop_profit": (
-        r"^(?!.*\b(nhat|top|nao)\b).*\b(loi gop|lai gop|loi nhuan|lai rong|loi rong)\b"
+        r"^(?!.*\b(nhat|top|nao)\b).*\b(loi gop|lai gop|loi nhuan|lai rong|loi rong|loi that|"
+        r"lai that|tru (?:het )?chi phi)\b"
     ),
+    # Price-change effects need the price list and the rulebook window; the plan schema
+    # cannot express them.
+    "price_effect": r"\b(?:len gia|tang gia|doi gia)\b",
     "purchase_minus_sales": r"\bnhap tru (so )?ban\b|\bchenh lech nhap\b",
     "unsupported_channel": r"\b(zalo|shopee|lazada|tiktok|grab|online)\b",
 }
@@ -134,7 +138,8 @@ _LIST_CUES = (
     r"\b(?<!thang )(?<!quy )(?<!tuan )(?<!ngay )"
     r"(?:top )?(?:[2-9]|10|hai|ba|bon|nam) (?:mat hang|mon|san pham|khach|"
     r"nhan vien)\b",
-    r"\bnhung (?:mat hang|mon|san pham|khach)\b",
+    # "trong những khách có mua" is the population of a share, not a list request.
+    r"(?<!trong )\bnhung (?:mat hang|mon|san pham|khach)\b",
 )
 _DATE_CUE = r"\b(?:ngay|thang) nao\b"
 _WHO_CUE = (

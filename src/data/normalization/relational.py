@@ -785,6 +785,15 @@ def build_relational(
                     group = customers[customer_id][1]
             elif not customer_id and any(x.role == "customer" for x in mapping.sources):
                 group = ""
+            if (
+                group is None
+                and "customer_group" in s.fields
+                and not any(x.role == "customer" for x in mapping.sources)
+            ):
+                # No customer list: the order row carries the group. Rulebook §1: an order
+                # without a customer (walk-in) belongs to no group, "lẻ" included.
+                written = str(value(row, s, "customer_group", "") or "").strip()
+                group = written if customer_id else ""
             if group is not None:
                 conn.execute("INSERT OR IGNORE INTO order_groups VALUES (?,?)", (key, str(group)))
     for oid, refs in return_events.items():

@@ -232,3 +232,68 @@ def test_tet_wording(text, windows):
 
     found = _literal_windows(question(question=text, as_of_date="2026-08-05"))
     assert [(w["kind"], w["year"]) for w in found] == windows
+
+
+@pytest.mark.parametrize(
+    ("token", "value"),
+    [("130k", 130000), ("449.500d", 449500), ("73 nghin", 73000), ("1tr2", 1200000)],
+)
+def test_note_debt_amounts(token, value):
+    from src.agent.note_debt import _amount
+
+    assert _amount(token) == value
+
+
+def test_note_debt_owed_wording():
+    import re
+
+    from src.agent.note_debt import OWED, PAID
+
+    assert re.search(PAID, "no 79k, khach ck du roi")
+    assert re.findall(OWED, "tra 259k, no 449.500d") == ["449.500d"]
+    assert re.findall(OWED, "ck 913 nghin, thieu lai 456.500d") == ["456.500d"]
+
+
+def test_lot_window_follows_days_ahead_or_written_days():
+    from src.agent.lots import _span
+
+    q = question(question="Hàng hết hạn trong 90 ngày tới", as_of_date="2026-08-08")
+    assert _span(q, question_plain(q.question)) == ("2026-08-08", "2026-11-06")
+    q = question(
+        question="Có mấy lô sẽ hết hạn từ nay đến hết ngày 22/09/2026?", as_of_date="2026-05-25"
+    )
+    assert _span(q, question_plain(q.question)) == ("2026-05-25", "2026-09-22")
+
+
+@pytest.mark.parametrize(
+    ("text", "kind"),
+    [
+        ("Tính tới hôm nay, có mấy đơn bán chịu có ngày phải trả rơi vào tháng 11/2025?", "due"),
+        ("Tháng 7/2025 hàng nào lời nhất?", None),
+    ],
+)
+def test_a_year_after_a_slash_is_not_a_top_n(text, kind):
+    import re
+
+    assert not re.search(
+        r"\b(?<!thang )(?<!quy )(?<!tuan )(?<!ngay )(?<![\d/])(\d+) (?:mat hang|hang|mon|khach)\b",
+        question_plain(text),
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "plain_text"),
+    [
+        ("Riêng hôm nay cửa hàng có doanh thu bao nhiêu?", "hom nay cua hang co doanh thu"),
+        ("4/26 doanh thu đạt bao nhiêu ạ?", "4/26 doanh thu bao nhieu"),
+    ],
+)
+def test_today_only_and_revenue_reached_wording(text, plain_text):
+    assert plain_text in question_plain(text)
+
+
+def test_shared_month_list_and_last_year_growth_wording():
+    from src.agent.plan import _time_text
+
+    q = question(question="Doanh thu từ đầu tháng đến hết hôm nay", as_of_date="2026-03-20")
+    assert "thang nay" in _time_text(q)

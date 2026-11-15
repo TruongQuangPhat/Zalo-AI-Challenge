@@ -71,11 +71,39 @@ def _tables(context: BusinessContext) -> list[dict]:
                 raw = None if cell is None else cell.raw_value
                 values[role] = None if raw is None or str(raw).strip() == "" else raw
                 if role == "date" and values[role] is not None:
-                    values[role] = _day(values[role], cell, epoch)
+                    raw_day = values[role]
+                    if epoch is None and re.fullmatch(r"\d{5}", str(raw_day).strip()):
+                        values[role] = ("serial", int(str(raw_day).strip()))
+                    else:
+                        values[role] = _day(raw_day, cell, epoch)
             if values.get("receipt") is not None:
                 rows.append(values)
+        _resolve_serials(rows)
         tables.append({"roles": set(roles), "rows": rows})
     return tables
+
+
+def _resolve_serials(rows: list[dict]) -> None:
+    """CSV day serials (no workbook epoch): read in the 1900 system only when every receipt
+    that also writes its day as text gives the same day both ways."""
+    serials = [r for r in rows if isinstance(r.get("date"), tuple)]
+    if not serials:
+        return
+    texts = {}
+    for r in rows:
+        if isinstance(r.get("date"), str):
+            texts.setdefault(str(r["receipt"]).strip(), set()).add(r["date"])
+    checked = 0
+    for r in serials:
+        day = parse_date(str(r["date"][1]), date_system="1900").isoformat()
+        known = texts.get(str(r["receipt"]).strip())
+        if known is not None:
+            if known != {day}:
+                raise ContractError("purchase_serial_day_conflict")
+            checked += 1
+        r["date"] = day
+    if not checked:
+        raise ContractError("purchase_serial_day_unproved")
 
 
 def _day(raw, cell, epoch: str | None) -> str:
@@ -138,23 +166,57 @@ def _number(raw) -> Decimal:
         raise ContractError("purchase_number_invalid") from exc
 
 
+# "Nhập hàng tổng bao nhiêu tiền", "tốn / chi / hết bao nhiêu tiền": money spent buying in.
+PURCHASE_MONEY = r"\bnhap(?: hang)?\b.*\b(?:tong|ton|chi|het)?\s*(?:bao nhieu|bn|nhieu) tien\b"
+
+
+def _main_supplier(question, context, text):
+    """Public rule "Nhà cung cấp chính": most purchase receipts in the period, cancelled
+    receipts left out; equal counts go to the smaller code (rulebook "Bằng nhau")."""
+    from src.agent.plan import _literal_windows
+    from src.agent.rule_ops import _decision, _window
+
+    if re.search(r"\b(?:tien|nhieu tien|gia tri)\b", text) or len(_literal_windows(question)) != 1:
+        return None
+    check = _window(question, context)
+    if not isinstance(check, dict):
+        return None
+    start, end = check["effective_window"]["start"], check["effective_window"]["end"]
+    receipts = _receipts(_tables(context))
+    counts: dict[str, int] = {}
+    for record in receipts.values():
+        if start <= record["date"] <= end and not record["cancelled"]:
+            if record.get("supplier") is None:
+                raise ContractError("purchase_supplier_missing")
+            who = str(record["supplier"]).strip()
+            counts[who] = counts.get(who, 0) + 1
+    if not counts:
+        return None
+    best = max(counts.values())
+    leader = sorted(k for k, v in counts.items() if v == best)[0]
+    names = _supplier_names(context)
+    return _decision("purchase_main_supplier", check, names.get(leader, leader), "string")
+
+
 def answer(question, context: BusinessContext, text: str):
     """(op, value, type, details) for a weighted purchase price or top supplier."""
     from src.agent.plan import _literal_windows
     from src.agent.rule_ops import _decision, _money, _window
 
-    if not re.search(r"\bnhap\b", text) or not context.prepared:
+    if not re.search(r"\bnhap\b|\b(?:nha cung cap|ncc) chinh\b", text) or not context.prepared:
         return None
     rules = context.rules.rules if context.rules is not None else {}
     average = re.search(r"\bbinh quan\b", text) and re.search(r"\bgia\b|\btien\b", text)
     supplier = re.search(r"\b(?:nha cung cap|ncc) nao\b", text) and re.search(
         r"\b(?:nhieu (?:tien )?(?:hang )?nhat|cao nhat|lon nhat)\b", text
     )
+    if re.search(r"\b(?:nha cung cap|ncc) chinh\b", text) and "supplier_count" in rules:
+        return _main_supplier(question, context, text)
     if re.search(r"\bnhap\b.*\btru\b.*\bban\b|\bchenh lech nhap\b", text):
         return _purchase_minus_sales(question, context, text, rules)
     total_cue = re.search(
         r"\b(?:tong (?:tien|gia tri)|tien (?:hang )?nhap|het (?:bao nhieu|bn|bnhiu) tien|"
-        r"bo ra (?:bao nhieu|bn|bnhiu) tien)\b",
+        r"bo ra (?:bao nhieu|bn|bnhiu) tien)\b|" + PURCHASE_MONEY,
         text,
     ) and not re.search(
         r"\b(?:binh quan|trung binh|nha cung cap|ncc|tru|ban|mat hang|nhom|lo|han)\b", text
