@@ -31,14 +31,14 @@ def main(argv: list[str] | None = None) -> int:
     predict.add_argument(
         "--model",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "models/qwen2.5-1.5b-instruct",
+        default=Path(__file__).resolve().parents[1] / "models/qwen3-14b",
         help="packaged local model directory; missing weights fail before writing output",
     )
     predict.add_argument(
         "--tensor-parallel-size",
         type=int,
-        default=1,
-        help="GPUs to split the model across; a 14B BF16 model needs 2 x 32 GB",
+        default=2,
+        help="GPUs to split the model across; Qwen3-14B BF16 needs the 2 x 32 GB test machine",
     )
     predict.add_argument("--question-timeout", type=float, default=120)
     predict.add_argument("--model-load-timeout", type=float, default=900)
