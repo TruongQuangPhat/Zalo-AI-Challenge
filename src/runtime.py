@@ -257,8 +257,8 @@ def run_inference(
                     "catalog": f"catalogs/{question.business_id}.json",
                     "execution": execution,
                 }
-                # DataMate Docker guide §3.3: Qwen2.5 emits structured plans,
-                # not a separate reasoning trace. Preserve its raw calls in plan.
+                # DataMate Docker guide §3.3: Qwen3 runs with thinking disabled and emits
+                # structured plans, not a reasoning trace. Preserve its raw calls in plan.
                 record.update(
                     elapsed_ms=max(0, int(record["elapsed_seconds"] * 1000)),
                     thinking=None,
