@@ -87,3 +87,35 @@ def test_channel_wording_names_one_channel(question, channel):
 )
 def test_net_profit_wording(question, net):
     assert bool(re.search(NET_PROFIT, question_plain(question))) is net
+
+
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        ("nhiêuf", "nhiều"),  # Telex tone key left in the word
+        ("dduowcj", "được"),
+        ("tíh", "tính"),  # dropped "n" of a final "nh"
+        ("từg", "từng"),
+        ("kác", "các"),  # "k" cannot start "ac"
+        ("nheiu", "nhieu"),  # swapped letters
+        ("bánnhiều", "bán nhiều"),  # missing space
+        ("đối", None),  # a real word the vocabulary lacks is never rewritten
+        ("lương", None),
+    ],
+)
+def test_typo_repair_needs_one_general_slip(token, expected):
+    from src.semantics.typos import repair
+    from src.semantics.vocabulary import correction_words
+
+    assert repair(token, correction_words()) == expected
+
+
+def test_typo_repair_keeps_names_and_conditions():
+    from src.semantics.typos import repaired
+    from src.semantics.vocabulary import is_known
+
+    text = "Tháng 1/2026 thợ Lương Chi Đức làm được mấy lượt xe?"
+    assert repaired(text, is_known) == text
+    text = "Doanh thu hôm nay so với hôm qua chênh lệch tuyệt đối bao nhiêu?"
+    assert repaired(text, is_known) == text
+    assert repaired("tíh tới hôm nay kác khách", is_known) == "tính tới hôm nay các khách"

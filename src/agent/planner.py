@@ -312,10 +312,10 @@ class LocalPlanner:
         }
 
     def decide(self, question: Question, *, context: BusinessContext) -> dict:
-        from src.agent.entities import regional_aligned
+        from src.agent.entities import regional_aligned, typo_repaired
         from src.agent.rule_ops import answer_by_rule
 
-        question = regional_aligned(context, question)
+        question = typo_repaired(context, regional_aligned(context, question))
         # Rulebook operators the QueryPlan cannot express answer first, without the model.
         ruled = answer_by_rule(question, context) if self.rule_ops else None
         if ruled is None and self.rule_ops:

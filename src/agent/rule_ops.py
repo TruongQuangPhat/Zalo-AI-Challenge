@@ -99,11 +99,11 @@ PEOPLE_COUNT = r"\b(?:bao nhieu|may) (?:nguoi|khach|vi khach)\b"
 
 def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
     """Operator answer that also passes the wording, shape and size guards, else None."""
-    from src.agent.entities import entity_words, regional_aligned
+    from src.agent.entities import entity_words, regional_aligned, typo_repaired
     from src.agent.planner import shape_mismatch
     from src.semantics.vocabulary import unknown_words
 
-    question = regional_aligned(context, question)
+    question = typo_repaired(context, regional_aligned(context, question))
     decision = _operator_answer(question, context)
     if decision is None:
         return None

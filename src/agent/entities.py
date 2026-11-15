@@ -136,6 +136,18 @@ def regional_aligned(context: BusinessContext, question: Question) -> Question:
     return Question(question.id, question.business_id, text, question.as_of_date)
 
 
+def typo_repaired(context: BusinessContext, question: Question) -> Question:
+    """The question with mistyped function words repaired (``src.semantics.typos``); words
+    of the shop's own names never change."""
+    from src.semantics.typos import repaired
+    from src.semantics.vocabulary import is_known
+
+    text = repaired(question.question, is_known, entity_words(context))
+    if text == question.question:
+        return question
+    return Question(question.id, question.business_id, text, question.as_of_date)
+
+
 def mentioned_entity(context: BusinessContext, question: Question) -> str | None:
     """First source entity or group name the question names, accent-insensitively."""
     if not context.prepared or context.prepared.path is None or context.prepared.path.is_symlink():
