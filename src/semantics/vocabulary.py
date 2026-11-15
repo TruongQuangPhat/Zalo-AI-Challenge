@@ -40,7 +40,7 @@ OPERATOR_WORDS = (
     "hạn dùng đứt chốt kênh thương mại điện tử sàn dưới vượt tối thiểu nhỏ hãng chiếc "
     "máy điện thoại đt cũ mới phụ kiện góp trả góp kỳ hạn quá chậm bảo hành lượt dòng thu "
     "hợp đồng imei đóng xếp nhận bỉm tã bịch size voucher ship phí điểm thành viên đăng ký nb "
-    "chính"
+    "chính nv đọng thường"
 ).split()
 
 _WORD = re.compile(r"\w+")

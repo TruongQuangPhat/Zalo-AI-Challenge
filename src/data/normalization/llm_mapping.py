@@ -19,6 +19,7 @@ from src.data.cache import fingerprint
 from src.data.normalization.values import STATUSES
 from src.data.profiling import normalized
 from src.jsonio import ContractError, dumps, loads
+from src.semantics.rulebook import plain
 
 Propose = Callable[[str, dict], dict]
 """(prompt, JSON schema) -> parsed JSON object; may set a ``model_id`` attribute."""
@@ -404,6 +405,19 @@ def normalize_proposal(catalog: dict, proposal: dict, note_status: bool = False)
             and all(_order_level(readme, c) for c, m in columns.items() if m == "discount")
         ):
             columns[gross[0]] = "line_net_amount"
+        # A header that says "(ĐV cơ bản)" counts base units: it is the base quantity, and an
+        # unlabelled plain quantity header ("S.L", "SL") is then the line's own quantity.
+        base_named = [
+            c for c, m in columns.items() if m == "quantity" and re.search(r"\bco ban\b", plain(c))
+        ]
+        plain_qty = [
+            c
+            for c, m in columns.items()
+            if m == "other" and re.fullmatch(r"s\.?\s?l\.?|so luong", plain(c).strip())
+        ]
+        if len(base_named) == 1 and len(plain_qty) == 1 and "base_quantity" not in labels:
+            columns[base_named[0]] = "base_quantity"
+            columns[plain_qty[0]] = "quantity"
         used = [v for v in columns.values() if v not in DECOYS]
         for label, meaning in columns.items():
             if meaning not in _CORE and used.count(meaning) > 1:

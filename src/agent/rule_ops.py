@@ -671,6 +671,8 @@ def _window(question: Question, context: BusinessContext, expression: dict | Non
     """Revenue contract and effective window, or an unanswerable/None decision."""
     if expression is None:
         expressions = _literal_windows(question)
+        # The same period written twice ("7/25 … tổng doanh thu 7/25") is one period.
+        expressions = [e for i, e in enumerate(expressions) if e not in expressions[:i]]
         if len(expressions) != 1:
             return None
         expression = expressions[0]
@@ -966,14 +968,16 @@ def _best_period(question, context, text):
     by_month = re.search(r"\bthang nao\b", text)
     if not (by_day or by_month) or not re.search(
         r"\b(?:cao nhat|nhieu nhat|lon nhat|nhieu tien nhat|dat nhat|dat khach nhat|"
-        r"dong khach nhat)\b",
+        r"dong khach nhat|nhieu doanh thu nhat)\b",
         text,
     ):
         return None
     count_orders = bool(re.search(r"\b(?:nhieu don|dong khach|dat khach|don nhat)\b", text))
     if not count_orders and not re.search(r"\b(?:doanh thu|dthu|tien)\b", text):
         return None
-    rest = re.sub(r"\b(?:nhieu|cao|lon|nhieu tien|dat|dat khach|dong khach) nhat\b", " ", text)
+    rest = re.sub(
+        r"\b(?:nhieu|cao|lon|nhieu tien|dat|dat khach|dong khach|nhieu doanh thu) nhat\b", " ", text
+    )
     if re.search(
         r"\b(nhom|khach|ca sang|ca chieu|nhan vien|kenh|tien mat|chuyen khoan|huy|zalo|"
         r"mat hang|mon)\b",
@@ -1056,6 +1060,14 @@ def _month_list(question, context, text):
     time_text = _time_text(question)
     named = re.findall(r"\bthang (\d{1,2})(?:/| nam )(\d{4})\b", time_text)
     months = [(int(y), int(m)) for m, y in named]
+    bare = _literal_windows(question)
+    if not named and len(bare) >= 2 and all(e["kind"] == "month" and "year" not in e for e in bare):
+        # Rulebook "Tháng M không ghi năm": this year unless after today, else last year.
+        today = date.fromisoformat(question.as_of_date)
+        months = [
+            (today.year - (date(today.year, e["month"], 1) > today), e["month"]) for e in bare
+        ]
+        named = [(str(m), str(y)) for y, m in months]
     span = re.search(
         r"\btu thang (\d{1,2})/(\d{4}) (?:toi|den)(?: het)? thang (\d{1,2})/(\d{4})\b",
         time_text,
@@ -1159,6 +1171,11 @@ def _method_revenue(question, context, text):
     """
     # "don tra bang X" means paid by X, not the returned-order qualifier "don tra".
     text = re.sub(r"\b(?:cac )?don (?:tra|thanh toan) bang\b", " ", text)
+    text = re.sub(
+        r"\b(?:cac )?don (?:tra|thanh toan) (?=tien mat|chuyen khoan|vi dien tu|cod|thu ho)",
+        " ",
+        text,
+    )
     positions = sorted(
         (m.start(), key)
         for key, (pattern, _) in METHODS.items()
@@ -1274,7 +1291,9 @@ def _cancellation(question, context, text):
         return None
     rate = bool(re.search(r"\b(?:ti le|ty le|phan tram)\b|%", text))
     if not rate and not re.search(
-        r"\b" + ASK + r" don(?: hang)?\b|\bhuy (?:" + ASK + r") don\b", text
+        r"\b" + ASK + r" don(?: hang)?\b|\bhuy (?:" + ASK + r") don\b|"
+        r"\bdem (?:cac )?don(?: hang)? (?:bi )?huy\b.*\b(?:bao nhieu|may|bn)\b",
+        text,
     ):
         return None
     check = _window(question, context)
@@ -1325,22 +1344,68 @@ def _product_ranking(question, context, text):
     answer_type = "list" if limit else "string"
     if isinstance(check, tuple):
         return _decision("product_ranking", check, None, answer_type)
-    totals, keys, names = defaultdict(Decimal), {}, {}
-    for row in _lines(context, check):
-        _, _, amount, role, product, name, code, base, sold = row[:9]
-        if role != "sale_item":
-            continue
-        if product is None or name is None:
-            raise ContractError("sale_line_product_unknown")
-        keys[product], names[product] = (code or name), name
-        totals[product] += (
-            _base_quantity(base, sold, name, row[12]) if by_quantity else Decimal(str(amount or 0))
-        )
-    ranked = _ranked(totals, keys, limit or 1)
-    if not ranked:
+    combined = context.rules is not None and "combined_topping" in context.rules.rules
+    # Two readings of "2 Trân châu" on a line of 3 drinks (2 portions, or 2 per drink);
+    # the answer must not depend on which one the shop meant.
+    results = []
+    for per_unit in (False, True):
+        totals, keys, names = defaultdict(Decimal), {}, {}
+        by_name = {}
+        for row in _lines(context, check):
+            _, _, amount, role, product, name, code, base, sold = row[:9]
+            if role != "sale_item":
+                continue
+            if product is None or name is None:
+                raise ContractError("sale_line_product_unknown")
+            if combined and " + " in name:
+                parts = _combined_parts(name)
+                if parts is None or sold is None:
+                    raise ContractError("combined_topping_unread")
+                (main, _), toppings = parts[0], parts[1:]
+                money = sum((m for _, (_, m) in toppings), Decimal(0))
+                entries = [(main, Decimal(str(sold)), Decimal(str(amount or 0)) - money)]
+                entries += [
+                    (t, n * (Decimal(str(sold)) if per_unit else 1), m) for t, (n, m) in toppings
+                ]
+                for item, qty, value in entries:
+                    key = by_name.setdefault(plain(item), ("combined", plain(item)))
+                    names.setdefault(key, item)
+                    keys.setdefault(key, item)
+                    totals[key] += qty if by_quantity else value
+                continue
+            key = by_name.setdefault(plain(name), product)
+            keys[key], names[key] = (code or name), names.get(key, name)
+            totals[key] += (
+                _base_quantity(base, sold, name, row[12])
+                if by_quantity
+                else Decimal(str(amount or 0))
+            )
+        ranked = _ranked(totals, keys, limit or 1)
+        if not ranked:
+            return None
+        results.append([names[k] for k in ranked])
+        if not combined:
+            break
+    if any(r != results[0] for r in results):
         return None
-    value = [names[k] for k in ranked] if limit else names[ranked[0]]
+    value = results[0] if limit else results[0][0]
     return _decision("product_ranking", check, value, answer_type)
+
+
+def _combined_parts(name: str):
+    """ "Trà đào (M) + 2 Trân châu (14.000đ)" -> [(món, (1, 0)), (topping, (2, 14000))].
+
+    Rulebook "Topping ghi chung ô với món" and the shop README: the number before a
+    topping is its portions (none: 1), its money is in brackets."""
+    pieces = [re.sub(r"\s+", " ", p).strip() for p in name.split(" + ")]
+    result = [(pieces[0], (Decimal(1), Decimal(0)))]
+    for piece in pieces[1:]:
+        found = re.fullmatch(r"(?:(\d+)\s+)?(.+?)\s*\(([\d.,]+)\s*(?:đ|d|vnd)?\)", piece)
+        if not found:
+            return None
+        money = Decimal(re.sub(r"[.,]", "", found[3]))
+        result.append((found[2].strip(), (Decimal(found[1] or 1), money)))
+    return result
 
 
 def _group_label(context, text):
@@ -2018,10 +2083,13 @@ def _whole_shop(question, context, text):
 
     if unsupported_intent(question):  # e.g. "thuốc kê đơn" narrows the shop total
         return None
+    raw = question.question.casefold()
+    # "nhờ bạn tính" reads "ban tinh" once accents go: only a written "bán" can sell an item.
+    selling = text if "bán" in raw or "bạn" not in raw else text.replace("ban ", "  ")
     if mentioned_entity(context, question) or re.search(
         r"\b(?:tien ban|ban) (?!(?:hang )?(?:duoc|dc|ra|bao|bn|bnhiu|tong|total|nhieu|cua|"
         r"thang|tuan|hom|ngay|quy|nam|bua|trong|tu|th|t\d|\d))[a-z]",
-        text,
+        selling,
     ):
         return None
     if metric == "average_order_value":
@@ -2121,7 +2189,10 @@ def _trend(question, context, text):
     claims = _month_claims(question)
     if claims:
         return _claimed_rises(question, context, text, claims)
-    if not re.search(r"\btang lien tuc\b|\bthang sau (?:co |deu )?(?:luon |deu )?cao hon\b", text):
+    if not re.search(
+        r"\btang lien tuc\b|\bthang sau (?:co |deu )?(?:luon |deu )?(?:cao hon|hon thang truoc)\b",
+        text,
+    ):
         return None
     if re.search(r"\b(nhom|khach|mat hang|ca sang|ca chieu|kenh)\b", text):
         return None
@@ -2207,7 +2278,7 @@ def _channel_revenue(question, context, text):
 def _items_in_orders(question, context, text):
     """Count products present in at least N distinct valid orders (§1 order policy)."""
     found = re.search(
-        r"\b(?:mat hang|san pham|mon)\b.*\b(?:o|trong) (?:it nhat |>= ?|≥ ?)?(\d+) don"
+        r"\b(?:mat hang|san pham|mon)\b.*\b(?:o|trong|chong) (?:tu |it nhat |>= ?|≥ ?)?(\d+) don"
         r"(?: hang)?(?: khac nhau)?(?: tro len)?\b",
         text,
     )

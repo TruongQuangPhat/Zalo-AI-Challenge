@@ -117,10 +117,16 @@ def answer(question, context: BusinessContext, text: str):
     """(op, value, type, details) for one staff member's revenue or the best seller."""
     from src.agent.rule_ops import QUALIFIERS, _decision, _money, _window
 
-    if not re.search(r"\bnhan vien\b|\bnv\d", text) or not context.prepared:
+    if not re.search(r"\bnhan vien\b|\bnv\b|\bnv\d", text) or not context.prepared:
         return None
+    text = re.sub(r"\bnv\b(?!\d)", "nhan vien", text)
+    text = re.sub(r"\bcong lai\b", "cong", text)  # "cộng lại" is a sum, not "lãi"
     best = re.search(r"\b(?:ban gioi nhat|doanh thu cao nhat|ban duoc nhieu tien nhat)\b", text)
-    money = re.search(r"\b(?:ban duoc|doanh thu|dthu|tien hang)\b.*\b(?:bao nhieu|tien)\b", text)
+    money = re.search(
+        r"\b(?:ban duoc|doanh thu|dthu|tien hang)\b.*\b(?:bao nhieu|tien)\b|"
+        r"\bban\b.*\b(?:bao nhieu|bn|nhieu) tien\b|\btong tien hang\b",
+        text,
+    )
     if not best and not money:
         return None
     if re.search(

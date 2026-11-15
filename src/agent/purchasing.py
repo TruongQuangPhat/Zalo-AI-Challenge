@@ -365,7 +365,7 @@ def _purchase_minus_sales(question, context: BusinessContext, text: str, rules: 
 
     if "purchase_sales_quantity" not in rules or len(_literal_windows(question)) != 1:
         return None
-    asked = re.findall(r"\b(?:bao nhieu|bn|bnhiu|may|nhieu) ([a-z]+)\b", text)
+    asked = re.findall(r"\b(?:bao nhieu|bn|bnhiu|may|nhieu|so|tong) ([a-z]+)\b", text)
     if not asked:
         return None
     check = _window(question, context)
@@ -438,9 +438,11 @@ def _purchase_minus_sales(question, context: BusinessContext, text: str, rules: 
     for row in _lines(context, check):
         if row[3] == "sale_item" and row[5] and plain(row[5]) == name:
             sold += _base_quantity(row[7], row[8], row[5], row[12])
-    ratio = factor(asked[-1])
-    if ratio is None:
+    # "số viên nhập trừ số viên bán": every unit word the question names must be one unit.
+    units = {bare(w) for w in asked if factor(w) is not None}
+    if len(units) != 1:
         return None
+    ratio = factor(units.pop())
     value = (bought - sold) / ratio
     if value != value.to_integral_value():
         return None

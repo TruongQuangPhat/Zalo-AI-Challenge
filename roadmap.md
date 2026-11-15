@@ -13,6 +13,54 @@
 
 ---
 
+## Coverage round 5d: dữ liệu dev_002/003/004/005, mốc 900 câu public — 15/11/2026
+
+Mọi sửa đổi là luật chung, có căn cứ ở rulebook (§3, §8) hoặc README của shop. Sửa ở tầng dữ
+liệu đều đo lại trên các shop train cùng dạng; nếu train không có dạng đó thì tính lại độc
+lập trên public.
+
+- **Quy đổi nhiều cấp** (`conversion_table`):
+  - ô tỉ lệ ghi "15 vỉ" tính theo đơn vị ngay dưới, dồn chuỗi về đơn vị cơ bản;
+  - câu README "… bán theo bó, 1 bó = 10 cây".
+
+  dev_005 trước thiếu số lượng cơ bản ở 11.788 dòng, nay đủ; ống PVC dev_004 đếm theo cây
+  khớp từng dòng facts. Train không có shop dạng này.
+- **Một mặt hàng ghi hai cách** (§8): tên không dấu gộp vào tên có dấu duy nhất cùng chữ ("Banh
+  tiramisu" → "Bánh tiramisu"). Hai tên có dấu khác nhau không gộp. Train biz_101/104/114/125
+  có dạng này: dựng lại, 0 mất, 0 sai. Các câu "hàng ế" ở dev_004 hết đếm thừa bản không dấu.
+- **Topping ghi chung ô** (luật public): món nhận số lượng dòng; tiền trong ngoặc là của
+  topping. Số phần topping tính theo hai cách (n hoặc n × số lượng dòng), chỉ trả lời khi xếp
+  hạng như nhau. Top 3 tháng 6/2025 ở dev_002 đổi thứ tự khi tính đúng.
+- **dev_003:** cột "SL (ĐV cơ bản)" là số lượng cơ bản, cột "S.L" là số lượng bán (đọc từ tiêu
+  đề cột). Lãi gộp dev_003 sửa lại theo §5 (giá vốn × số lượng theo đơn vị bán): ba đáp án lãi
+  gộp trong bản r5 đã sai.
+- **Câu hỏi:**
+  - "dh", "nv", "kác", "từg", "zìa";
+  - "tháng ba/tư/bảy…" (không nhận khi theo sau là một mốc thời gian khác);
+  - "tính luôn hôm nay thì N ngày gần nhất";
+  - danh sách tháng không ghi năm;
+  - "đếm đơn hàng huỷ";
+  - "nhiều doanh thu nhất";
+  - "tháng sau có luôn hơn tháng trước";
+  - "mặt hàng có mặt trong từ N đơn";
+  - "đơn trả tiền mặt" (= trả bằng);
+  - một kỳ ghi hai lần;
+  - "của tuần trước";
+  - "nhờ bạn" không còn đọc thành "bán";
+  - "bán … tổng cộng bao nhiêu tiền";
+  - nhân viên theo tên/mã/"nv", "cộng lại";
+  - "số viên nhập trừ số viên bán" (khớp tính độc lập 3/3);
+  - top khách nợ "của từng người".
+
+Kết quả:
+
+- train gốc **2.810 / 0 sai**, chat 2.008 / 0, phrasing 1.604 / 0;
+- `verify_runtime` 727 test;
+- public theo luật **925** (5c: 881).
+
+Một câu lô ở dev_006 bỏ trống khi máy local quá tải: bộ thực thi plan có ngân sách thời
+gian. Chạy riêng thì trả lời bình thường.
+
 ## Coverage round 5c: sau điểm public 0,668 — 15/11/2026
 
 Bản r5 (`d25cbe8`) được **0,668** với 734 câu trả lời. So với r4c (0,567, 653 câu), chỉ cách

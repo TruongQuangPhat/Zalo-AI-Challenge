@@ -205,6 +205,8 @@ def _metric_cues(question: Question) -> set[str]:
     cues = {
         r"\b(doanh thu|doanh so|dthu|revenue|tien ban|tien hang|"
         r"ban duoc (?:tong (?:cong )?|tat ca )?bao nhieu tien|"
+        r"ban(?: (?:thang|quy|tuan|nam) [\d/]+)? (?:tong cong |tat ca )?(?:duoc |dc )?"
+        r"(?:tong (?:cong )?|tat ca )?bao nhieu tien|"
         r"thu ve bao nhieu tien)\b": "revenue",
         r"\b((so|may|bao nhieu|bao nhiu|bn|bnhiu|dem|tong) (don|bill)|"
         r"don hang duoc bao nhieu)\b": "order_count",
@@ -265,6 +267,29 @@ def _time_text(question: Question) -> str:
         text,
     )
     text = re.sub(r"\b((?:den|toi) het) (?=\d{1,2}/\d{1,2}/\d{4})", r"\1 ngay ", text)
+    # "Tính luôn hôm nay thì 7 ngày gần nhất": the rulebook's N days already end today.
+    text = re.sub(
+        r"\btinh (?:luon|ca) (?:hom nay|hnay|bua nay)(?: thi)?\b(?=.*\b\d+ ngay gan nhat\b)",
+        " ",
+        text,
+    )
+    # "tháng ba", "tháng tư"…: spelled month numbers ("tháng sáu" is not taken: "tháng sau").
+    spelled = {
+        "ba": "3",
+        "tu": "4",
+        "bay": "7",
+        "tam": "8",
+        "chin": "9",
+        "muoi": "10",
+        "muoi mot": "11",
+        "muoi hai": "12",
+    }
+    text = re.sub(
+        r"\bthang (ba|tu|bay|tam|chin|muoi mot|muoi hai|muoi)\b"
+        r"(?! (?:ngay|thang|dau|nay|truoc|toi|den|hom|tuan|quy|\d))",
+        lambda m: "thang " + spelled[m[1]],
+        text,
+    )
     # "từ đầu tháng / từ mùng 1 (tháng này) tới hết hôm nay" is this month to date.
     text = re.sub(
         r"\btu (?:dau thang|mung 1|mong 1|ngay 1)(?: thang nay)? (?:den|toi)(?: het)? "
@@ -967,6 +992,10 @@ def _check_question_scope(
         )
     owners_removed = re.sub(
         r"\b(cua\s+)?(cua hang|shop|sop|tiem|quan|nha thuoc|doanh nghiep)( minh)?\b", "", text
+    )
+    # "của tuần trước / của tháng 9" names the period, not an owner.
+    owners_removed = re.sub(
+        r"\b(?:cua|cuar)\s+(?=(?:tuan|thang|ngay|quy|nam|hom|bua)\b)", "", owners_removed
     )
     if match := re.search(r"\b(cua|cuar)\s+\w", owners_removed):
         raise ContractError("question_owner_filter_unsupported")

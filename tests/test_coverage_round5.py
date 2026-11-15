@@ -297,3 +297,63 @@ def test_shared_month_list_and_last_year_growth_wording():
 
     q = question(question="Doanh thu từ đầu tháng đến hết hôm nay", as_of_date="2026-03-20")
     assert "thang nay" in _time_text(q)
+
+
+def test_combined_item_and_topping_cells_split():
+    from decimal import Decimal
+
+    from src.agent.rule_ops import _combined_parts
+
+    parts = _combined_parts("Trà đào cam sả (M) + 2 Trân châu đen (14.000đ)")
+    assert parts == [
+        ("Trà đào cam sả (M)", (Decimal(1), Decimal(0))),
+        ("Trân châu đen", (Decimal(2), Decimal(14000))),
+    ]
+    assert _combined_parts("Latte (M) + Thạch cà phê") is None  # no money: not read
+
+
+@pytest.mark.parametrize(
+    ("name", "folded", "accented"),
+    [("Bánh tiramisu", "banhtiramisu", True), ("Banh tiramisu", "banhtiramisu", False)],
+)
+def test_item_spellings_fold_to_one_key(name, folded, accented):
+    from src.data.normalization.entities import _ascii_fold, _letters
+
+    assert _ascii_fold(name) == folded
+    assert (_letters(name) != _ascii_fold(name)) is accented
+
+
+@pytest.mark.parametrize(
+    ("text", "unit"),
+    [
+        ("Th9/2025 Hagifen, số viên nhập trừ số viên bán ra chênh bnhiu?", "vien"),
+        ("Biosubtyl-II T11/2025: tổng gói nhập trừ tổng gói bán?", "goi"),
+    ],
+)
+def test_purchase_minus_sales_reads_the_unit_from_any_unit_word(text, unit):
+    import re
+
+    found = re.findall(
+        r"\b(?:bao nhieu|bn|bnhiu|may|nhieu|so|tong) ([a-z]+)\b", question_plain(text)
+    )
+    assert unit in found
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Tháng ba quán có tất cả bao nhiêu đơn bị huỷ thế?", [3]),
+        ("doanh thu các tháng từ tháng 3/2025 đến tháng 5/2025", [3, 5]),
+    ],
+)
+def test_spelled_months_never_eat_a_following_period(text, expected):
+    from src.agent.plan import _literal_windows
+
+    windows = _literal_windows(question(question=text, as_of_date="2026-08-21"))
+    assert [w["month"] for w in windows] == expected
+
+
+def test_order_of_a_period_is_no_owner_filter():
+    from src.agent.plan import _check_question_scope
+
+    _check_question_scope(question(question="Doanh thu của tuần trước là bao nhiêu?"))

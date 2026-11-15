@@ -396,6 +396,9 @@ def _check_business_scope(question: Question, spec: dict, entity: dict | None) -
             # remain scope restrictions; they cannot become a whole-shop total.
             text = re.sub(r"(?:\bcua\s+)?" + _alias_pattern(plain(name)), " ", text)
     text = re.sub(r"\bcua (?:cua hang|shop)\b|\bcua hang\b", " ", text)
+    # "số nợ của từng người" names the table's own rows, not another scope.
+    if spec["group"] == "customer":
+        text = re.sub(r"\bcua (?:tung|moi) (?:nguoi|khach(?: hang)?)\b", " ", text)
     cardinalities = re.findall(
         r"\btop\s*(\d+)\b|\b(?<!thang )(?<!quy )(?<!tuan )(?<!ngay )(?<![\d/])"
         r"(\d+) (?:mat hang|hang|mon|khach)\b",  # "7/2025 hàng nào" is a date, not top 2025

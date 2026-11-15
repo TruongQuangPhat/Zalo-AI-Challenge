@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import unicodedata
 from dataclasses import replace
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal, localcontext
@@ -212,6 +213,18 @@ def source_fields(context: BusinessContext, profile: dict) -> dict[str, int]:
     return result
 
 
+def _ascii_fold(text: str) -> str:
+    """Letters and digits without diacritics, lower case ("Bánh Đa" -> "banhda")."""
+    folded = unicodedata.normalize("NFD", text.replace("đ", "d").replace("Đ", "D"))
+    return "".join(c for c in folded.casefold() if c.isalnum() and not unicodedata.combining(c))
+
+
+def _letters(text: str) -> str:
+    """Letters and digits as written, lower case; a spelling without diacritics equals its
+    own ``_ascii_fold``."""
+    return "".join(c for c in unicodedata.normalize("NFC", text).casefold() if c.isalnum())
+
+
 def conversion_table(context: BusinessContext):
     """Unit conversions the shop lists: a conversion table (README column meanings or
     headers "Đơn vị quy đổi / Tỉ lệ quy đổi / Đơn vị cơ bản") or a README list
@@ -244,6 +257,15 @@ def conversion_table(context: BusinessContext):
     for name, large, ratio, base in listed:
         if not add(name, base, large, parse_number(ratio.replace(",", "."))):
             return None
+    # "- **Hàng theo bó**: A, B, C bán theo bó, 1 bó = 10 cây": a large unit for listed items.
+    for items, large, ratio, base in re.findall(
+        r"^\s*-\s+\*\*[^*]+\*\*\s*:\s*(.+?)\s+bán theo (\w+),\s*1 \2\s*=\s*(\d+)\s+(\w+)",
+        raw_readme,
+        re.M,
+    ):
+        for name in (n.strip() for n in items.split(",")):
+            if not name or not add(name, base, large, parse_number(ratio)):
+                return None
     only_large = bool(listed)
     sections = re.findall(
         r"^## Cột trong `([^`]+)`(?:, sheet `([^`]+)`)?\s*\n(.*?)(?=^## |\Z)",
@@ -297,6 +319,7 @@ def conversion_table(context: BusinessContext):
     if found:
         profile, roles, name_meaning = found[0]
         header = set(profile.get("header_rows", []))
+        chained: list[tuple] = []
         for row in context.source_table(profile["source_id"]).iter_rows():
             if row.row in header or (header and row.row is not None and row.row < min(header)):
                 continue
@@ -306,12 +329,36 @@ def conversion_table(context: BusinessContext):
                 continue
             if any(v in {None, ""} for v in raw.values()):
                 return None
+            # "15 vỉ": the ratio counts the unit named (README: "số kèm tên đơn vị là tính
+            # theo đơn vị đó, chỉ có số là tính theo đơn vị cơ bản").
+            named = re.fullmatch(r"\s*(\d+(?:[.,]\d+)?)\s+(\D+?)\s*", str(raw["ratio"]))
+            if named:
+                chained.append((raw["name"], raw["base"], raw["large"], named[1], named[2]))
+                continue
             try:
                 ratio = parse_number(raw["ratio"])
             except ContractError:
                 return None
             if not add(raw["name"], raw["base"], raw["large"], ratio):
                 return None
+        pending = chained
+        while pending:
+            left = []
+            for name, base, large, count, unit in pending:
+                known = table.get(identity_text(str(name)), (None, {}))
+                unit_key = identity_text(unit)
+                if unit_key == identity_text(str(base)):
+                    per = Decimal(1)
+                elif unit_key in known[1]:
+                    per = known[1][unit_key]
+                else:
+                    left.append((name, base, large, count, unit))
+                    continue
+                if not add(name, base, large, parse_number(count.replace(",", ".")) * per):
+                    return None
+            if len(left) == len(pending):
+                return None  # a chain that never reaches the base unit
+            pending = left
         only_large = (
             only_large
             or "chi co mat hang co don vi lon" in name_meaning
@@ -521,12 +568,30 @@ def build_entities(
     lineage = dict(conn.execute("SELECT raw_id, line_key FROM lineage WHERE line_key IS NOT NULL"))
     line_numbers = {}
     units = {}
+    spellings: dict[str, set[str]] = {}
     for s in sources:
-        if s.role in {"combined", "detail"} and {"item", "unit"} <= s.fields.keys():
+        if s.role in {"combined", "detail"} and "item" in s.fields:
             for _, row in data_rows(context, s):
-                n, u = get(row, s.fields, "item"), get(row, s.fields, "unit")
+                n = get(row, s.fields, "item")
+                u = get(row, s.fields, "unit") if "unit" in s.fields else None
+                if n:
+                    n = abbreviations.get(identity_text(str(n)), n)
+                    spellings.setdefault(_ascii_fold(str(n)), set()).add(str(n))
                 if n and u:
                     units.setdefault(identity_text(str(n)), set()).add(str(u))
+    # Rulebook §8: one item written two ways ("Bánh tiramisu", "Banh tiramisu") is one item.
+    # A spelling without any diacritic joins the single spelling with them; two accented
+    # spellings of the same letters are different names and stay apart.
+    twins: dict[str, str] = {}
+    for group in spellings.values():
+        keys = {identity_text(n): n for n in group}
+        accented = {k: n for k, n in keys.items() if _letters(n) != _ascii_fold(n)}
+        plain_keys = [k for k in keys if k not in accented]
+        if len(accented) == 1 and plain_keys:
+            ((target_key, target),) = accented.items()
+            for k in plain_keys:
+                twins[k] = target
+                units.setdefault(target_key, set()).update(units.pop(k, set()))
     # A listed item's base unit is the conversion list's, not the unit it happens to sell in.
     if conversions:
         for listed_name, (listed_base, _) in conversions[0].items():
@@ -590,6 +655,7 @@ def build_entities(
                 if not code and name is not None:
                     # The shop's own abbreviation list names the full item ("Cáp C").
                     name = abbreviations.get(identity_text(str(name)), name)
+                    name = twins.get(identity_text(str(name)), name)
                 key = masters["product"].get(str(code).strip()) if code else None
                 if code and not key:
                     raise ContractError("orphan_product_code")
