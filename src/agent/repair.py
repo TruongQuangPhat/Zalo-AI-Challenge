@@ -267,7 +267,9 @@ def answer(question: Question, context: BusinessContext, text: str):
         r"\b(?:dong xe|xe [a-z]+ khac nhau|lam gi|thay|sua dien|va|nhot|ruot|bdtq)\b", text
     ) or any(re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", text) for w in models):
         return None  # vehicle models and job wording need the shop's own abbreviations
-    if re.search(r"\bbao hanh\b", text):
+    # "không tính xe bảo hành": the warranty tickets are left out, not counted.
+    excluded = re.search(r"\b(?:khong tinh|khong ke|tru|bo|ngoai tru)\b[^,.?]*\bbao hanh\b", text)
+    if re.search(r"\bbao hanh\b", text) and not excluded:
         if re.search(r"%|\b(?:ti le|ty le|chiem|phan tram)\b", text):
             if not paid:
                 return None

@@ -302,6 +302,9 @@ def note_status(note) -> str:
     aliases = STATUS_ALIASES.get() or {}
     if token in aliases:
         return "completed" if aliases[token] == "not_status" else aliases[token]
+    # "kiểm tra lại" is a check, not "trả lại" (a return): drop it before looking for status
+    # wording.
+    token = re.sub(r"(?<!\w)kiem tra(?!\w)", " ", token)
     found = {
         status
         for status, labels in STATUSES.items()

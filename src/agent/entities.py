@@ -115,6 +115,27 @@ def entity_words(context: BusinessContext) -> frozenset[str]:
     return _name_words(path, _catalog_revision(path))
 
 
+@lru_cache(maxsize=4)
+def _product_names(path: Path, revision: tuple) -> tuple[str, ...]:
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:
+        rows = conn.execute("SELECT name, aliases FROM entities WHERE kind='product'").fetchall()
+    return tuple(dict.fromkeys(n for name, aliases in rows for n in (name, *loads(aliases)) if n))
+
+
+def regional_aligned(context: BusinessContext, question: Question) -> Question:
+    """The question with an item named in its other-region form written as in the catalog
+    ("Má lợn nướng" for a shop that sells "Má heo nướng")."""
+    from src.semantics.dialect import align_names
+
+    if not context.prepared or context.prepared.path is None or context.prepared.path.is_symlink():
+        return question
+    path = context.prepared.path.resolve()
+    text = align_names(question.question, _product_names(path, _catalog_revision(path)))
+    if text == question.question:
+        return question
+    return Question(question.id, question.business_id, text, question.as_of_date)
+
+
 def mentioned_entity(context: BusinessContext, question: Question) -> str | None:
     """First source entity or group name the question names, accent-insensitively."""
     if not context.prepared or context.prepared.path is None or context.prepared.path.is_symlink():

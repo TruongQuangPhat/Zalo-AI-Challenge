@@ -159,6 +159,8 @@ def answer(question: Question, context: BusinessContext, text: str):
         return _milk(context, window(), items, text)
     group = _group(items, text)
     channel = re.search(r"\bsan (?:thuong mai dien tu|tmdt)\b", text)
+    if channel and re.search(r"\bzalo\b|\btai (?:quay|tiem|cua hang)\b|\bqua dien thoai\b", text):
+        return None  # several channels: the shop-wide channel operator answers per channel
     if group or channel:
         c = window()
         if c is None:

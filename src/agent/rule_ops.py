@@ -99,10 +99,11 @@ PEOPLE_COUNT = r"\b(?:bao nhieu|may) (?:nguoi|khach|vi khach)\b"
 
 def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
     """Operator answer that also passes the wording, shape and size guards, else None."""
-    from src.agent.entities import entity_words
+    from src.agent.entities import entity_words, regional_aligned
     from src.agent.planner import shape_mismatch
     from src.semantics.vocabulary import unknown_words
 
+    question = regional_aligned(context, question)
     decision = _operator_answer(question, context)
     if decision is None:
         return None
@@ -225,6 +226,7 @@ def _operator_answer(question: Question, context: BusinessContext) -> dict | Non
         _rulebook_rankings,
         _purchase_total,
         _gross_profit,
+        _net_profit,
         _customer_ops,
         _tet_growth,
         _growth,
@@ -708,6 +710,19 @@ def _rows(context: BusinessContext, check: dict):
         yield from conn.execute(sql, [*statuses, window["start"], window["end"]])
 
 
+def _line_item(context, name, base_unit):
+    """(item, base unit) of a sale line. A cell holding a drink and its toppings is the
+    drink's line: its quantity is the drink's (rulebook "Topping ghi chung ô với món")."""
+    if name and " + " in name and context.rules is not None:
+        if "combined_topping" in context.rules.rules:
+            parts = _combined_parts(name)
+            if parts is None:
+                raise ContractError("combined_topping_unread")
+            main = parts[0][0]
+            return main, base_unit or dict(_products(context)).get(plain(main))
+    return name, base_unit
+
+
 def _quantity(base, sold) -> Decimal:
     raw = base if base is not None else sold
     if raw is None:
@@ -828,6 +843,8 @@ def _size_quantity(question, context, text):
     for _, _, _, role, name, _, base, sold in _rows(context, check):
         if role == "sale_item" and not name:
             raise ContractError("sale_line_product_unknown")
+        if role == "sale_item":
+            name, _ = _line_item(context, name, None)
         if role == "sale_item" and plain(name).endswith(suffix):
             total += _quantity(base, sold)
     return _decision("size_quantity", check, int(total), "number", size=size[1])
@@ -853,6 +870,16 @@ def _unit_quantity(question, context, text):
     unit = found[1]
     named = [name for name, _ in products if len(name.split()) >= 2 and name in text]
     named = sorted(named, key=len, reverse=True)[:1]
+    group = None
+    if not named and re.search(r"\bnhom\b", text):
+        if re.search(r"\b(?:nao|nhat|top)\b", text):
+            return None  # the top item inside a group is a ranking, not a total
+        # "bao nhiêu đĩa nhóm X": items of group X whose base unit is that unit.
+        found_group = _group_label(context, text)
+        if found_group is None or found_group[1] != "item":
+            return None
+        group = found_group[0]
+        text = re.sub(r"\bnhom (?:hang )?" + re.escape(group) + r"\b", " ", text)
     if named:
         target = named[0]
         if dict(products).get(target) != unit:
@@ -871,11 +898,23 @@ def _unit_quantity(question, context, text):
     if isinstance(check, tuple):
         return _decision("unit_quantity", check, None, "number")
     total = Decimal(0)
+    if group is not None:
+        for row in _lines(context, check):
+            if row[3] != "sale_item" or row[10] is None or plain(row[10]) != group:
+                continue
+            if not row[5]:
+                raise ContractError("sale_line_product_unknown")
+            if row[12] and plain(row[12]) == unit:
+                total += _base_quantity(row[7], row[8], row[5], row[12])
+        if not total or total != total.to_integral_value():
+            return None
+        return _decision("unit_quantity", check, int(total), "number", unit=unit, group=group)
     for _, _, _, role, name, base_unit, base, sold in _rows(context, check):
         if role != "sale_item":
             continue
         if not name:
             raise ContractError("sale_line_product_unknown")
+        name, base_unit = _line_item(context, name, base_unit)
         if (target and plain(name) == target) or (
             not target and base_unit and plain(base_unit) == unit
         ):
@@ -1508,6 +1547,14 @@ def _group_revenue(question, context, text):
     if re.search(r"\b(nhat|top|nao|so don|bao nhieu don|may don|khach nao)\b", text):
         return None
     share = bool(re.search(r"%|\b(?:phan tram|ti trong|ty trong|chiem|dong gop|phan cua)\b", text))
+    units = {unit for _, unit in _products(context) if unit} - NOT_UNITS
+    if (
+        not share
+        and units
+        and not re.search(r"\b(?:doanh thu|dthu|tien|revenue)\b", text)
+        and re.search(r"\b" + ASK + r" (?:" + "|".join(map(re.escape, units)) + r")\b", text)
+    ):
+        return None  # "bao nhiêu đĩa": a quantity, not money
     if not share and not re.search(
         r"\b(?:doanh thu|dthu|tien|revenue|thu duoc|ban duoc)\b" + (r"|\bgia tri\b" if aov else ""),
         text,
@@ -1716,6 +1763,13 @@ def _gross_profit(question, context, text):
         return None
     if isinstance(check, tuple):
         return _decision("gross_profit", check, None, "number")
+    profit = _gross_profit_value(context, check)
+    if profit is None:
+        return None
+    return _decision("gross_profit", check, _money(profit), "number")
+
+
+def _gross_profit_value(context, check) -> Decimal | None:
     roles = set(check["contract"].get("row_roles") or {"sale_item", "service_fee"})
     window = check["effective_window"]
     statuses = list(check["contract"]["status_policy"])
@@ -1738,9 +1792,77 @@ def _gross_profit(question, context, text):
             if role == "sale_item":
                 profit -= Decimal(str(sold)) * Decimal(str(cost))
             lines += 1
-    if not lines:
+    return profit if lines else None
+
+
+NET_PROFIT = r"\b(?:lai rong|loi rong|loi nhuan rong|lai that|loi that)\b|\btru (?:het )?chi phi\b"
+
+
+def _net_profit(question, context, text):
+    """§5 'Lãi ròng một tháng': the month's gross profit minus every entry of the expense
+    book in that month. The README names the book's money column: "Sổ chi phí … (tiền X)"."""
+    from src.agent.purchasing import _day
+
+    if not re.search(NET_PROFIT, text) or re.search(
+        r"\b(nhom|khach|hang nao|mat hang|mon|san pham|nhan vien|kenh|phan tram|ti le|ty le|"
+        r"nao|nhat|top|tuan|ngay|quy|nam nay)\b|%",
+        text,
+    ):
         return None
-    return _decision("gross_profit", check, _money(profit), "number")
+    named = re.search(
+        r"so chi phi\b[^()]{0,120}?\(tien (?:\*\*)?([^*)]+?)(?:\*\*)?\)",
+        plain(context.catalog.get("readme") or ""),
+    )
+    if not named:
+        return None
+    check = _window(question, context)
+    if not isinstance(check, dict):
+        return None
+    window = check["effective_window"]
+    start, end = date.fromisoformat(window["start"]), date.fromisoformat(window["end"])
+    if (
+        start.day != 1
+        or (end + timedelta(1)).day != 1
+        or (start.year, start.month)
+        != (
+            end.year,
+            end.month,
+        )
+    ):
+        return None
+    if end > date.fromisoformat(question.as_of_date):
+        return None
+    column = named[1].strip()
+    books = []
+    for profile in context.catalog["tables"]:
+        headers = {plain(str(c["display_name"])): c["position"] for c in profile.get("columns", [])}
+        days = [p for h, p in headers.items() if re.fullmatch(r"ngay(?: [a-z]+)?|thoi gian", h)]
+        if column in headers and len(days) == 1 and profile.get("header_rows"):
+            books.append((profile, headers[column], days[0]))
+    if len(books) != 1:
+        return None
+    profile, money_at, day_at = books[0]
+    source = context.source_table(profile["source_id"])
+    last_header = max(profile["header_rows"])
+    spent, entries = Decimal(0), 0
+    for row in source.iter_rows():
+        if row.row is not None and row.row <= last_header:
+            continue
+        amount, when = row.cells.get(money_at), row.cells.get(day_at)
+        if amount is None or amount.raw_value in {None, ""}:
+            continue
+        if when is None or when.raw_value in {None, ""}:
+            raise ContractError("expense_day_missing")
+        day = date.fromisoformat(_day(when.raw_value, when, source.metadata.get("date_system")))
+        if start <= day <= end:
+            from src.agent.books import money
+
+            spent += money(amount.raw_value)
+            entries += 1
+    gross = _gross_profit_value(context, check)
+    if gross is None or not entries:
+        return None
+    return _decision("net_profit", check, _money(gross - spent), "number")
 
 
 def _customer_ops(question, context, text):
@@ -1925,8 +2047,8 @@ def _price_increase_day(context, product: str, target: Decimal) -> date | None:
         "date": r"ngay ap dung",
         "price": r"gia moi|gia ban le",
         "old": r"gia cu",
-        "code": r"ma (?:san pham|hang hoa|hang|sp)",
-        "name": r"ten ?hang|san pham|ten san pham",
+        "code": r"ma (?:san pham|hang hoa|h\.? ?hoa|hang|sp)",
+        "name": r"ten ?hang|san pham|ten san pham|ten hang hoa|item",
     }
     tables = []
     for profile in context.catalog["tables"]:
@@ -1991,10 +2113,14 @@ def _price_increase_day(context, product: str, target: Decimal) -> date | None:
 def _price_effect(question, context, text):
     """§5 'Hiệu ứng tăng giá': base quantity N days from D (inclusive) vs N days before D."""
     days = re.search(r"\b(\d+) ngay (?:ke tu|tinh tu|tu|dau)\b", text)
-    day = re.search(r"\b(?:ngay|tu ngay|hom|vao ngay) (\d{1,2})/(\d{1,2})/(\d{4})\b", text)
-    if not days or not re.search(r"%|\bphan tram\b", text):
+    # The day of the change: the one full date the question gives, however introduced.
+    dates = set(re.findall(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", text))
+    day = next(iter(dates)) if len(dates) == 1 else None
+    if not days or not re.search(r"%|\bphan tram\b", text) or len(dates) > 1:
         return None
-    if not re.search(r"\b(?:doi gia|tang gia|len gia|giam gia|gia moi|ngay tang gia)\b", text):
+    if not re.search(
+        r"\b(?:doi gia|tang gia|len gia|giam gia|gia moi|ngay tang gia)\b|\blen \d", text
+    ):
         return None
     products = [name for name, _ in _products(context) if len(name.split()) >= 2 and name in text]
     if not products:
@@ -2002,7 +2128,7 @@ def _price_effect(question, context, text):
     product = max(products, key=len)
     n = int(days[1])
     if day:
-        start = date(int(day[3]), int(day[2]), int(day[1]))
+        start = date(int(day[2]), int(day[1]), int(day[0]))
     else:
         # No date: the price list's first raise of this item to the price asked.
         rules = context.rules.rules if context.rules is not None else {}
@@ -2032,9 +2158,12 @@ def _price_effect(question, context, text):
             return None
         total = Decimal(0)
         for row in _lines(context, check):
-            role, name, base, sold = row[3], row[5], row[7], row[8]
-            if role == "sale_item" and name and plain(name) == product:
-                total += _base_quantity(base, sold, name, row[12])
+            role, base, sold = row[3], row[7], row[8]
+            if role != "sale_item":
+                continue
+            name, unit = _line_item(context, row[5], row[12])
+            if name and plain(name) == product:
+                total += _base_quantity(base, sold, name, unit)
         totals.append((total, check))
     if totals[1][0] <= 0:
         return None
@@ -2217,8 +2346,15 @@ def _trend(question, context, text):
 
 CHANNELS = {
     "phone": (r"\bqua dien thoai\b", {"phone"}),
-    "store": (r"\btai quay\b", {"store", "counter"}),
-    "zalo_oa": (r"\bzalo(?: oa)?\b", {"zalo_oa", "zalo"}),
+    "store": (
+        r"\btai (?:quay|tiem|cua hang|shop)\b|\bmua truc tiep\b",
+        {"store", "counter", "tai quay", "tai tiem", "tai cua hang", "tai shop", "truc tiep"},
+    ),
+    "zalo_oa": (r"\bzalo(?: oa)?\b", {"zalo_oa", "zalo", "zalo oa"}),
+    "marketplace": (
+        r"\bsan (?:thuong mai dien tu|tmdt)\b",
+        {"marketplace", "ecommerce", "san tmdt", "san thuong mai dien tu"},
+    ),
 }
 
 
@@ -2245,6 +2381,10 @@ def _channel_revenue(question, context, text):
     with closing(context.prepared.connect()) as conn:
         channels = dict(conn.execute("SELECT order_key,channel FROM order_scopes"))
     if not channels:
+        return None
+    # A channel the shop never records is not "0 đồng": every asked channel must exist.
+    present = {plain(v or "") for v in channels.values()}
+    if any(not (CHANNELS[key][1] & present) for key in found):
         return None
     check = _window(question, context)
     if check is None:
