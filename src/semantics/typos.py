@@ -13,6 +13,12 @@ general typing slip:
 The known words are the measured question vocabulary (train questions and their variants).
 Capitalised words inside a sentence are names and stay as written.
 More than one possible repair means no repair: the word stays unknown and the model reads it.
+
+A mistyped word that is still spelled like a syllable ("dảm" for "giảm") may be a real word
+the vocabulary lacks, so the same slips, plus a final "n"/"ng", "t"/"c" or "i"/"y" typed
+for the other, are tried only in context: the repair is kept when exactly one reading forms
+a two-word phrase seen in the measured questions with the word before or after it
+(``question_bigrams.txt``).
 """
 
 from __future__ import annotations
@@ -21,8 +27,13 @@ import re
 import unicodedata
 from collections.abc import Collection
 from functools import lru_cache
+from pathlib import Path
 
 from src.data.profiling import normalized
+
+BIGRAMS_FILE = Path(__file__).with_name("question_bigrams.txt")
+# Neighbour of a word in a measured two-word phrase: an amount, date or code.
+NUMBER = "0"
 
 TONES = {"́": "s", "̀": "f", "̉": "r", "̃": "x", "̣": "j"}
 _TONE_MARKS = {letter: mark for mark, letter in TONES.items()}
@@ -136,6 +147,59 @@ def _candidates(plain: str, mark: str | None) -> list[set[tuple[str, str | None]
     return tiers
 
 
+# Final consonants and the closing i/y that everyday spelling confuses.
+_FINALS = (("ng", "n"), ("n", "ng"), ("c", "t"), ("t", "c"), ("i", "y"), ("y", "i"))
+
+
+def _syllable_readings(plain: str, mark: str | None) -> set[tuple[str, str | None]]:
+    """Readings of a mistyped word that is itself spelled like a syllable."""
+    readings = set().union(*_candidates(plain, mark))
+    for typed, meant in _FINALS:
+        if plain.endswith(typed) and len(plain) > len(typed):
+            readings.add((plain[: -len(typed)] + meant, mark))
+    readings.discard((plain, mark))
+    return readings
+
+
+@lru_cache(maxsize=1)
+def bigrams() -> frozenset[tuple[str, str]]:
+    """Accentless adjacent word pairs of the measured questions (numbers as ``NUMBER``)."""
+    if not BIGRAMS_FILE.exists():
+        return frozenset()
+    pairs = (line.split(" ") for line in BIGRAMS_FILE.read_text(encoding="utf-8").splitlines())
+    return frozenset((p[0], p[1]) for p in pairs if len(p) == 2)
+
+
+def plain_tokens(text: str) -> list[str]:
+    """Accentless words of a question, each amount/date/code written as ``NUMBER``."""
+    text = unicodedata.normalize("NFC", text).casefold()
+    return [NUMBER if re.search(r"\d", t) else normalized(t) for t in re.findall(r"\w+", text)]
+
+
+def repair_in_context(
+    token: str, before: str | None, after: str | None, words: frozenset[str]
+) -> str | None:
+    """The one known word a syllable-shaped ``token`` stands for, judged by its neighbours
+    (accentless words, or None at the sentence edge), else None."""
+    if len(token) < 2 or re.search(r"\d", token):
+        return None
+    plains, by_sound = _index(words)
+    plain = normalized(token)
+    accented = token != plain
+    seen = bigrams()
+    found = set()
+    for word, mark in _syllable_readings(plain, tone(token)):
+        if word not in plains:
+            continue
+        if not ((before, word) in seen or (word, after) in seen):
+            continue
+        if not accented and mark is None:
+            found.add(word)
+        else:
+            found |= by_sound.get((word, mark), set())
+    return found.pop() if len(found) == 1 else None
+
+
 def _resolve(tier, plains, by_sound, accented: bool) -> set[str] | None:
     """Known words a tier of readings gives, or None when one reading is ambiguous."""
     outputs = set()
@@ -177,21 +241,42 @@ def repair(token: str, words: frozenset[str]) -> str | None:
     return splits.pop() if len(splits) == 1 else None
 
 
-def repaired(question: str, known, names: Collection[str] = ()) -> str:
+def repaired(
+    question: str, known, names: Collection[str] = (), accented: Collection[str] | None = None
+) -> str:
     """``question`` with each unknown word repaired; ``known(token)`` says a word is known
-    wording, ``names`` holds the accentless words of the shop's names (never changed)."""
+    wording, ``names`` holds the accentless words of the shop's names (never changed). With
+    ``accented`` (the names' casefolded words), a word typed with marks stays only when it
+    is spelled so in a name: "thán" is not the name word "Thân"."""
     from src.semantics.vocabulary import correction_words
 
     words = correction_words()
+    question = unicodedata.normalize("NFC", question)
+    matches = list(re.finditer(r"\w+", question))
+    plains = plain_tokens(question)
 
-    def fix(match: re.Match) -> str:
+    def fix(i: int, match: re.Match) -> str:
         token = match[0]
         lower = token.casefold()
         # A capitalised word inside the sentence is a name ("Lương Chi Đức").
         if token != lower and match.start() > 0:
             return token
-        if normalized(lower) in names or known(lower):
+        if known(lower):
             return token
-        return repair(lower, words) or token
+        if normalized(lower) in names and (
+            accented is None or lower == normalized(lower) or lower in accented
+        ):
+            return token
+        if fixed := repair(lower, words):
+            return fixed
+        if not is_syllable(normalized(lower)):
+            return token
+        before = plains[i - 1] if i > 0 else None
+        after = plains[i + 1] if i + 1 < len(plains) else None
+        return repair_in_context(lower, before, after, words) or token
 
-    return re.sub(r"\w+", fix, unicodedata.normalize("NFC", question))
+    out, end = [], 0
+    for i, match in enumerate(matches):
+        out += [question[end : match.start()], fix(i, match)]
+        end = match.end()
+    return "".join(out) + question[end:]

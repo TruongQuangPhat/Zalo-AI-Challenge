@@ -126,7 +126,7 @@ def answer_by_rule(question: Question, context: BusinessContext) -> dict | None:
     # A word outside the measured wording may change what is asked: leave it to the model.
     # Industry books (repair, phone, pharmacy) bind their own trade wording.
     if not str(decision["plan"].get("op")).startswith(INDUSTRY_OPS) and unknown_words(
-        question.question, entity_words(context)
+        question.question, entity_words(context), entity_words(context, accented=True)
     ):
         return None
     answer = decision["answer"]
@@ -205,6 +205,7 @@ def _operator_answer(question: Question, context: BusinessContext) -> dict | Non
         _pharmacy,
         _note_debt,
         _lots,
+        _nearest_lot,
         _debt,
         _staff,
         _delivery,
@@ -212,6 +213,8 @@ def _operator_answer(question: Question, context: BusinessContext) -> dict | Non
         _dead_stock,
         _stockout,
         _stock_value,
+        _large_unit_stock,
+        _lot_stock,
         _size_quantity,
         _unit_quantity,
         _threshold_count,
@@ -276,6 +279,13 @@ def _lots(question, context, text):
     from src.agent.lots import answer as lots_answer
 
     result = lots_answer(question, context, text)
+    return None if result is None else (*result, {})
+
+
+def _nearest_lot(question, context, text):
+    from src.agent.lots import nearest_lot
+
+    result = nearest_lot(question, context, text)
     return None if result is None else (*result, {})
 
 
@@ -410,6 +420,110 @@ def _stock_value(question, context, text):
             raise ContractError("stock_item_cost_unknown")
         total += balance * costs[str(code).strip()]
     return _decision("stock_value", check, _money(total), "number")
+
+
+def _item_balance(question, context, item: dict):
+    """(check, balance) of one item at the end of today: the facts' stock records, or, for
+    a shop whose facts hold none, its lot books at the declared last data day."""
+    from src.agent.lot_book import lot_balances
+    from src.agent.lots import AUTHORITY
+
+    with closing(context.prepared.connect()) as conn:
+        stocked = conn.execute("SELECT 1 FROM stock_balances LIMIT 1").fetchone()
+    if stocked:
+        check, balances = _day_balances(question, context, {"kind": "today"})
+        if isinstance(check, tuple) or check is None:
+            return check, None
+        return check, balances.get(item["entity_key"])
+    confirmed = context.semantics["coverage"]["confirmed_end"] if context.semantics else None
+    if question.as_of_date != confirmed or AUTHORITY not in plain(context.catalog["readme"]):
+        return None, None
+    lots = lot_balances(context)
+    held = [balance for _, product, _, balance in lots or () if product == item["entity_key"]]
+    if not held:
+        return None, None
+    window = {"start": question.as_of_date, "end": question.as_of_date}
+    return {"effective_window": window}, sum(held, Decimal(0))
+
+
+def _stock_item(question, context, text):
+    """The one item a stock question about the end of today names, with its base unit."""
+    if not re.search(STOCK, text):
+        return None
+    today = [{"kind": "today"}], [{"kind": "day", "date": question.as_of_date}]
+    if _literal_windows(question) not in today:
+        return None
+    from src.agent.entities import entity_candidates
+
+    candidates = entity_candidates(context, question.question)
+    if len(candidates) != 1 or not candidates[0]["base_unit"]:
+        return None
+    return candidates[0]
+
+
+def _lot_stock(question, context, text):
+    """An item's stock at the end of today in base units from the lot books (shops whose
+    facts hold no stock records; the facts' own stock is answered by the stock plan)."""
+    if re.search(r"\b(?:chan|nguyen|le|han dung|het han|gia tri|tien|von)\b|\blo hang\b", text):
+        return None
+    with closing(context.prepared.connect()) as conn:
+        if conn.execute("SELECT 1 FROM stock_balances LIMIT 1").fetchone():
+            return None
+    item = _stock_item(question, context, text)
+    if item is None or not _base_unit_asked(question, item["base_unit"]):
+        return None
+    if not re.search(r"\b(?:ton|kho|con lai|con)\b", text):
+        return None
+    check, balance = _item_balance(question, context, item)
+    if check is None or balance is None or isinstance(check, tuple):
+        return None
+    return _decision("lot_stock", check, balance, "number")
+
+
+def _large_unit_stock(question, context, text):
+    """§5 "Tồn theo đơn vị lớn": one item's balance at the end of today as [whole large
+    units, loose base units]. The large unit is the one unit of the item's conversion list
+    the question names; the loose part is in the base unit, which the question must name."""
+    if not re.search(r"\b(?:chan|nguyen)\b", text) or not re.search(r"\ble\b", text):
+        return None
+    rules = context.rules.rules if context.rules is not None else {}
+    if "large_unit_stock" not in rules:
+        return None
+    from src.agent.entities import _strip_marks
+    from src.data.normalization.entities import conversion_table
+    from src.data.normalization.stock import _alias_pattern, identity_text
+
+    item = _stock_item(question, context, text)
+    conversions = conversion_table(context)
+    if item is None or not conversions:
+        return None
+    listed = conversions[0].get(identity_text(item["name"]))
+    if not listed or listed[0] != identity_text(item["base_unit"]):
+        return None
+    base, larges = listed
+    remaining = _strip_marks(question.question)
+    for name in [item["name"], item["source_code"] or ""]:
+        if name:
+            remaining = re.sub(_alias_pattern(_strip_marks(name)), " ", remaining)
+    words = re.findall(r"\w+", remaining)
+    spans = {
+        identity_text("".join(words[i:j]))
+        for i in range(len(words))
+        for j in range(i + 1, min(i + 4, len(words)) + 1)
+    }
+    named = [unit for unit in larges if identity_text(_strip_marks(unit)) in spans]
+    if len(named) != 1 or identity_text(_strip_marks(base)) not in spans:
+        return None
+    check, balance = _item_balance(question, context, item)
+    if isinstance(check, tuple):
+        return _decision("large_unit_stock", check, None, "list")
+    if check is None or balance is None:
+        return None
+    factor = larges[named[0]]
+    if balance < 0 or balance % 1 or factor % 1 or factor <= 1:
+        return None
+    whole, loose = divmod(int(balance), int(factor))
+    return _decision("large_unit_stock", check, [whole, loose], "list", large_unit=named[0])
 
 
 def _stockout(question, context, text):
@@ -820,7 +934,9 @@ def _products(context: BusinessContext) -> list[tuple[str, str | None]]:
 
     ledger = ledger_lines(context)
     if ledger is not None:
-        return sorted({(plain(row[5]), row[12]) for row in ledger if row[5]})
+        return sorted(
+            {(plain(row[5]), plain(row[12]) if row[12] else None) for row in ledger if row[5]}
+        )
     with closing(context.prepared.connect()) as conn:
         return [
             (plain(name), plain(unit) if unit else None)
@@ -859,21 +975,22 @@ def _unit_quantity(question, context, text):
     products = _products(context)
     # Base units that are also ordinary question words never name a quantity here.
     units = {unit for _, unit in products if unit} - NOT_UNITS
-    if not units or re.search(r"\bsize\b|" + STOCK, text):
+    named = [name for name, _ in products if len(name.split()) >= 2 and name in text]
+    named = sorted(named, key=len, reverse=True)[:1]
+    # Words of the item's own name ("Rau củ kho quẹt") do not make it a stock question.
+    if not units or re.search(r"\bsize\b|" + STOCK, text.replace(named[0], " ") if named else text):
         return None
     pattern = (
         r"\b"
         + ASK
         + r" ("
         + "|".join(sorted(map(re.escape, units), key=len, reverse=True))
-        + r")\b(?! nhi)"  # "tong cong bao nhieu": "bao" is the question word, not a unit
+        + r")\b(?! nhi(?:eu|u)\b)"  # "tong cong bao nhieu": "bao" is the question word
     )
     found = re.search(pattern, text)
     if not found:
         return None
     unit = found[1]
-    named = [name for name, _ in products if len(name.split()) >= 2 and name in text]
-    named = sorted(named, key=len, reverse=True)[:1]
     group = None
     if not named and re.search(r"\bnhom\b", text):
         if re.search(r"\b(?:nao|nhat|top)\b", text):
@@ -1546,7 +1663,15 @@ def _group_revenue(question, context, text):
     )
     if aov:
         text = re.sub(r"\b(?:trung binh|binh quan|tb)\b", " ", text)
-    if not re.search(r"\bnhom\b", text) or re.search(GROUP_QUALIFIERS, text):
+    if not re.search(r"\bnhom\b", text):
+        return None
+    group = _group_label(context, text)
+    if group is None:
+        return None
+    # Words of the group's own label ("nhóm giảm đau hạ sốt") are not conditions.
+    named = r"\bnhom (?:hang |khach (?:hang )?)?" + re.escape(group[0]) + r"\b"
+    text = re.sub(named, " nhom ", text)
+    if re.search(GROUP_QUALIFIERS, text):
         return None
     if re.search(r"\b(nhat|top|nao|so don|bao nhieu don|may don|khach nao)\b", text):
         return None
@@ -1563,9 +1688,6 @@ def _group_revenue(question, context, text):
         r"\b(?:doanh thu|dthu|tien|revenue|thu duoc|ban duoc)\b" + (r"|\bgia tri\b" if aov else ""),
         text,
     ):
-        return None
-    group = _group_label(context, text)
-    if group is None:
         return None
     label, kind = group
     if aov and (share or kind != "customer"):
@@ -2289,7 +2411,8 @@ def _day_sale_price(question, context, text):
     price_at = {}
     for profile in context.catalog["tables"]:
         fields = source_fields(context, profile)
-        if not {"item", "quantity"} <= fields.keys():
+        # Sale lines name their item, or only its code ("Mã hàng bán").
+        if "quantity" not in fields or not {"item", "product_id"} & fields.keys():
             continue
         found = role_columns(
             context,
@@ -2398,9 +2521,13 @@ def _claimed_rises(question, context, text, claims):
     holds (boolean). Only revenue claims between whole months; nothing else in the sentence."""
     from src.agent.plan import _time_text
 
-    if len(claims) < 2 or not re.search(
-        r"\b(?:dung khong|phai khong|dung vay khong|dung ko|phai ko|dung chua|ha|khong)\s*[?.!]*$",
-        text,
+    if len(claims) < 2 or not (
+        re.search(
+            r"\b(?:dung khong|phai khong|dung vay khong|dung ko|phai ko|dung chua|ha|khong)"
+            r"\s*[?.!]*$",
+            text,
+        )
+        or re.search(r"\bco phai\b", text)
     ):
         return None
     if not re.search(r"\b(?:doanh thu|dthu)\b", text) or re.search(
@@ -2408,6 +2535,15 @@ def _claimed_rises(question, context, text, claims):
     ):
         return None
     rest = re.sub(_CLAIM, " ", _time_text(question))
+    # "Xu hướng doanh thu 3 tháng 9/2025 → 10/2025 → 11/2025: …" names the claimed months.
+    month = r"(?:thang )?(\d{1,2})/(\d{4})"
+    listed = re.search(rf"\b3 thang {month}\s*(?:→|->|,)\s*{month}\s*(?:→|->|,)\s*{month}", rest)
+    if listed:
+        months = {(int(listed[i]), int(listed[i + 1])) for i in (1, 3, 5)}
+        claimed = {m for c in claims for m in ((c[0], c[1]), (c[2], c[3]))}
+        if months != claimed:
+            return None
+        rest = rest.replace(listed[0], " ")
     if re.search(r"\d", rest):
         return None
     values = {}

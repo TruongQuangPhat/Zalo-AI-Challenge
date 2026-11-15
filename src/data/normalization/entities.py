@@ -845,8 +845,12 @@ def build_entities(
         finally:
             conn.execute("RELEASE optional_family")
     snapshot_at = None
+    # A snapshot names its items by code, or by name when the shop keeps no codes.
     snapshots = [
-        s for s in sources if {"product_id", "base_unit", "snapshot_balance"} <= s.fields.keys()
+        s
+        for s in sources
+        if {"base_unit", "snapshot_balance"} <= s.fields.keys()
+        and ({"product_id", "item"} & s.fields.keys())
     ]
     if snapshots:
         conn.execute("SAVEPOINT snapshot_family")
@@ -865,8 +869,20 @@ def build_entities(
             snapshot_at = parse_date(dates[0]).isoformat()
             source = snapshots[0]
             seen = set()
+            by_name: dict[str, set[str]] = {}
+            if "product_id" not in source.fields:
+                for key, name in conn.execute(
+                    "SELECT entity_key,name FROM entities WHERE kind='product'"
+                ):
+                    by_name.setdefault(identity_text(str(name)), set()).add(key)
             for table, row in data_rows(context, source):
-                product = masters["product"].get(str(get(row, source.fields, "product_id")).strip())
+                if "product_id" in source.fields:
+                    code = str(get(row, source.fields, "product_id")).strip()
+                    product = masters["product"].get(code)
+                else:
+                    # Exactly one catalog item of that name, else the snapshot is unusable.
+                    found = by_name.get(identity_text(str(get(row, source.fields, "item"))), ())
+                    product = next(iter(found)) if len(found) == 1 else None
                 if product is None or product in seen:
                     raise ContractError("snapshot_product_key_or_cardinality_invalid")
                 unit = str(get(row, source.fields, "base_unit") or "")

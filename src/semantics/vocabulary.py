@@ -91,16 +91,26 @@ def correction_words() -> frozenset[str]:
     return frozenset(words | set(FILLERS) | set(OPERATOR_WORDS))
 
 
-def unknown_words(question: str, names: Collection[str] = ()) -> list[str]:
+def unknown_words(
+    question: str, names: Collection[str] = (), accented: Collection[str] | None = None
+) -> list[str]:
     """Words of ``question`` that are neither measured wording nor in ``names`` (accentless
-    words of the shop's entity names)."""
+    words of the shop's entity names). With ``accented`` (the names' casefolded words), a
+    word typed with marks whose bare spelling is only a name word ("thán" for "Thân") counts
+    as a name word only when a name spells it so; a bare spelling that is also measured
+    wording ("cũa", "tóp") stays understood."""
     unknown = []
     # "cao hay thấp hơn" asks the signed change; "thấp nhất" (a lowest) is not understood.
     question = re.sub(r"(?i)\bcao hay (?:thấp|thap)\b", "cao hay", question)
     # "xếp từ cao xuống thấp" orders a ranking; it is not "lowest".
     question = re.sub(r"(?i)\bcao xuống (?:thấp|thap)\b", "cao xuống", question)
     for token in question_tokens(question):
-        if normalized(token) in names or is_known(token):
+        if is_known(token):
+            continue
+        bare = normalized(token)
+        if bare in names and (
+            accented is None or token == bare or token in accented or is_known(bare)
+        ):
             continue
         unknown.append(token)
     return unknown

@@ -55,20 +55,27 @@ purchases, stock balances, lots and unit conversions.
   classified by the model.
 - Quantities are converted to base units from conversion tables or README sentences,
   including chained ratios. An item name written with and without accents becomes one item.
+- An end-of-data stock list is read by item code, or by item name when the shop keeps no
+  codes and the name matches exactly one catalog item.
 
 ### 3. Question answering (`src/agent`)
 
 For each question in `questions.jsonl` (`src/agent/planner.py`):
 
 1. **Normalisation.** Chat spellings, abbreviations and Telex typing errors become standard
-   words (`src/semantics/rulebook.py`, `src/semantics/typos.py`). An item named in its
-   other regional form ("má lợn" / "má heo") is replaced by the catalog name
-   (`src/semantics/dialect.py`).
+   words (`src/semantics/rulebook.py`, `src/semantics/typos.py`). A mistyped word that is
+   still a valid syllable ("dảm" for "giảm") is repaired only when exactly one reading forms
+   a two-word phrase seen in the train questions. Words of the shop's own names are never
+   changed. An item named in its other regional form ("má lợn" / "má heo") is replaced by
+   the catalog name (`src/semantics/dialect.py`).
 2. **Rulebook operators.** `src/agent/rule_ops.py` and the domain modules (`pharmacy.py`,
-   `repair.py`, `phone.py`, `baby.py`, `debt.py`, `lots.py`, `delivery.py`,
+   `repair.py`, `phone.py`, `baby.py`, `debt.py`, `lots.py`, `lot_book.py`, `delivery.py`,
    `purchasing.py`, `staff.py`) implement the rulebook definitions as Python functions:
-   revenue, order counts, growth, rankings, customers, debt, stock, gross and net profit,
-   price-change effects and more. An operator answers only when the question's wording,
+   revenue, order counts, growth, rankings, customers, debt, stock (also in whole large
+   units plus loose base units), lots near expiry, gross and net profit, price-change
+   effects and more. Where the facts hold no lot records, lot stock is rebuilt from the
+   shop's lot books (each receipt line is one lot; sales take from lots; returns go back),
+   and only when the item totals agree with the shop's own stock list, if it has one. An operator answers only when the question's wording,
    time window and answer shape are fully covered. Otherwise it yields to the next step.
 3. **Model rewrite.** Qwen3-14B rewrites the question into standard wording and the
    operators are tried again.

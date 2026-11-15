@@ -47,6 +47,45 @@ def remaining_lots(context: BusinessContext, day: str) -> list[tuple[str, str, s
     return [(lot, p, e, q) for lot, (p, e, q) in balances.items() if q > 0]
 
 
+def _held_lots(context: BusinessContext, day: str) -> list[tuple[str, str, str, Decimal]] | None:
+    """Lots with stock left at the end of ``day`` (the declared last day): the prepared lot
+    facts, or the shop's lot books when the facts could not hold them."""
+    if "lots" in (context.prepared.summary.get("extensions", {}).get("issues") or {}):
+        from src.agent.lot_book import lot_balances
+
+        books = lot_balances(context)
+        return None if books is None else [x for x in books if x[3] > 0]
+    return remaining_lots(context, day)
+
+
+def nearest_lot(question: Question, context: BusinessContext, text: str):
+    """§6 "Lô gần hết hạn nhất của một thuốc" from the lot books: among the item's lots still
+    held and not expired today, the earliest expiry. The prepared lot facts answer through
+    the stock plan instead."""
+    if not re.search(r"\blo\b.*\b(?:gan het han nhat|som nhat|can date (?:nhat|nhut))\b", text):
+        return None
+    if not context.prepared or AUTHORITY not in plain(context.catalog.get("readme") or ""):
+        return None
+    if "lots" not in (context.prepared.summary.get("extensions", {}).get("issues") or {}):
+        return None
+    confirmed = context.semantics["coverage"]["confirmed_end"] if context.semantics else None
+    if question.as_of_date != confirmed:
+        return None
+    from src.agent.entities import entity_candidates
+
+    candidates = entity_candidates(context, question.question)
+    if len(candidates) != 1:
+        return None
+    lots = _held_lots(context, question.as_of_date)
+    if lots is None:
+        return None
+    key, today = candidates[0]["entity_key"], question.as_of_date
+    expiries = [e for _, product, e, _ in lots if product == key and e >= today]
+    if not expiries:
+        return None
+    return "nearest_lot_expiry", min(expiries), "date"
+
+
 def _span(question: Question, text: str) -> tuple[str, str] | None:
     from src.agent.plan import _literal_windows
 
@@ -81,9 +120,6 @@ def answer(question: Question, context: BusinessContext, text: str):
         return None
     if not context.prepared or AUTHORITY not in plain(context.catalog.get("readme") or ""):
         return None
-    extension = context.prepared.summary.get("extensions", {})
-    if "lots" in (extension.get("issues") or {}):
-        return None
     confirmed = context.semantics["coverage"]["confirmed_end"] if context.semantics else None
     if question.as_of_date != confirmed:
         return None  # lot stock is known only at the declared export end
@@ -91,7 +127,10 @@ def answer(question: Question, context: BusinessContext, text: str):
     if span is None:
         return None
     start, end = span
-    lots = [x for x in remaining_lots(context, start) if start <= x[2] <= end]
+    held = _held_lots(context, start)
+    if held is None:
+        return None
+    lots = [x for x in held if start <= x[2] <= end]
     if re.search(r"\b(?:may|bao nhieu|bn|so) lo\b", text):
         return "lots_expiring_count", len(lots), "number"
     if re.search(

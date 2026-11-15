@@ -125,6 +125,8 @@ def answer(question, context: BusinessContext, text: str):
     """(op, value, type, details) for one staff member's revenue or the best seller."""
     from src.agent.rule_ops import QUALIFIERS, _decision, _money, _window
 
+    # "người bán" is the staff member who sold the order.
+    text = re.sub(r"\bnguoi ban(?: hang)?\b", "nhan vien", text)
     if not re.search(r"\bnhan vien\b|\bnv\b|\bnv\d", text) or not context.prepared:
         return None
     text = re.sub(r"\bnv\b(?!\d)", "nhan vien", text)

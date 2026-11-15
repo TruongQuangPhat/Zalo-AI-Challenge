@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import unicodedata
 from collections.abc import Iterator
 from contextlib import closing
 from copy import deepcopy
@@ -13,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from src.data.catalog import BusinessContext
 from src.data.normalization.stock import _alias_pattern
+from src.data.profiling import normalized
 from src.data.split import Question
 from src.jsonio import ContractError, loads
 from src.semantics.rulebook import plain, question_plain
@@ -88,12 +90,18 @@ def _mention_names(path: Path, revision: tuple) -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=4)
-def _name_words(path: Path, revision: tuple) -> frozenset[str]:
+def _name_words(path: Path, revision: tuple, accented: bool = False) -> frozenset[str]:
     words = set()
+
+    def split(text: str) -> list[str]:
+        if accented:
+            return re.findall(r"\w+", unicodedata.normalize("NFC", text).casefold())
+        return re.findall(r"\w+", plain(text))
+
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:
         for name, aliases, unit in conn.execute("SELECT name, aliases, base_unit FROM entities"):
             for text in (name, unit or "", *loads(aliases)):
-                words.update(re.findall(r"\w+", plain(text)))
+                words.update(split(text))
         for table, column in (
             ("line_groups", "item_group"),
             ("event_groups", "item_group"),
@@ -101,18 +109,19 @@ def _name_words(path: Path, revision: tuple) -> frozenset[str]:
         ):
             try:
                 for (value,) in conn.execute(f"SELECT DISTINCT {column} FROM {table}"):
-                    words.update(re.findall(r"\w+", plain(str(value))))
+                    words.update(split(str(value)))
             except sqlite3.OperationalError:
                 continue
     return frozenset(words)
 
 
-def entity_words(context: BusinessContext) -> frozenset[str]:
-    """Accentless words of the shop's product, customer, unit and group names."""
+def entity_words(context: BusinessContext, accented: bool = False) -> frozenset[str]:
+    """Accentless (or, with ``accented``, casefolded) words of the shop's product, customer,
+    unit and group names."""
     if not context.prepared or context.prepared.path is None or context.prepared.path.is_symlink():
         return frozenset()
     path = context.prepared.path.resolve()
-    return _name_words(path, _catalog_revision(path))
+    return _name_words(path, _catalog_revision(path), accented)
 
 
 @lru_cache(maxsize=4)
@@ -142,7 +151,9 @@ def typo_repaired(context: BusinessContext, question: Question) -> Question:
     from src.semantics.typos import repaired
     from src.semantics.vocabulary import is_known
 
-    text = repaired(question.question, is_known, entity_words(context))
+    text = repaired(
+        question.question, is_known, entity_words(context), entity_words(context, accented=True)
+    )
     if text == question.question:
         return question
     return Question(question.id, question.business_id, text, question.as_of_date)
@@ -177,11 +188,56 @@ def entity_candidates(context: BusinessContext, question: str, kind: str = "prod
             re.search(_alias_pattern(a), question.casefold()) for a in (*aliases, code or "") if a
         ):
             result.append(row)
-    return (coded or result)[:9]
+    return (coded or result or _unaccented_candidates(context, question, kind))[:9]
+
+
+def _strip_marks(text: str) -> str:
+    """Casefolded ``text`` without Vietnamese marks, letter for letter (same length)."""
+    return "".join(normalized(c) or c for c in unicodedata.normalize("NFC", text).casefold())
+
+
+def _distinctive(name: str) -> bool:
+    """An unaccented spelling that cannot be everyday words: three or more words, a digit,
+    or a word that is not a Vietnamese syllable ("croissant")."""
+    from src.semantics.typos import is_syllable
+
+    words = re.findall(r"[^\W\d_]+", name)
+    return len(words) >= 3 or bool(re.search(r"\d", name)) or not all(map(is_syllable, words))
+
+
+def _unaccented_candidates(context: BusinessContext, question: str, kind: str) -> list[dict]:
+    """Entities whose name the question types without accent marks ("banh croissant" for
+    "Bánh croissant"): the matched words carry no mark and the spelling is distinctive."""
+    text = unicodedata.normalize("NFC", question).casefold()
+    bare = _strip_marks(text)
+    if len(bare) != len(text):
+        return []
+    result = []
+    for key, code, name, unit, aliases in _candidate_rows(context.prepared, kind):
+        for alias in (*aliases, name):
+            if not alias or not _distinctive(_strip_marks(alias)):
+                continue
+            found = re.search(_alias_pattern(_strip_marks(alias)), bare)
+            if found and text[found.start() : found.end()] == found[0]:
+                result.append(
+                    {"entity_key": key, "source_code": code, "name": name, "base_unit": unit}
+                )
+                break
+    return result
 
 
 def business_spec(question: Question) -> dict | None:
     """Finite intent guards, only question text/capability; no answers or IDs."""
+    spec = _business_spec(question)
+    # A percent sign glued to a number ("Natri clorid 0,9%") is part of an item name; only
+    # the stock and lot questions about that one item are read with it.
+    if spec and re.search(r"\d%", question.question):
+        if spec["metric"] not in {"stock_balance", "lot_expiry"}:
+            return None
+    return spec
+
+
+def _business_spec(question: Question) -> dict | None:
     from src.agent.plan import _literal_windows
 
     text = question_plain(question.question)
@@ -218,7 +274,7 @@ def business_spec(question: Question) -> dict | None:
         text,
     ):
         return None
-    if "%" in text and not nearest_lot:
+    if re.search(r"(?<!\d)%", text) and not nearest_lot:
         return None
     expressions = _literal_windows(question)
     current_point = all(
@@ -540,12 +596,13 @@ def validate_business_plan(
             raise ContractError("question_entity_unsupported_missing_ambiguous_or_not_grounded")
         entity = candidates[0]
         if spec["metric"] in {"quantity", "stock_balance"}:
-            remaining = question.question.casefold()
+            # Accent-free, so a name typed without marks is removed as well.
+            remaining = _strip_marks(question.question)
             for name in [entity["name"], entity["source_code"] or ""]:
                 if name:
-                    remaining = re.sub(_alias_pattern(name), " ", remaining)
+                    remaining = re.sub(_alias_pattern(_strip_marks(name)), " ", remaining)
             if not entity["base_unit"] or not re.search(
-                _alias_pattern(entity["base_unit"]), remaining
+                _alias_pattern(_strip_marks(entity["base_unit"])), remaining
             ):
                 raise ContractError("explicit_base_unit_required")
         plan["resolved_entity"] = entity

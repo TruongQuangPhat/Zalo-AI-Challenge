@@ -357,8 +357,24 @@ def test_model_rewrite_is_used_only_when_numbers_names_and_periods_survive(rewri
     from src.data.split import Question
 
     original = Question("q", "b", "dthu th 8/2025 của Trà Sữa Hoa bnhiu z", "2026-01-01")
-    result = rewrite_question(_Rewriter(rewrite), original)
+    result, outcome = rewrite_question(_Rewriter(rewrite), original)
     assert (result is not None) is kept
+    assert outcome["status"] == ("rewritten" if kept else "unfaithful")
+
+
+def test_planner_logs_why_a_model_rewrite_did_not_reach_a_rule_answer(semantic_source):
+    from src.agent.planner import LocalPlanner
+    from src.data.split import Question
+
+    rewrite = "Doanh thu tháng này của quán qzxv là bao nhiêu?"
+    original = Question("q", "b", "dthu thang nay cua quan qzxv bnhiu z", "2026-01-31")
+    result = LocalPlanner(_Rewriter(rewrite)).decide(original, context=semantic_source())
+    assert result["answer"]["type"] == "abstain"
+    assert result["plan"]["rewrite"] == {
+        "status": "not_ruled",
+        "text": rewrite,
+        "unknown_words": ["qzxv"],
+    }
 
 
 REPAIR_RULES = (

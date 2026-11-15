@@ -250,23 +250,30 @@ _NUMBER = re.compile(r"\d+(?:[.,/:-]\d+)*")
 _NAME = re.compile(r"(?<=[\w,] )[A-ZĐÀ-Ỹ][\w-]*")
 
 
-def faithful_rewrite(original: str, rewritten: str) -> bool:
-    """Every number and name-like word survives verbatim, and no new number appears."""
+def rewrite_drift(original: str, rewritten: str) -> str | None:
+    """What a rewrite failed to keep: ``numbers``, ``names`` or ``cues``; None when every
+    number and name-like word survives verbatim, no new number appears and the relative
+    periods and comparison words are the same."""
     from collections import Counter
 
     numbers = Counter(_NUMBER.findall(original))
     if numbers != Counter(_NUMBER.findall(rewritten)):
-        return False
+        return "numbers"
     words = set(re.findall(r"[\w-]+", rewritten))
     if not all(name in words for name in _NAME.findall(original)):
-        return False
+        return "names"
     from src.semantics.rulebook import question_plain
 
     # Relative periods and comparison words must not drift ("hôm qua" -> "hôm nay").
     def cues(text: str) -> list[str]:
         return sorted(re.findall(_CUES, question_plain(text)))
 
-    return cues(original) == cues(rewritten)
+    return None if cues(original) == cues(rewritten) else "cues"
+
+
+def faithful_rewrite(original: str, rewritten: str) -> bool:
+    """Every number and name-like word survives verbatim, and no new number appears."""
+    return rewrite_drift(original, rewritten) is None
 
 
 _CUES = (
@@ -276,8 +283,9 @@ _CUES = (
 )
 
 
-def rewrite_question(model, question: Question) -> Question | None:
-    """One short model call; ``None`` unless the rewrite keeps every number and name."""
+def rewrite_question(model, question: Question) -> tuple[Question | None, dict]:
+    """One short model call. The rewritten question is ``None`` unless the rewrite keeps
+    every number and name; the outcome records why for the question log."""
     from dataclasses import replace
 
     schema = {
@@ -290,13 +298,17 @@ def rewrite_question(model, question: Question) -> Question | None:
     try:
         record = model.generate([{"role": "user", "content": prompt}], schema, 60, max_tokens=256)
         if record.get("finish_reason") != "stop":
-            return None
+            return None, {"status": "incomplete", "finish_reason": record.get("finish_reason")}
         text = str(loads(record["text"])["question"]).strip()
-    except (ContractError, OSError, ValueError, KeyError, TypeError):
-        return None
-    if not text or text == question.question or not faithful_rewrite(question.question, text):
-        return None
-    return replace(question, question=text)
+    except (ContractError, OSError, ValueError, KeyError, TypeError) as exc:
+        return None, {"status": "call_failed", "error": f"{type(exc).__name__}: {exc}"[:300]}
+    if not text:
+        return None, {"status": "empty"}
+    if text == question.question:
+        return None, {"status": "unchanged"}
+    if drift := rewrite_drift(question.question, text):
+        return None, {"status": "unfaithful", "drift": drift, "text": text}
+    return replace(question, question=text), {"status": "rewritten", "text": text}
 
 
 class LocalPlanner:
@@ -319,7 +331,15 @@ class LocalPlanner:
         }
 
     def decide(self, question: Question, *, context: BusinessContext) -> dict:
-        from src.agent.entities import regional_aligned, typo_repaired
+        rewrite: dict = {}
+        decision = self._decide(question, context, rewrite)
+        if rewrite:
+            # Why the model rewrite did or did not lead to a rule answer (log only).
+            decision["plan"]["rewrite"] = rewrite
+        return decision
+
+    def _decide(self, question: Question, context: BusinessContext, rewrite: dict) -> dict:
+        from src.agent.entities import entity_words, regional_aligned, typo_repaired
         from src.agent.rule_ops import answer_by_rule
 
         question = typo_repaired(context, regional_aligned(context, question))
@@ -327,11 +347,23 @@ class LocalPlanner:
         ruled = answer_by_rule(question, context) if self.rule_ops else None
         if ruled is None and self.rule_ops:
             # Chat/dialect wording no operator recognised: a faithful standard rewrite only.
-            rewritten = rewrite_question(self.model, question)
+            rewritten, outcome = rewrite_question(self.model, question)
+            rewrite.update(outcome)
             if rewritten is not None:
                 ruled = answer_by_rule(rewritten, context)
                 if ruled is not None:
                     ruled["plan"]["rewritten_question"] = rewritten.question
+                    rewrite["status"] = "answered"
+                else:
+                    from src.semantics.vocabulary import unknown_words
+
+                    repaired = typo_repaired(context, regional_aligned(context, rewritten))
+                    rewrite["status"] = "not_ruled"
+                    rewrite["unknown_words"] = unknown_words(
+                        repaired.question,
+                        entity_words(context),
+                        entity_words(context, accented=True),
+                    )
         if ruled is not None:
             if expected := shape_mismatch(question, ruled["answer"]["type"]):
                 return _suppress(ruled, question, "guard:answer_shape", expected=expected)

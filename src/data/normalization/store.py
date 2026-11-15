@@ -32,7 +32,7 @@ from src.data.normalization.values import STATUS_ALIASES, parse_date
 from src.data.profiling import normalized
 from src.jsonio import ContractError, dumps, loads
 
-VERSION = "prepared-facts-v8"
+VERSION = "prepared-facts-v9"
 MAX_STATUS_VALUES = 30  # more distinct rejected values than this is not a status column
 SCHEMA = """
 PRAGMA foreign_keys=ON;

@@ -13,6 +13,68 @@
 
 ---
 
+## Round 7 (lần cuối): tổng quát hoá, đo trên train — 15/11/2026
+
+Nguyên tắc: không đọc câu/dữ liệu public để viết luật; mọi thay đổi đo trên train
+(`dataset/train`) và biến thể của train. Public chỉ để kiểm tra chương trình chạy được.
+
+**P1. Bước model viết lại câu (chưa đo được trên CPU).**
+
+- `planner.decide` ghi `plan.rewrite`: `call_failed` / `incomplete` / `empty` / `unchanged` /
+  `unfaithful` (kèm `drift`: numbers, names, cues) / `not_ruled` (kèm `unknown_words` còn
+  lại) / `answered`. Chỉ thêm log, không đổi hành vi.
+- Notebook molab (`.artifacts/molab_llm_mapping.py`): mỗi lượt predict có thêm
+  `*-questions.jsonl` (mỗi câu một dòng: loại đáp án, op, trạng thái plan, câu viết lại, lý
+  do); bước `RUN_TRAIN_MODEL_EVAL` chạy `predict.sh` trên câu gốc + chat + phrasing của 9 shop
+  train và chấm bằng `src.cli evaluate` (nhãn tách khỏi split trước khi predict). Chưa chạy.
+
+**P2. Sửa lỗi gõ theo ngữ cảnh.** Từ lạ vẫn là âm tiết hợp lệ ("dảm", "đơng", "chước",
+"thán") được sửa khi đúng một cách đọc (các phép cũ + nhầm n/ng, t/c, i/y cuối) tạo thành cụm
+2 từ đã gặp trong câu train (`src/semantics/question_bigrams.txt`, 4.547 cụm, sinh bằng
+`scripts.build_question_words`). Biến thể đo mới `typo_questions` (`scripts.perturb_train`):
+lỗi gõ ngẫu nhiên theo quy tắc chung trên từ dùng ở ≥ 1/4 số shop, không chạm từ nằm trong
+cụm 2 từ có trong dữ liệu shop, không tạo ra từ đã biết.
+
+- Lỗi tìm được nhờ biến thể này: chữ gõ sai có dấu trùng cách viết không dấu của một chữ trong
+  tên ("thán" ~ "Thân", "hơng" ~ "Hồng") được coi là chữ của tên, nên không sửa và không bị
+  chặn: "thán 3 năm 2026" thành câu hỏi cả năm 2026. Nay bước sửa lỗi gõ chỉ giữ chữ có dấu
+  khi tên viết đúng như vậy; bước kiểm tra từ lạ coi chữ đó là chữ của tên khi tên viết đúng
+  như vậy hoặc cách viết không dấu cũng là một từ hỏi đã đo ("cũa", "tóp" vẫn hiểu được).
+
+**P3. Tồn kho, lô (tầng dữ liệu và luật).**
+
+- Bảng tồn cuối chỉ ghi tên hàng (biz_105, biz_117) được đọc khi tên khớp đúng một mặt hàng
+  (facts `prepared-facts-v9`).
+- `src/agent/lot_book.py`: sổ lô đọc theo tiêu đề hoặc nghĩa README (mỗi dòng nhập một lô, số
+  lượng theo đơn vị cơ bản; dòng bán lấy từ lô; hàng trả về lô). Tồn lô cuối dữ liệu = nhập −
+  bán (đơn không huỷ) + trả. Chỉ dùng khi facts không có lô; shop có bảng tồn cuối thì tổng
+  theo lô phải khớp bảng tồn (biz_119/120/124 khớp hết), lệch thì bỏ trống.
+- Phép mới: tồn theo đơn vị lớn `[nguyên, lẻ]` (luật `large_unit_stock`, hệ số ở bảng quy
+  đổi, đơn vị lẻ phải là đơn vị cơ bản), tồn một mặt hàng từ sổ lô, lô gần hết hạn nhất; câu
+  "hàng hết hạn trong N ngày" dùng sổ lô khi facts không có lô.
+- Câu tồn kho: "%" dính số trong tên hàng ("Natri clorid 0,9%"), tên hàng gõ không dấu khi
+  cách viết đủ riêng (≥ 3 từ, có số, hoặc có từ không phải âm tiết tiếng Việt).
+
+**Sửa nhỏ khác (đều đo trên train):** đơn vị ở shop dạng sổ được bỏ dấu ("bao nhiêu đĩa");
+chữ "kho" trong tên món ("Rau củ kho quẹt"); "bao nhiêu chai nhỉ"; giá bán một ngày ở bảng chỉ
+ghi mã hàng; "Xu hướng doanh thu 3 tháng A → B → C: có phải …"; nhãn nhóm chứa chữ điều kiện
+("nhóm giảm đau hạ sốt"); "người bán" là nhân viên.
+
+**Kết quả** (CPU, chỉ phần luật, `.artifacts/r7/qcombo`, facts `.artifacts/r5/train3`):
+
+| Phần | Mốc `6fe683c` | Round 7 |
+| --- | --- | --- |
+| Train gốc | 2.874 / 0 sai | **2.936 / 0 sai** |
+| Chat | 2.049 / 0 | **2.083 / 0** |
+| Phrasing | 1.615 / 0 | **1.629 / 0** |
+| Trap lọt | 1 / 600 | 1 / 600 (cùng câu biz_109) |
+| Lỗi gõ (mới) | 1.700 / **3 sai** | **2.190 / 0** |
+
+Không mất câu nào so với mốc (`.artifacts/r7/new4_verdicts.json`). Kiểm tra public (chỉ luật,
+facts public cũ, so với bài molab r6c): 0 câu đổi giá trị; thêm 6 câu; 14 câu r6c trả lời nhờ
+bước model viết lại (luật mốc cũng không trả lời) vẫn để cho model. 777 test đạt, ruff đạt. Chưa chạy GPU/molab cho bản này; TP=2
+chưa từng chạy; bước model viết lại/lập plan chưa đo trên train.
+
 ## Round 6: sửa 28 câu sai của r5d, tên món theo vùng miền, lãi ròng — 15/11/2026
 
 Bản r5d (`e8bd69e`) được **0,870** public với 926 câu trả lời: khoảng 898 đúng / 28 sai.

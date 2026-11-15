@@ -76,6 +76,7 @@ VARIANTS = (
     "footer_rows",
     "phrasing_questions",
     "trap_questions",
+    "typo_questions",
 )
 _BULLET = re.compile(r"^(\s*-\s+\*\*)(.+?)(\*\*\s*:\s*)(.+)$")
 _SECTION = re.compile(r"^## Cột trong `")
@@ -707,6 +708,149 @@ def phrasing_split(data_dir: Path, root: Path) -> int:
     return len(rules)
 
 
+# --- Typing slips (round 7): general keyboard/spelling errors, never a list of real typos ---
+
+_TONE_KEYS = {"\u0301": "s", "\u0300": "f", "\u0309": "r", "\u0303": "x", "\u0323": "j"}
+_SLIP_ONSETS = (
+    ("s", "x"),
+    ("x", "s"),
+    ("ch", "tr"),
+    ("tr", "ch"),
+    ("gi", "d"),
+    ("d", "gi"),
+    ("l", "n"),
+    ("n", "l"),
+    ("v", "d"),
+    ("c", "k"),
+    ("qu", "w"),
+    ("ph", "f"),
+)
+_SLIP_FINALS = (("ng", "n"), ("n", "ng"), ("c", "t"), ("t", "c"))
+
+
+def _typo_forms(word: str) -> list[str]:
+    """Every single general slip of one word, in a fixed order."""
+    nfd = unicodedata.normalize("NFD", word)
+    tone = next((c for c in nfd if c in _TONE_KEYS), None)
+    bare = unicodedata.normalize("NFC", "".join(c for c in nfd if c not in _TONE_KEYS))
+    forms = []
+    if tone:  # Telex tone key typed after the word instead of the mark
+        forms.append(bare + _TONE_KEYS[tone])
+        other = {"\u0309": "\u0303", "\u0303": "\u0309"}.get(tone)
+        if other:  # hỏi and ngã confused
+            forms.append(unicodedata.normalize("NFC", nfd.replace(tone, other)))
+    for final in ("nh", "ng"):  # the "n" of a final nh/ng dropped
+        if word.endswith(final) and len(word) > 2:
+            forms.append(word[:-2] + final[1])
+    for typed, meant in _SLIP_ONSETS:
+        if word.startswith(typed) and len(word) > len(typed) + 1:
+            forms.append(meant + word[len(typed) :])
+    for typed, meant in _SLIP_FINALS:
+        if word.endswith(typed) and not word.endswith(("nh", "ch")) and len(word) > 2:
+            forms.append(word[: -len(typed)] + meant)
+    for i in range(len(word) - 1):  # two adjacent keys swapped
+        if word[i] != word[i + 1]:
+            forms.append(word[:i] + word[i + 1] + word[i] + word[i + 2 :])
+    if len(word) >= 3:  # a key pressed twice
+        forms.append(word[:-1] + word[-1] * 2)
+    return forms
+
+
+def _shop_pairs(business: Path) -> set[str]:
+    """Casefolded adjacent word pairs of a shop's data cells (CSV, XLSX strings, SQLite)."""
+    import sqlite3
+
+    parts = []
+    for path in sorted(business.iterdir()):
+        if path.suffix == ".csv":
+            parts.append(path.read_text(encoding="utf-8-sig", errors="replace"))
+        elif path.suffix == ".xlsx":
+            with zipfile.ZipFile(path) as archive:
+                for name in archive.namelist():
+                    if name.endswith(".xml") and ("sharedStrings" in name or "sheet" in name):
+                        xml = archive.read(name).decode("utf-8", "replace")
+                        parts += map(html.unescape, re.findall(r"<t[^>]*>([^<]*)</t>", xml))
+        elif path.suffix == ".sqlite":
+            with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+                tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master")]
+                for table in tables:
+                    for row in conn.execute(f'SELECT * FROM "{table}"'):
+                        parts += [v for v in row if isinstance(v, str)]
+    pairs = set()
+    for line in unicodedata.normalize("NFC", "\n".join(parts)).casefold().splitlines():
+        words = re.findall(r"\w+", line)
+        pairs.update(f"{a} {b}" for a, b in zip(words, words[1:], strict=False))
+    return pairs
+
+
+def typo_question(text: str, index: int, general: set[str], shop_pairs: set[str]) -> str:
+    """One or two general words of a question typed with a slip that leaves no known word.
+    A word that, with a neighbour, appears in the shop's data is part of a name: kept."""
+    import random
+
+    from src.semantics.vocabulary import is_known
+
+    rng = random.Random(index)
+    words = list(re.finditer(r"\w+", text))
+
+    def in_data(i: int) -> bool:
+        pairs = [words[j : j + 2] for j in (i - 1, i) if j >= 0 and j + 1 < len(words)]
+        return any(f"{a[0]} {b[0]}".casefold() in shop_pairs for a, b in pairs)
+
+    spans = [
+        m
+        for i, m in enumerate(words)
+        if m[0] == m[0].casefold()
+        and m[0] in general
+        and not re.search(r"\d", m[0])
+        and not in_data(i)
+    ]
+    rng.shuffle(spans)
+    chosen = []
+    for match in spans:
+        forms = [f for f in _typo_forms(match[0]) if f != match[0] and not is_known(f)]
+        if forms:
+            chosen.append((match, rng.choice(forms)))
+        if len(chosen) == 1 + index % 2:
+            break
+    for match, form in sorted(chosen, key=lambda c: -c[0].start()):
+        text = text[: match.start()] + form + text[match.end() :]
+    return text
+
+
+def typo_split(data_dir: Path, root: Path) -> int:
+    """Questions with general typing slips in common question words (used by at least a
+    quarter of the shops, so never part of an item or person name)."""
+    root.mkdir(parents=True)
+    for business in sorted((data_dir / "data").iterdir()):
+        for path in business.iterdir():
+            _link(path, root / "data" / business.name / path.name)
+    for name in ["rulebook.md", "calendar.csv"]:
+        _link(data_dir / name, root / name)
+    questions = [json.loads(line) for line in (data_dir / "questions.jsonl").open()]
+    shops: dict[str, set[str]] = {}
+    for q in questions:
+        for word in re.findall(r"\w+", unicodedata.normalize("NFC", q["question"])):
+            shops.setdefault(word, set()).add(q["business_id"])
+    floor = max(2, len({q["business_id"] for q in questions}) // 4)
+    general = {w for w, s in shops.items() if len(s) >= floor and w == w.casefold()}
+    kept, lines, texts = set(), [], {}
+    for i, q in enumerate(questions):
+        if q["business_id"] not in texts:
+            texts[q["business_id"]] = _shop_pairs(data_dir / "data" / q["business_id"])
+        text = texts[q["business_id"]]
+        new = typo_question(unicodedata.normalize("NFC", q["question"]), i, general, text)
+        if new != unicodedata.normalize("NFC", q["question"]):
+            kept.add(q["id"])
+            lines.append(json.dumps(q | {"question": new}, ensure_ascii=False) + "\n")
+    (root / "questions.jsonl").write_text("".join(lines), encoding="utf-8")
+    answers = (data_dir / "answers.jsonl").read_text(encoding="utf-8").splitlines(keepends=True)
+    (root / "answers.jsonl").write_text(
+        "".join(a for a in answers if json.loads(a)["id"] in kept), encoding="utf-8"
+    )
+    return len(kept)
+
+
 def _protected_names(data_dir: Path) -> dict[str, set[str]]:
     """Plain text of every question and answer per business; renamed values avoid it."""
     texts: dict[str, list[str]] = {}
@@ -766,6 +910,9 @@ def main(argv: list[str] | None = None) -> None:
             continue
         if variant == "phrasing_questions":
             print(f"{variant}: {phrasing_split(data_dir, root)} questions -> {root}")
+            continue
+        if variant == "typo_questions":
+            print(f"{variant}: {typo_split(data_dir, root)} questions -> {root}")
             continue
         if variant == "trap_questions":
             print(f"{variant}: {trap_split(data_dir, root)} questions -> {root}")
