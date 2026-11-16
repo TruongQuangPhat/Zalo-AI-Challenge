@@ -116,9 +116,16 @@ Inference settings (fixed defaults in `src/cli.py` and `src/agent/local.py`):
 
 ## Training and data
 
-No training, fine-tuning or data generation is performed. The rulebook operators are
-hand-written from the rulebook, the shop READMEs and the provided train split. The train
-answers are used only for offline scoring. Details are in `training_code/README.md` and
+No model is trained or fine-tuned: training samples 0, validation samples 0. The rulebook
+operators are hand-written from the rulebook, the shop READMEs and the provided train split
+(30 businesses, 3,000 questions). The train answers are used only for offline scoring.
+
+The only derived data is the question vocabulary in `src/semantics/` (`question_words.txt`,
+1,185 words; `question_bigrams.txt`, 4,547 word pairs). It is built from the 3,000 train
+questions and two deterministic rule rewrites of them (chat spellings, 2,129 questions;
+other everyday wordings, 1,682 questions), with no model and no randomness. The source
+questions, the generator and the rebuild command are in `training_code/`; the rebuild is
+byte-identical. Details are in `training_code/README.md` and
 `training_code/data_manifest.json`.
 
 ## Input and output
@@ -149,7 +156,8 @@ answers are used only for offline scoring. Details are in `training_code/README.
 │   ├── agent/            # planner, rulebook operators, executors, local model
 │   └── evaluation/       # offline scorer (not used during inference)
 ├── models/qwen3-14b/     # model weights (downloaded, not in git)
-└── training_code/        # no-training statement, model manifest and checksums
+└── training_code/        # no-training statement, question vocabulary generator and
+                          # source questions, model manifest and checksums
 ```
 
 ## Setup

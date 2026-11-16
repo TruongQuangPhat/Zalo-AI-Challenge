@@ -4,7 +4,42 @@
   "datasets": {
     "train_samples": 0,
     "validation_samples": 0,
-    "files": []
+    "files": [],
+    "note": "No model is trained or fine-tuned, so there is no training or validation data."
+  },
+  "question_vocabulary": {
+    "purpose": "Word list read by the rule operators (typo repair, unknown-word check); not a learned model.",
+    "source": {
+      "path": "/code/training_code/data/train_questions.jsonl",
+      "bytes": 504081,
+      "sha256": "b258ebd978a6d51b3b0b431b26926f958e56522beeb7da2984fea8333e21cec1",
+      "origin": "Zalo AI Challenge 2026 DataMate train split, questions.jsonl (unchanged copy)",
+      "questions": 3000,
+      "businesses": 30
+    },
+    "generation": {
+      "script": "/code/training_code/data_generation/build_question_vocabulary.py",
+      "command": "cd /code && PYTHONPATH=/code python3 training_code/data_generation/build_question_vocabulary.py --questions training_code/data/train_questions.jsonl --out-dir /tmp/vocabulary --check",
+      "method": "Deterministic rule rewrites of the train questions (no model, no randomness): chat spellings and other everyday wordings, rotated by line index.",
+      "variant_counts": {
+        "chat_questions": 2129,
+        "phrasing_questions": 1682
+      }
+    },
+    "outputs": [
+      {
+        "path": "/code/src/semantics/question_words.txt",
+        "bytes": 6720,
+        "sha256": "dc505b89aad3b138adddd536f106198283818ec3c8e8ae2e5be928cc2bb1d7ca",
+        "entries": 1185
+      },
+      {
+        "path": "/code/src/semantics/question_bigrams.txt",
+        "bytes": 41519,
+        "sha256": "ace38ef49c951ec37765afa1d1dd288422f561725855279c299085174c7efe8e",
+        "entries": 4547
+      }
+    ]
   },
   "inference_models": [
     {
