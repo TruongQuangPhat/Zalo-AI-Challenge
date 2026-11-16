@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import signal
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -44,7 +45,9 @@ def guided_schema(schema: dict) -> dict:
 def _worker(
     pipe, model_dir: str, max_model_len: int, gpu_memory_utilization: float, tensor_parallel: int
 ) -> None:
-    # Keep the engine in this process so terminating the worker releases the GPU.
+    # Keep the engine in this process so terminating the worker releases the GPU. Its own
+    # process group also holds the tensor-parallel workers vLLM starts, so close() stops them.
+    os.setpgrp()
     os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
     os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
     try:
@@ -217,6 +220,12 @@ class LocalModel:
         if self.process.is_alive():
             self.process.kill()
             self.process.join(timeout=2)
+        # Tensor-parallel workers outlive a stopped worker and keep the run from exiting.
+        if self.process.pid is not None:
+            try:
+                os.killpg(self.process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
         self.pipe.close()
 
 
