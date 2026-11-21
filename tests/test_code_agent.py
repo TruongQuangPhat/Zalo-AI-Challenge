@@ -40,6 +40,7 @@ def test_extract_code_and_vote_key():
     assert extract_code("x\n```python\nANSWER = 1\n```") == "ANSWER = 1\n"
     assert extract_code("không có code") is None
     assert vote_key({"type": "number", "answer": 3}) == vote_key({"type": "number", "answer": 3.0})
+    assert vote_key({"type": "number", "answer": 10**400})
     assert vote_key({"type": "string", "answer": " Trà "}) == vote_key({"type": "string", "answer": "trà"})
 
 

@@ -446,7 +446,10 @@ def _norm(value: Any) -> Any:
     if isinstance(value, bool) or value is None:
         return value
     if isinstance(value, (int, float)):
-        return round(float(value), 2)
+        try:
+            return round(float(value), 2)
+        except OverflowError:  # an absurdly large int still votes, as its digits
+            return str(value)
     if isinstance(value, str):
         return re.sub(r"\s+", " ", value).strip().casefold()
     if isinstance(value, list):
