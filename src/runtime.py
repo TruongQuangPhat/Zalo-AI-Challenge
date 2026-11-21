@@ -225,7 +225,9 @@ def run_inference(
                 phase_start = time.perf_counter()
                 try:
                     context = contexts[question.business_id]
-                    if context is None:
+                    if context is None and not getattr(
+                        adapter, "accepts_missing_context", False
+                    ):
                         raise ContractError("business preparation failed; see catalog diagnostic")
                     called_planner = True
                     decision = adapter.decide(question, context=context)

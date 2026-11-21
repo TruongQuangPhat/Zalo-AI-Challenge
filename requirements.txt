@@ -4,3 +4,6 @@ vllm==0.10.1.1
 # vLLM 0.10.1.1 requires transformers>=4.55 without an upper bound; 5.x removed
 # Qwen2Tokenizer.all_special_tokens_extended, which this vLLM still calls.
 transformers==4.55.4
+# Code fallback (post-hoc 2026-11): sandboxed pandas code over raw shop files.
+pandas==2.2.3
+openpyxl==3.1.5

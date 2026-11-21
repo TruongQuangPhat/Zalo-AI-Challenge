@@ -13,7 +13,7 @@ from src.data.cache import fingerprint
 from src.data.catalog import digest
 from src.jsonio import ContractError
 
-MAX_MODEL_LEN = 16384  # mapping prompts list every column of a shop
+MAX_MODEL_LEN = 24576  # mapping prompts list every column; code fallback adds rulebook + previews
 GPU_MEMORY_UTILIZATION = 0.85
 REQUIRED_FILES = ("config.json", "tokenizer.json", "tokenizer_config.json")
 
@@ -80,6 +80,37 @@ def _worker(
             request = pipe.recv()
             if request is None:
                 break
+            if request.get("free"):
+                # Free-text samples (code fallback): no grammar, n samples in one batch.
+                try:
+                    started = time.monotonic()
+                    params = SamplingParams(
+                        n=request.get("n", 1),
+                        temperature=request.get("temperature", 0.0),
+                        top_p=0.95 if request.get("temperature") else 1.0,
+                        seed=request.get("seed", 0),
+                        max_tokens=request["max_tokens"],
+                    )
+                    result = model.chat(
+                        request["messages"],
+                        params,
+                        use_tqdm=False,
+                        chat_template_kwargs={"enable_thinking": bool(request.get("thinking"))},
+                    )[0]
+                    pipe.send(
+                        {
+                            "texts": [o.text for o in result.outputs],
+                            "finish_reasons": [o.finish_reason for o in result.outputs],
+                            "usage": {
+                                "prompt_tokens": len(result.prompt_token_ids or []),
+                                "completion_tokens": sum(len(o.token_ids) for o in result.outputs),
+                            },
+                            "seconds": time.monotonic() - started,
+                        }
+                    )
+                except Exception as exc:
+                    pipe.send({"request_error": f"{type(exc).__name__}: {exc}"})
+                continue
             try:
                 started = time.monotonic()
                 # Two aggregates plus refs need more JSON than the S1 scalar draft.
@@ -208,6 +239,31 @@ class LocalModel:
         if not self.process.is_alive():
             raise ContractError("local_model_worker_unavailable")
         self.pipe.send({"messages": messages, "schema": schema, "max_tokens": max_tokens})
+        return self._receive(timeout)
+
+    def sample(
+        self,
+        messages: list[dict],
+        timeout: float,
+        *,
+        n: int,
+        temperature: float,
+        max_tokens: int,
+        thinking: bool = False,
+    ) -> dict:
+        """n free-text completions of one prompt (no JSON grammar)."""
+        if not self.process.is_alive():
+            raise ContractError("local_model_worker_unavailable")
+        self.pipe.send(
+            {
+                "free": True,
+                "messages": messages,
+                "n": n,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "thinking": thinking,
+            }
+        )
         return self._receive(timeout)
 
     def close(self) -> None:

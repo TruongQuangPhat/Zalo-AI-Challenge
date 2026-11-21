@@ -45,6 +45,15 @@ def main(argv: list[str] | None = None) -> int:
     predict.add_argument(
         "--question-id", action="append", help="explicit subset, input order retained"
     )
+    predict.add_argument(
+        "--fallback",
+        choices=["off", "code", "code-only"],
+        default="code",
+        help="code: model-written pandas code answers what the rule planner abstains on; "
+        "code-only: skip the rule planner (measurement)",
+    )
+    predict.add_argument("--fallback-samples", type=int, default=4)
+    predict.add_argument("--fallback-min-votes", type=int, default=3)
     for command, help_text in [
         ("catalog", "inspect source tables without labels or metrics"),
         ("prepare", "normalize supported sources into exact, traceable local facts"),
@@ -76,11 +85,27 @@ def main(argv: list[str] | None = None) -> int:
                 tensor_parallel=args.tensor_parallel_size,
             )
             try:
+                planner = LocalPlanner(model, timeout=args.question_timeout)
+                if args.fallback != "off":
+                    import tempfile
+
+                    from src.agent.code_agent import CodeAgent, FallbackPlanner
+
+                    agent = CodeAgent(
+                        model,
+                        args.data_dir.resolve(),
+                        args.cache_dir or Path(tempfile.mkdtemp(prefix="code_agent_")),
+                        samples=args.fallback_samples,
+                        min_votes=args.fallback_min_votes,
+                    )
+                    planner = FallbackPlanner(
+                        planner, agent, skip_base=args.fallback == "code-only"
+                    )
                 report = run_inference(
                     args.data_dir,
                     args.output_dir,
                     cache_dir=args.cache_dir,
-                    planner=LocalPlanner(model, timeout=args.question_timeout),
+                    planner=planner,
                     question_ids=args.question_id,
                     resume_from=args.resume_from,
                     resume_tail=args.resume_tail,
