@@ -43,6 +43,38 @@ def test_extract_code_and_vote_key():
     assert vote_key({"type": "string", "answer": " Trà "}) == vote_key({"type": "string", "answer": "trà"})
 
 
+def test_table_helpers_clean_numbers_dates_and_join_sheets(tmp_path):
+    path = tmp_path / "t.pkl"
+    a = pd.DataFrame([["Ngày", "Tiền", "Mã"], ["1 thg 6 2025", "1.250.000", "0901234567"],
+                      ["2/6/2025", "560,000", "0907654321"]])
+    b = pd.DataFrame([["Ngày", "Tiền", "Mã"], ["3/7/2025", "12k", "0900000000"]])
+    pickle.dump({"so.xlsx::T6": a, "so.xlsx::T7": b}, path.open("wb"))
+    code = (
+        "df = table('so.xlsx')\n"
+        "ANSWER = {'type': 'list', 'answer': [df['Tiền'].sum(), str(df['Ngày'].min().date()), "
+        "df['Mã'].iloc[0], len(df), sorted(df['sheet'].unique())]}"
+    )
+    out = run_code(code, path, "2026-01-05")
+    assert out == {"answer": {"type": "list", "answer": [1822000, "2025-06-01", "0901234567", 3, ["T6", "T7"]]}}
+
+
+def test_numeric_strings_are_coerced_and_failures_repaired(tmp_path):
+    root = _split(tmp_path)
+    as_text = "```python\nANSWER = {'type': 'number', 'answer': '1.250.000'}\n```"
+    broken = "```python\nANSWER = {'type': 'number', 'answer': undefined_name}\n```"
+
+    class Repairing(FakeModel):
+        def sample(self, messages, timeout, **kwargs):
+            if messages[-1]["role"] == "user" and "bị lỗi" in messages[-1]["content"]:
+                return {"texts": [as_text, as_text], "usage": {}, "seconds": 0}
+            return {"texts": self.texts, "usage": {}, "seconds": 0}
+
+    agent = CodeAgent(Repairing([as_text, broken, broken, broken]), root, tmp_path / "c", min_votes=3)
+    out = agent.answer(Question("q1", "s1", "?", "2026-01-05"))
+    assert out["answer"] == {"id": "q1", "type": "number", "answer": 1250000}
+    assert sum(1 for r in out["log"]["runs"] if r.get("repair")) == 2
+
+
 def test_agent_answers_only_when_enough_samples_agree(tmp_path):
     root = _split(tmp_path)
     good = "```python\nANSWER = {'type': 'number', 'answer': len(table('ban.csv'))}\n```"

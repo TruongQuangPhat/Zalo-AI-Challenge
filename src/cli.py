@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     predict.add_argument("--fallback-samples", type=int, default=4)
     predict.add_argument("--fallback-min-votes", type=int, default=3)
+    predict.add_argument("--fallback-repairs", type=int, default=2)
     for command, help_text in [
         ("catalog", "inspect source tables without labels or metrics"),
         ("prepare", "normalize supported sources into exact, traceable local facts"),
@@ -97,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                         args.cache_dir or Path(tempfile.mkdtemp(prefix="code_agent_")),
                         samples=args.fallback_samples,
                         min_votes=args.fallback_min_votes,
+                        repairs=args.fallback_repairs,
                     )
                     planner = FallbackPlanner(
                         planner, agent, skip_base=args.fallback == "code-only"

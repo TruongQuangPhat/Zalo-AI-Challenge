@@ -147,6 +147,15 @@ def _worker(
                     }
                 )
             except Exception as exc:  # one bad request (e.g. prompt too long) keeps the engine
+                # A grammar that fails to compile can stay queued in the engine and fail every
+                # later request (seen on the 2026 private test); abort what is left of it.
+                try:
+                    engine = model.llm_engine
+                    states = getattr(getattr(engine, "output_processor", None), "request_states", None)
+                    if states:
+                        engine.abort_request(list(states))
+                except Exception:  # noqa: BLE001 - best effort only
+                    pass
                 pipe.send({"request_error": f"{type(exc).__name__}: {exc}"})
     except Exception as exc:
         pipe.send({"error": f"{type(exc).__name__}: {exc}"})
