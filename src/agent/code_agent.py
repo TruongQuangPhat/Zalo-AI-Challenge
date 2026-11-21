@@ -343,14 +343,19 @@ class CodeAgent:
         )
         log["usage"] = result.get("usage")
         log["model_seconds"] = result.get("seconds")
-        runs, by_code = [], {}
-        for text in result["texts"]:
-            code = extract_code(text)
+        from concurrent.futures import ThreadPoolExecutor
+
+        codes = [extract_code(text) for text in result["texts"]]
+        unique = list(dict.fromkeys(c for c in codes if c is not None))
+        with ThreadPoolExecutor(max_workers=max(1, len(unique))) as pool:
+            by_code = dict(
+                zip(unique, pool.map(lambda c: run_code(c, tables_path, question.as_of_date), unique))
+            )
+        runs = []
+        for code in codes:
             if code is None:
                 runs.append({"error": "no code"})
                 continue
-            if code not in by_code:
-                by_code[code] = run_code(code, tables_path, question.as_of_date)
             run = dict(by_code[code])
             run["code"] = code[-1500:]
             if "answer" in run:
