@@ -76,7 +76,19 @@ def _num(v):
     x *= mult
     return -x if neg else x
 
-def _date(v):
+_DMY = re.compile(r"^\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})")
+
+def _day_first(values):
+    """False when a column is written month first (some 'a/b/yyyy' has b > 12 and none a > 12)."""
+    firsts, seconds = [], []
+    for v in values:
+        m = _DMY.match(v) if isinstance(v, str) else None
+        if m:
+            firsts.append(int(m.group(1)))
+            seconds.append(int(m.group(2)))
+    return not (seconds and max(seconds) > 12 and max(firsts) <= 12)
+
+def _date(v, dayfirst=True):
     if isinstance(v, (pd.Timestamp, datetime)):
         return pd.Timestamp(v)
     if isinstance(v, date):
@@ -88,7 +100,9 @@ def _date(v):
     try:
         if re.match(r"^\d{4}-\d{1,2}-\d{1,2}", s):
             return pd.Timestamp(s)
-        return pd.to_datetime(s, dayfirst=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return pd.to_datetime(s, dayfirst=dayfirst)
     except (ValueError, TypeError, OverflowError):
         return None
 
@@ -107,9 +121,10 @@ def _clean(df):
         if sum(n is not None for n in nums) >= 0.9 * len(vals) and codes < 0.5 * len(vals):
             out[c] = pd.to_numeric(col.map(_num), errors="coerce")
             continue
-        dates = [_date(v) for v in vals]
+        first = _day_first(vals)
+        dates = [_date(v, first) for v in vals]
         if sum(d is not None for d in dates) >= 0.9 * len(vals):
-            out[c] = pd.to_datetime(col.map(_date), errors="coerce")
+            out[c] = pd.to_datetime(col.map(lambda v: _date(v, first)), errors="coerce")
     return out
 
 def _header_row(df):
@@ -151,16 +166,18 @@ def _resolve(name, store):
         raise KeyError(f"Không có bảng {name!r}. Các bảng: {list(store)}")
     return keys
 
-def _table(store, name, header_row=None, clean=True):
+def _table(store, name, header_row=None, clean=True, cache=None):
     parts = []
     keys = _resolve(name, store)
     for k in keys:
         df = store[k]
-        if not _is_sql(k):
+        if cache is not None and header_row is None and clean and k in cache:
+            df = cache[k].copy()  # cleaned once per shop, outside the sandbox
+        elif not _is_sql(k):
             df = _with_header(df, _header_row(df) if header_row is None else header_row)
         else:
             df = df.copy()
-        if clean:
+        if clean and not (cache is not None and header_row is None and k in cache):
             df = _clean(df)
         if len(keys) > 1:
             df["sheet"] = k.split("::")[-1]
@@ -170,15 +187,19 @@ def _table(store, name, header_row=None, clean=True):
 
 # Runs inside the sandbox (cwd = the shop's folder). argv[1] = pickled tables, argv[2] = today.
 PRELUDE = r'''
-import sys, json, math, re, pickle, datetime as dt
+import sys, json, math, re, pickle, warnings, datetime as dt
 from datetime import date, datetime, timedelta
 import pandas as pd
 import numpy as np
 pd.set_option("future.no_silent_downcasting", True)
 ''' + HELPERS + r'''
-_TABLES = pickle.load(open(sys.argv[1], "rb"))
+_STORE = pickle.load(open(sys.argv[1], "rb"))
+if "__raw__" in _STORE:
+    _TABLES, _CLEAN, CALENDAR = _STORE["__raw__"], _STORE["__clean__"], _STORE.get("__calendar__")
+else:
+    _TABLES, _CLEAN = _STORE, None
+    CALENDAR = _TABLES.pop("__calendar__", None)
 TODAY = date.fromisoformat(sys.argv[2])
-CALENDAR = _TABLES.pop("__calendar__", None)
 
 def tables():
     """Names of every table: 'file' or 'file::sheet'."""
@@ -192,7 +213,7 @@ def raw(name):
 def table(name, header_row=None, clean=True):
     """Table with its header row as column names; numbers/dates converted; a file name
     without '::sheet' joins all its sheets (column 'sheet')."""
-    return _table(_TABLES, name, header_row, clean)
+    return _table(_TABLES, name, header_row, clean, _CLEAN)
 
 def num(v):
     """Parse one number written as text ('1.250.000', '560,000', '12k'); NaN if not a number."""
@@ -240,7 +261,9 @@ def _helpers() -> dict:
     import numpy as np
     import pandas as pd
 
-    namespace = {"re": re, "math": math, "pd": pd, "np": np, "date": date_cls,
+    import warnings
+
+    namespace = {"re": re, "math": math, "warnings": warnings, "pd": pd, "np": np, "date": date_cls,
                  "datetime": datetime, "dt": dt_module}
     exec(HELPERS, namespace)  # noqa: S102 - our own constant helper source
     return namespace
@@ -307,21 +330,30 @@ def _kind(series) -> str:
     return "chữ"
 
 
-def preview(tables: dict, sample_rows: int = 3, distinct: bool = True) -> str:
-    """Compact view of what table() returns: columns with their kind, a few rows, the last
-    row, and the values of short text columns (status, channel, group...). Tables with the
-    same columns are listed once."""
+def clean_tables(tables: dict) -> dict:
+    """What table(name) returns for every single table, computed once per shop."""
     helpers = _helpers()
-    groups: dict[tuple, list[str]] = {}
     cleaned: dict[str, Any] = {}
     for name in tables:
         if name.startswith("__"):
             continue
         try:
-            frame = helpers["_table"](tables, name)
-        except Exception:  # noqa: BLE001 - a preview never fails the shop
+            cleaned[name] = helpers["_table"](tables, name)
+        except Exception:  # noqa: BLE001 - such a table is cleaned in the sandbox instead
             continue
-        cleaned[name] = frame
+    return cleaned
+
+
+def preview(
+    tables: dict, sample_rows: int = 3, distinct: bool = True, cleaned: dict | None = None
+) -> str:
+    """Compact view of what table() returns: columns with their kind, a few rows, the last
+    row, and the values of short text columns (status, channel, group...). Tables with the
+    same columns are listed once."""
+    helpers = _helpers()
+    cleaned = clean_tables(tables) if cleaned is None else cleaned
+    groups: dict[tuple, list[str]] = {}
+    for name, frame in cleaned.items():
         groups.setdefault(tuple(str(c) for c in frame.columns), []).append(name)
     parts = []
     for header, names in groups.items():
@@ -502,20 +534,25 @@ class CodeAgent:
 
             shop_dir = self.root / "data" / business
             tables = load_tables(shop_dir)
-            view = preview(tables)
+            cleaned = clean_tables(tables)
+            view = preview(tables, cleaned=cleaned)
             if len(view) > PREVIEW_CHAR_BUDGET:
-                view = preview(tables, sample_rows=2)
+                view = preview(tables, sample_rows=2, cleaned=cleaned)
             if len(view) > PREVIEW_CHAR_BUDGET:
-                view = preview(tables, sample_rows=1, distinct=False)
+                view = preview(tables, sample_rows=1, distinct=False, cleaned=cleaned)
             if len(view) > PREVIEW_CHAR_BUDGET:
                 view = view[:PREVIEW_CHAR_BUDGET] + "\n…(cắt bớt)"
             calendar = self.root / "calendar.csv"
-            if calendar.exists():
-                tables["__calendar__"] = pd.read_csv(calendar, encoding="utf-8-sig")
+            store = {
+                "__raw__": tables,
+                "__clean__": cleaned,
+                "__calendar__": pd.read_csv(calendar, encoding="utf-8-sig")
+                if calendar.exists() else None,
+            }
             path = self.cache_dir / "code_agent" / f"{business}.pkl"
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("wb") as stream:
-                pickle.dump(tables, stream)
+                pickle.dump(store, stream)
             self._shops[business] = (path, view)
         return self._shops[business]
 
@@ -569,6 +606,9 @@ class CodeAgent:
         # One repair round per distinct failure (up to `repairs`): the model sees its code and
         # the traceback and returns fixed code; repaired runs vote like the others.
         failed = [r for r in runs if "error" in r and r.get("code")]
+        first_votes = collections.Counter(vote_key(r["record"]) for r in runs if "record" in r)
+        if first_votes and first_votes.most_common(1)[0][1] >= self.min_votes:
+            failed = []  # already decided: a repair could not change the answer
         seen: set[str] = set()
         for run in failed:
             if len(seen) >= self.repairs:

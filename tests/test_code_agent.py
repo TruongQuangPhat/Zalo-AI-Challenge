@@ -59,6 +59,15 @@ def test_table_helpers_clean_numbers_dates_and_join_sheets(tmp_path):
     assert out == {"answer": {"type": "list", "answer": [1822000, "2025-06-01", "0901234567", 3, ["T6", "T7"]]}}
 
 
+def test_month_first_date_columns_are_read_month_first(tmp_path):
+    path = tmp_path / "t.pkl"
+    frame = pd.DataFrame([["Ngày đặt"], ["06/13/2025"], ["07/02/2025"]])
+    pickle.dump({"don.csv": frame}, path.open("wb"))
+    code = "ANSWER = {'type': 'list', 'answer': [str(d.date()) for d in table('don.csv')['Ngày đặt']]}"
+    out = run_code(code, path, "2026-01-05")
+    assert out == {"answer": {"type": "list", "answer": ["2025-06-13", "2025-07-02"]}}
+
+
 def test_numeric_strings_are_coerced_and_failures_repaired(tmp_path):
     root = _split(tmp_path)
     as_text = "```python\nANSWER = {'type': 'number', 'answer': '1.250.000'}\n```"
