@@ -81,23 +81,26 @@ def _worker(
             if request is None:
                 break
             if request.get("free"):
-                # Free-text samples (code fallback): no grammar, n samples in one batch.
+                # Free-text samples (code fallback): no grammar, n samples per conversation;
+                # "conversations" sends many prompts in one call so vLLM batches them.
                 try:
                     started = time.monotonic()
                     params = SamplingParams(
                         n=request.get("n", 1),
                         temperature=request.get("temperature", 0.0),
                         top_p=0.95 if request.get("temperature") else 1.0,
+                        top_k=20 if request.get("thinking") else -1,
                         seed=request.get("seed", 0),
                         max_tokens=request["max_tokens"],
                     )
-                    result = model.chat(
-                        request["messages"],
+                    conversations = request.get("conversations") or [request["messages"]]
+                    outputs = model.chat(
+                        conversations,
                         params,
                         use_tqdm=False,
                         chat_template_kwargs={"enable_thinking": bool(request.get("thinking"))},
-                    )[0]
-                    pipe.send(
+                    )
+                    results = [
                         {
                             "texts": [o.text for o in result.outputs],
                             "finish_reasons": [o.finish_reason for o in result.outputs],
@@ -105,9 +108,14 @@ def _worker(
                                 "prompt_tokens": len(result.prompt_token_ids or []),
                                 "completion_tokens": sum(len(o.token_ids) for o in result.outputs),
                             },
-                            "seconds": time.monotonic() - started,
                         }
-                    )
+                        for result in outputs
+                    ]
+                    seconds = time.monotonic() - started
+                    if request.get("conversations"):
+                        pipe.send({"results": results, "seconds": seconds})
+                    else:
+                        pipe.send({**results[0], "seconds": seconds})
                 except Exception as exc:
                     pipe.send({"request_error": f"{type(exc).__name__}: {exc}"})
                 continue
@@ -274,6 +282,31 @@ class LocalModel:
             }
         )
         return self._receive(timeout)
+
+    def sample_batch(
+        self,
+        conversations: list[list[dict]],
+        timeout: float,
+        *,
+        n: int,
+        temperature: float,
+        max_tokens: int,
+        thinking: bool = False,
+    ) -> list[dict]:
+        """n free-text completions for each conversation, generated together."""
+        if not self.process.is_alive():
+            raise ContractError("local_model_worker_unavailable")
+        self.pipe.send(
+            {
+                "free": True,
+                "conversations": conversations,
+                "n": n,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "thinking": thinking,
+            }
+        )
+        return self._receive(timeout)["results"]
 
     def close(self) -> None:
         if self.process.is_alive():

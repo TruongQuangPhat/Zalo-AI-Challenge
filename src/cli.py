@@ -55,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     predict.add_argument("--fallback-samples", type=int, default=4)
     predict.add_argument("--fallback-min-votes", type=int, default=3)
     predict.add_argument("--fallback-repairs", type=int, default=2)
+    predict.add_argument("--fallback-thinking", action="store_true")
+    predict.add_argument("--fallback-max-tokens", type=int, default=1400)
+    predict.add_argument("--fallback-chunk", type=int, default=24)
     for command, help_text in [
         ("catalog", "inspect source tables without labels or metrics"),
         ("prepare", "normalize supported sources into exact, traceable local facts"),
@@ -99,9 +102,14 @@ def main(argv: list[str] | None = None) -> int:
                         samples=args.fallback_samples,
                         min_votes=args.fallback_min_votes,
                         repairs=args.fallback_repairs,
+                        thinking=args.fallback_thinking,
+                        max_tokens=args.fallback_max_tokens,
                     )
                     planner = FallbackPlanner(
-                        planner, agent, skip_base=args.fallback == "code-only"
+                        planner,
+                        agent,
+                        skip_base=args.fallback == "code-only",
+                        chunk=args.fallback_chunk,
                     )
                 report = run_inference(
                     args.data_dir,

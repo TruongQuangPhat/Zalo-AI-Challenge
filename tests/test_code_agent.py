@@ -31,7 +31,9 @@ def test_run_code_reads_table_and_returns_plain_json(tmp_path):
     path = tmp_path / "t.pkl"
     frame = pd.DataFrame([["Ngày", "Tiền"], ["2026-01-02", "20000"], ["2026-01-03", "15000"]])
     pickle.dump({"ban.csv": frame}, path.open("wb"))
-    code = "df = table('ban.csv')\nANSWER = {'type': 'number', 'answer': df['Tiền'].astype(int).sum()}"
+    code = (
+        "df = table('ban.csv')\nANSWER = {'type': 'number', 'answer': df['Tiền'].astype(int).sum()}"
+    )
     assert run_code(code, path, "2026-01-05") == {"answer": {"type": "number", "answer": 35000}}
     assert "error" in run_code("raise SystemExit(3)", path, "2026-01-05")
 
@@ -41,13 +43,20 @@ def test_extract_code_and_vote_key():
     assert extract_code("không có code") is None
     assert vote_key({"type": "number", "answer": 3}) == vote_key({"type": "number", "answer": 3.0})
     assert vote_key({"type": "number", "answer": 10**400})
-    assert vote_key({"type": "string", "answer": " Trà "}) == vote_key({"type": "string", "answer": "trà"})
+    assert vote_key({"type": "string", "answer": " Trà "}) == vote_key(
+        {"type": "string", "answer": "trà"}
+    )
 
 
 def test_table_helpers_clean_numbers_dates_and_join_sheets(tmp_path):
     path = tmp_path / "t.pkl"
-    a = pd.DataFrame([["Ngày", "Tiền", "Mã"], ["1 thg 6 2025", "1.250.000", "0901234567"],
-                      ["2/6/2025", "560,000", "0907654321"]])
+    a = pd.DataFrame(
+        [
+            ["Ngày", "Tiền", "Mã"],
+            ["1 thg 6 2025", "1.250.000", "0901234567"],
+            ["2/6/2025", "560,000", "0907654321"],
+        ]
+    )
     b = pd.DataFrame([["Ngày", "Tiền", "Mã"], ["3/7/2025", "12k", "0900000000"]])
     pickle.dump({"so.xlsx::T6": a, "so.xlsx::T7": b}, path.open("wb"))
     code = (
@@ -56,14 +65,18 @@ def test_table_helpers_clean_numbers_dates_and_join_sheets(tmp_path):
         "df['Mã'].iloc[0], len(df), sorted(df['sheet'].unique())]}"
     )
     out = run_code(code, path, "2026-01-05")
-    assert out == {"answer": {"type": "list", "answer": [1822000, "2025-06-01", "0901234567", 3, ["T6", "T7"]]}}
+    assert out == {
+        "answer": {"type": "list", "answer": [1822000, "2025-06-01", "0901234567", 3, ["T6", "T7"]]}
+    }
 
 
 def test_month_first_date_columns_are_read_month_first(tmp_path):
     path = tmp_path / "t.pkl"
     frame = pd.DataFrame([["Ngày đặt"], ["06/13/2025"], ["07/02/2025"]])
     pickle.dump({"don.csv": frame}, path.open("wb"))
-    code = "ANSWER = {'type': 'list', 'answer': [str(d.date()) for d in table('don.csv')['Ngày đặt']]}"
+    code = (
+        "ANSWER = {'type': 'list', 'answer': [str(d.date()) for d in table('don.csv')['Ngày đặt']]}"
+    )
     out = run_code(code, path, "2026-01-05")
     assert out == {"answer": {"type": "list", "answer": ["2025-06-13", "2025-07-02"]}}
 
@@ -79,7 +92,9 @@ def test_numeric_strings_are_coerced_and_failures_repaired(tmp_path):
                 return {"texts": [as_text, as_text], "usage": {}, "seconds": 0}
             return {"texts": self.texts, "usage": {}, "seconds": 0}
 
-    agent = CodeAgent(Repairing([as_text, broken, broken, broken]), root, tmp_path / "c", min_votes=3)
+    agent = CodeAgent(
+        Repairing([as_text, broken, broken, broken]), root, tmp_path / "c", min_votes=3
+    )
     out = agent.answer(Question("q1", "s1", "?", "2026-01-05"))
     assert out["answer"] == {"id": "q1", "type": "number", "answer": 1250000}
     assert sum(1 for r in out["log"]["runs"] if r.get("repair")) == 2
@@ -133,3 +148,52 @@ def test_fallback_planner_keeps_rule_answers_and_falls_back_on_abstain(tmp_path)
     assert json.dumps(fell["plan"]["fallback"]["votes"])
     missing = FallbackPlanner(Base({"type": "number", "answer": 1}), agent)
     assert missing.decide(question, context=None)["answer"]["answer"] == 5
+
+
+def test_columns_match_without_accents_and_errors_list_columns(tmp_path):
+    path = tmp_path / "t.pkl"
+    frame = pd.DataFrame([["Thành tiền", "Trạng thái"], ["20000", "Xong"], ["15000", "Hủy"]])
+    pickle.dump({"ban.csv": frame}, path.open("wb"))
+    ok = "ANSWER = {'type': 'number', 'answer': table('ban.csv')['thanh tien'].sum()}"
+    assert run_code(ok, path, "2026-01-05") == {"answer": {"type": "number", "answer": 35000}}
+    bad = run_code("x = table('ban.csv')['Doanh thu']", path, "2026-01-05")
+    assert "Thành tiền" in bad["error"] and "Trạng thái" in bad["error"]
+
+
+def test_table_answers_and_thinking_output_are_normalised(tmp_path):
+    root = _split(tmp_path)
+    records = (
+        "<think>table('ban.csv') rồi ```python\nANSWER = 1\n```</think>\n"
+        "```python\nANSWER = {'type': 'table', 'answer': "
+        "[{'mon': 'Cà phê', 'tien': 20000}, {'mon': 'Trà', 'tien': 15000}]}\n```"
+    )
+    agent = CodeAgent(FakeModel([records] * 3), root, tmp_path / "c", min_votes=3)
+    out = agent.answer(Question("q1", "s1", "?", "2026-01-05"))
+    assert out["answer"]["answer"] == {
+        "columns": ["mon", "tien"],
+        "rows": [["Cà phê", 20000], ["Trà", 15000]],
+    }
+    assert extract_code("<think>chưa xong ```python\nANSWER = 1\n```") is None
+
+
+def test_code_only_planner_generates_a_chunk_in_one_batch(tmp_path):
+    root = _split(tmp_path)
+    code = "```python\nANSWER = {'type': 'number', 'answer': 5}\n```"
+
+    class Batch(FakeModel):
+        calls = 0
+
+        def sample_batch(self, conversations, timeout, **kwargs):
+            Batch.calls += 1
+            return [{"texts": self.texts, "usage": {}} for _ in conversations]
+
+    agent = CodeAgent(Batch([code] * 3), root, tmp_path / "c", min_votes=3)
+
+    class Base:
+        name, metadata = "base", {}
+
+    planner = FallbackPlanner(Base(), agent, skip_base=True, chunk=10)
+    questions = [Question(f"q{i}", "s1", "?", "2026-01-05") for i in range(4)]
+    planner.plan_ahead(questions)
+    answers = [planner.decide(q, context=object())["answer"] for q in questions]
+    assert [a["answer"] for a in answers] == [5, 5, 5, 5] and Batch.calls == 1

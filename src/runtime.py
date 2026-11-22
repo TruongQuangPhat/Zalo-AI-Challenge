@@ -176,6 +176,8 @@ def run_inference(
             predictions.flush()
             os.fsync(predictions.fileno())
             checkpoint()
+            if hasattr(adapter, "plan_ahead"):
+                adapter.plan_ahead(questions[len(prefix) :])
             for index, question in enumerate(questions[len(prefix) :], len(prefix)):
                 question_start = time.perf_counter()
                 error, execution, decision = None, "not_performed", None

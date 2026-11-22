@@ -26,7 +26,7 @@ from typing import Any
 from src.contracts import validate_answer
 from src.jsonio import ContractError
 
-PROMPT_VERSION = "code-fallback-v2"
+PROMPT_VERSION = "code-fallback-v3"
 WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ nhật"]
 PREVIEW_CHAR_BUDGET = 18000
 CELL_CHARS = 36
@@ -186,13 +186,16 @@ def _table(store, name, header_row=None, clean=True, cache=None):
 '''
 
 # Runs inside the sandbox (cwd = the shop's folder). argv[1] = pickled tables, argv[2] = today.
-PRELUDE = r'''
+PRELUDE = (
+    r"""
 import sys, json, math, re, pickle, warnings, datetime as dt
 from datetime import date, datetime, timedelta
 import pandas as pd
 import numpy as np
 pd.set_option("future.no_silent_downcasting", True)
-''' + HELPERS + r'''
+"""
+    + HELPERS
+    + r'''
 _STORE = pickle.load(open(sys.argv[1], "rb"))
 if "__raw__" in _STORE:
     _TABLES, _CLEAN, CALENDAR = _STORE["__raw__"], _STORE["__clean__"], _STORE.get("__calendar__")
@@ -201,9 +204,44 @@ else:
     CALENDAR = _TABLES.pop("__calendar__", None)
 TODAY = date.fromisoformat(sys.argv[2])
 
-def tables():
-    """Names of every table: 'file' or 'file::sheet'."""
-    return list(_TABLES)
+import unicodedata as _ud
+
+def _key(name):
+    text = _ud.normalize("NFD", str(name)).replace("đ", "d").replace("Đ", "D")
+    text = "".join(ch for ch in text if _ud.category(ch) != "Mn").casefold()
+    return re.sub(r"[^0-9a-z]+", "", text)
+
+class Frame(pd.DataFrame):
+    """DataFrame whose df['col'] also finds a column written without accents, case or spaces,
+    and whose KeyError lists the real columns."""
+
+    @property
+    def _constructor(self):
+        return Frame
+
+    def __getitem__(self, key):
+        try:
+            return super().__getitem__(key)
+        except KeyError:
+            if isinstance(key, str) or (isinstance(key, list) and all(isinstance(k, str) for k in key)):
+                by_key = {}
+                for c in self.columns:
+                    by_key.setdefault(_key(c), []).append(c)
+                wanted = [key] if isinstance(key, str) else key
+                found = []
+                for k in wanted:
+                    hits = [k] if k in self.columns else by_key.get(_key(k), [])
+                    if len(hits) != 1:
+                        raise KeyError(f"{k!r}; các cột: {list(self.columns)}") from None
+                    found.append(hits[0])
+                return super().__getitem__(found[0] if isinstance(key, str) else found)
+            raise
+
+def tables(name=None):
+    """Names of every table ('file' or 'file::sheet'); with a name, the matching ones."""
+    if name is None:
+        return list(_TABLES)
+    return _resolve(name, _TABLES)
 
 def raw(name):
     """Table exactly as stored, header=None (all rows, including titles/footers)."""
@@ -213,7 +251,7 @@ def raw(name):
 def table(name, header_row=None, clean=True):
     """Table with its header row as column names; numbers/dates converted; a file name
     without '::sheet' joins all its sheets (column 'sheet')."""
-    return _table(_TABLES, name, header_row, clean, _CLEAN)
+    return Frame(_table(_TABLES, name, header_row, clean, _CLEAN))
 
 def num(v):
     """Parse one number written as text ('1.250.000', '560,000', '12k'); NaN if not a number."""
@@ -225,8 +263,9 @@ def to_date(v):
     d = _date(v)
     return pd.NaT if d is None else d
 '''
+)
 
-EPILOGUE = r'''
+EPILOGUE = r"""
 def _plain(v):
     if isinstance(v, (np.integer,)):
         return int(v)
@@ -250,7 +289,7 @@ def _plain(v):
         return {str(k): _plain(x) for k, x in v.items()}
     return v
 print("\n__ANSWER__" + json.dumps(_plain(ANSWER), ensure_ascii=False))
-'''
+"""
 
 
 def _helpers() -> dict:
@@ -263,8 +302,16 @@ def _helpers() -> dict:
 
     import warnings
 
-    namespace = {"re": re, "math": math, "warnings": warnings, "pd": pd, "np": np, "date": date_cls,
-                 "datetime": datetime, "dt": dt_module}
+    namespace = {
+        "re": re,
+        "math": math,
+        "warnings": warnings,
+        "pd": pd,
+        "np": np,
+        "date": date_cls,
+        "datetime": datetime,
+        "dt": dt_module,
+    }
     exec(HELPERS, namespace)  # noqa: S102 - our own constant helper source
     return namespace
 
@@ -360,7 +407,11 @@ def preview(
         name = names[0]
         frame = cleaned[name]
         rows_total = sum(len(cleaned[n]) for n in names)
-        lines = [f"### {name}  (dòng={len(frame)}" + (f", cả nhóm={rows_total}" if len(names) > 1 else "") + ")"]
+        lines = [
+            f"### {name}  (dòng={len(frame)}"
+            + (f", cả nhóm={rows_total}" if len(names) > 1 else "")
+            + ")"
+        ]
         raw = tables[name]
         if ".sqlite::" not in name.lower() and len(raw):
             h = helpers["_header_row"](raw)
@@ -427,6 +478,10 @@ def build_messages(
 
 
 def extract_code(text: str) -> str | None:
+    if "<think>" in text:
+        if "</think>" not in text:
+            return None  # thinking ran out of tokens before any code
+        text = text.rsplit("</think>", 1)[1]
     blocks = re.findall(r"```(?:python|py)?\s*\n(.*?)```", text, flags=re.S)
     if blocks:
         return max(blocks, key=len)
@@ -441,19 +496,28 @@ def run_code(
     with tempfile.TemporaryDirectory() as tmp:
         script = Path(tmp) / "run.py"
         script.write_text(PRELUDE + "\n" + code + "\n" + EPILOGUE, encoding="utf-8")
-        env = {"PATH": os.environ.get("PATH", ""), "HOME": tmp, "PYTHONNOUSERSITE": "1",
-               "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"}
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": tmp,
+            "PYTHONNOUSERSITE": "1",
+            "OMP_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+        }
         try:
             proc = subprocess.run(
                 [sys.executable, "-I", str(script), str(tables_path.resolve()), today],
-                cwd=str(cwd) if cwd else tmp, env=env, capture_output=True, text=True,
+                cwd=str(cwd) if cwd else tmp,
+                env=env,
+                capture_output=True,
+                text=True,
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:
             return {"error": "timeout"}
     marker = proc.stdout.rfind("__ANSWER__")
     if proc.returncode != 0 or marker < 0:
-        return {"error": (proc.stderr or proc.stdout)[-600:]}
+        # The temporary folder differs per run; without it equal failures read the same.
+        return {"error": (proc.stderr or proc.stdout).replace(str(script), "run.py")[-600:]}
     try:
         return {"answer": json.loads(proc.stdout[marker + len("__ANSWER__") :].strip())}
     except ValueError as exc:
@@ -471,7 +535,25 @@ def _coerce(candidate: dict) -> dict:
         value = value.strip().lower() == "true"
     if kind == "date" and isinstance(value, str) and len(value) > 10 and value[:10].count("-") == 2:
         value = value[:10]
+    if kind == "table":
+        value = _as_table(value)
     return {**candidate, "answer": value}
+
+
+def _as_table(value: Any) -> Any:
+    """{'columns', 'rows'} from the shapes code usually builds (records, column dict)."""
+    if isinstance(value, dict) and "columns" in value and "rows" in value:
+        return {"columns": value["columns"], "rows": value["rows"]}
+    if isinstance(value, list) and value and all(isinstance(r, dict) for r in value):
+        columns = list(value[0])
+        if all(list(r) == columns for r in value):
+            return {"columns": columns, "rows": [[r[c] for c in columns] for r in value]}
+    if isinstance(value, dict) and value and all(isinstance(v, list) for v in value.values()):
+        lengths = {len(v) for v in value.values()}
+        if len(lengths) == 1:
+            columns = list(value)
+            return {"columns": columns, "rows": [list(r) for r in zip(*value.values())]}
+    return value
 
 
 def _norm(value: Any) -> Any:
@@ -492,8 +574,9 @@ def _norm(value: Any) -> Any:
 
 
 def vote_key(answer: dict) -> str:
-    return json.dumps([answer.get("type"), _norm(answer.get("answer"))], ensure_ascii=False,
-                      default=str)
+    return json.dumps(
+        [answer.get("type"), _norm(answer.get("answer"))], ensure_ascii=False, default=str
+    )
 
 
 def suspicious_zero(record: dict) -> bool:
@@ -511,28 +594,47 @@ def _short_error(error: str) -> str:
 class CodeAgent:
     name = "code-fallback"
 
-    def __init__(self, model, root: Path, cache_dir: Path, *, samples: int = 4,
-                 min_votes: int = 3, temperature: float = 0.6, max_tokens: int = 1400,
-                 timeout: float = 600, answer_unanswerable: bool = False, repairs: int = 2):
+    def __init__(
+        self,
+        model,
+        root: Path,
+        cache_dir: Path,
+        *,
+        samples: int = 4,
+        min_votes: int = 3,
+        temperature: float = 0.6,
+        max_tokens: int = 1400,
+        timeout: float = 3600,
+        answer_unanswerable: bool = False,
+        repairs: int = 2,
+        thinking: bool = False,
+        workers: int = 8,
+    ):
         self.model, self.root, self.cache_dir = model, root, cache_dir
         self.samples, self.min_votes, self.temperature = samples, min_votes, temperature
         self.max_tokens, self.timeout = max_tokens, timeout
         self.answer_unanswerable, self.repairs = answer_unanswerable, repairs
+        self.thinking, self.workers = thinking, workers
         self._shops: dict[str, tuple[Path, str]] = {}
         self._rulebook = (root / "rulebook.md").read_text(encoding="utf-8-sig")
         calendar = root / "calendar.csv"
         self._calendar_head = (
             "\n".join(calendar.read_text(encoding="utf-8-sig").splitlines()[:3])
-            if calendar.exists() else "(không có)"
+            if calendar.exists()
+            else "(không có)"
         )
 
     @property
     def metadata(self) -> dict:
         return {
-            "prompt_version": PROMPT_VERSION, "samples": self.samples,
-            "min_votes": self.min_votes, "temperature": self.temperature,
-            "max_tokens": self.max_tokens, "answer_unanswerable": self.answer_unanswerable,
+            "prompt_version": PROMPT_VERSION,
+            "samples": self.samples,
+            "min_votes": self.min_votes,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "answer_unanswerable": self.answer_unanswerable,
             "repairs": self.repairs,
+            "thinking": self.thinking,
         }
 
     def _shop(self, business: str) -> tuple[Path, str]:
@@ -554,7 +656,8 @@ class CodeAgent:
                 "__raw__": tables,
                 "__clean__": cleaned,
                 "__calendar__": pd.read_csv(calendar, encoding="utf-8-sig")
-                if calendar.exists() else None,
+                if calendar.exists()
+                else None,
             }
             path = self.cache_dir / "code_agent" / f"{business}.pkl"
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -563,89 +666,89 @@ class CodeAgent:
             self._shops[business] = (path, view)
         return self._shops[business]
 
-    def _execute(self, codes: list[str | None], tables_path: Path, question) -> list[dict]:
-        shop_dir = self.root / "data" / question.business_id
-        unique = list(dict.fromkeys(c for c in codes if c is not None))
-        with ThreadPoolExecutor(max_workers=max(1, len(unique))) as pool:
-            results = dict(zip(unique, pool.map(
-                lambda c: run_code(c, tables_path, question.as_of_date, cwd=shop_dir), unique
-            )))
-        runs = []
-        for code in codes:
+    def _messages(self, question) -> list[dict]:
+        _, view = self._shop(question.business_id)
+        readme_path = self.root / "data" / question.business_id / "README.md"
+        readme = readme_path.read_text(encoding="utf-8-sig") if readme_path.exists() else ""
+        return build_messages(
+            question.question,
+            question.as_of_date,
+            readme,
+            self._rulebook,
+            view,
+            self._calendar_head,
+        )
+
+    def _generate(self, conversations, *, n, temperature, thinking) -> list[dict]:
+        if hasattr(self.model, "sample_batch"):
+            return self.model.sample_batch(
+                conversations,
+                self.timeout,
+                n=n,
+                temperature=temperature,
+                max_tokens=self.max_tokens,
+                thinking=thinking,
+            )
+        return [
+            self.model.sample(
+                c,
+                self.timeout,
+                n=n,
+                temperature=temperature,
+                max_tokens=self.max_tokens,
+                thinking=thinking,
+            )
+            for c in conversations
+        ]
+
+    def _run_all(self, jobs: list[tuple[Any, str | None]]) -> list[dict]:
+        """Execute (question, code) pairs in parallel; each run checked against the contract."""
+
+        def one(job):
+            question, code = job
             if code is None:
-                runs.append({"error": "no code"})
-                continue
-            run = dict(results[code])
+                return {"error": "no code"}
+            tables_path, _ = self._shop(question.business_id)
+            run = dict(
+                run_code(
+                    code,
+                    tables_path,
+                    question.as_of_date,
+                    cwd=self.root / "data" / question.business_id,
+                )
+            )
             run["code"] = code[-1500:]
             if "answer" in run:
                 candidate = run["answer"]
                 if not isinstance(candidate, dict) or "type" not in candidate:
-                    run = {"error": "ANSWER is not {type, answer}", "code": run["code"]}
-                else:
-                    candidate = _coerce(candidate)
-                    record = {"id": question.id, "type": candidate["type"]}
-                    if candidate["type"] not in {"unanswerable", "abstain"}:
-                        record["answer"] = candidate.get("answer")
-                    try:
-                        validate_answer(record)
-                        run["record"] = record
-                    except ContractError as exc:
-                        run["error"] = f"format: {exc}"
-            runs.append(run)
-        return runs
+                    return {"error": "ANSWER is not {type, answer}", "code": run["code"]}
+                candidate = _coerce(candidate)
+                record = {"id": question.id, "type": candidate["type"]}
+                if candidate["type"] not in {"unanswerable", "abstain"}:
+                    record["answer"] = candidate.get("answer")
+                try:
+                    validate_answer(record)
+                    run["record"] = record
+                except ContractError as exc:
+                    run["error"] = f"format: {exc}"
+            return run
 
-    def answer(self, question) -> dict:
-        started = time.monotonic()
-        log: dict[str, Any] = {"prompt_version": PROMPT_VERSION}
-        tables_path, view = self._shop(question.business_id)
-        readme_path = self.root / "data" / question.business_id / "README.md"
-        readme = readme_path.read_text(encoding="utf-8-sig") if readme_path.exists() else ""
-        messages = build_messages(
-            question.question, question.as_of_date, readme, self._rulebook, view,
-            self._calendar_head,
-        )
-        result = self.model.sample(
-            messages, self.timeout, n=self.samples, temperature=self.temperature,
-            max_tokens=self.max_tokens,
-        )
-        log["usage"] = [result.get("usage")]
-        runs = self._execute([extract_code(t) for t in result["texts"]], tables_path, question)
-        # One repair round per distinct failure (up to `repairs`): the model sees its code and
-        # the traceback and returns fixed code; repaired runs vote like the others.
-        failed = [r for r in runs if "error" in r and r.get("code")]
-        first_votes = collections.Counter(vote_key(r["record"]) for r in runs if "record" in r)
-        if first_votes and first_votes.most_common(1)[0][1] >= self.min_votes:
-            failed = []  # already decided: a repair could not change the answer
-        seen: set[str] = set()
-        for run in failed:
-            if len(seen) >= self.repairs:
-                break
-            error = _short_error(run["error"])
-            if error in seen:
-                continue
-            seen.add(error)
-            repair = self.model.sample(
-                messages + [
-                    {"role": "assistant", "content": f"```python\n{run['code']}\n```"},
-                    {"role": "user", "content": "Code trên bị lỗi:\n" + error
-                     + "\nSửa lại và trả về TOÀN BỘ code đã sửa trong một khối ```python```."},
-                ],
-                self.timeout, n=2, temperature=0.3, max_tokens=self.max_tokens,
-            )
-            log["usage"].append(repair.get("usage"))
-            for fixed in self._execute(
-                [extract_code(t) for t in repair["texts"]], tables_path, question
-            ):
-                fixed["repair"] = True
-                runs.append(fixed)
+        unique = list(dict.fromkeys((q.id, code) for q, code in jobs))
+        by_id = {q.id: q for q, _ in jobs}
+        with ThreadPoolExecutor(max_workers=max(1, self.workers)) as pool:
+            done = dict(zip(unique, pool.map(lambda k: one((by_id[k[0]], k[1])), unique)))
+        return [dict(done[(q.id, code)]) for q, code in jobs]
+
+    def _decide(self, question, runs: list[dict], log: dict) -> dict:
         votes = collections.Counter(vote_key(r["record"]) for r in runs if "record" in r)
         log["runs"] = runs
         log["votes"] = dict(votes)
-        log["seconds"] = time.monotonic() - started
         answer = {"id": question.id, "type": "abstain"}
         if votes:
             key, count = votes.most_common(1)[0]
-            chosen = next(r["record"] for r in runs if "record" in r and vote_key(r["record"]) == key)
+            chosen = next(
+                r["record"] for r in runs if "record" in r and vote_key(r["record"]) == key
+            )
             log["top_votes"] = count
             if (
                 count >= self.min_votes
@@ -656,20 +759,122 @@ class CodeAgent:
         log["chosen"] = answer["type"]
         return {"answer": answer, "log": log}
 
+    def answer_many(self, questions: list) -> dict[str, dict]:
+        """Answer a chunk of questions together: one batched generation, parallel runs, one
+        batched repair round, then a vote per question."""
+        started = time.monotonic()
+        messages = {q.id: self._messages(q) for q in questions}
+        first = self._generate(
+            [messages[q.id] for q in questions],
+            n=self.samples,
+            temperature=self.temperature,
+            thinking=self.thinking,
+        )
+        jobs = [(q, extract_code(t)) for q, out in zip(questions, first) for t in out["texts"]]
+        flat = self._run_all(jobs)
+        runs = {q.id: [] for q in questions}
+        for (q, _), run in zip(jobs, flat):
+            runs[q.id].append(run)
+        logs = {
+            q.id: {
+                "prompt_version": PROMPT_VERSION,
+                "usage": [out.get("usage")],
+                "finish_reasons": out.get("finish_reasons"),
+            }
+            for q, out in zip(questions, first)
+        }
+        # Repair round: questions still short of the vote get their distinct failures back
+        # with the traceback (no thinking, to keep it short); repaired runs vote too.
+        asks = []
+        for q in questions:
+            got = collections.Counter(vote_key(r["record"]) for r in runs[q.id] if "record" in r)
+            if got and got.most_common(1)[0][1] >= self.min_votes:
+                continue
+            seen: set[str] = set()
+            for run in runs[q.id]:
+                if "error" not in run or not run.get("code") or len(seen) >= self.repairs:
+                    continue
+                error = _short_error(run["error"])
+                if error in seen:
+                    continue
+                seen.add(error)
+                asks.append(
+                    (
+                        q,
+                        messages[q.id]
+                        + [
+                            {"role": "assistant", "content": f"```python\n{run['code']}\n```"},
+                            {
+                                "role": "user",
+                                "content": "Code trên bị lỗi:\n"
+                                + error
+                                + "\nSửa lại và trả về TOÀN BỘ code đã sửa trong một khối ```python```.",
+                            },
+                        ],
+                    )
+                )
+        if asks:
+            fixed_out = self._generate([m for _, m in asks], n=2, temperature=0.3, thinking=False)
+            fixed_jobs = [
+                (q, extract_code(t)) for (q, _), out in zip(asks, fixed_out) for t in out["texts"]
+            ]
+            for (q, _), run in zip(fixed_jobs, self._run_all(fixed_jobs)):
+                run["repair"] = True
+                runs[q.id].append(run)
+            for (q, _), out in zip(asks, fixed_out):
+                logs[q.id]["usage"].append(out.get("usage"))
+        seconds = (time.monotonic() - started) / max(1, len(questions))
+        results = {}
+        for q in questions:
+            logs[q.id]["seconds"] = seconds  # chunk time shared out
+            results[q.id] = self._decide(q, runs[q.id], logs[q.id])
+        return results
+
+    def answer(self, question) -> dict:
+        return self.answer_many([question])[question.id]
+
 
 class FallbackPlanner:
-    """Rule planner first; the code agent only answers what the planner abstains on."""
+    """Rule planner first; the code agent only answers what the planner abstains on.
+    With skip_base, questions are answered in chunks (plan_ahead gives the order) so the
+    model generates for many questions at once."""
 
     accepts_missing_context = True
 
-    def __init__(self, base, agent: CodeAgent, *, skip_base: bool = False):
-        self.base, self.agent, self.skip_base = base, agent, skip_base
+    def __init__(self, base, agent: CodeAgent, *, skip_base: bool = False, chunk: int = 24):
+        self.base, self.agent, self.skip_base, self.chunk = base, agent, skip_base, chunk
         self.name = f"{base.name}+{agent.name}" + ("-only" if skip_base else "")
+        self._order: list = []
+        self._ready: dict[str, dict] = {}
 
     @property
     def metadata(self) -> dict:
-        return {**self.base.metadata, "fallback": self.agent.metadata,
-                "skip_base": self.skip_base}
+        return {
+            **self.base.metadata,
+            "fallback": self.agent.metadata,
+            "skip_base": self.skip_base,
+            "chunk": self.chunk,
+        }
+
+    def plan_ahead(self, questions) -> None:
+        self._order = list(questions)
+
+    def _fallback(self, question) -> dict:
+        try:
+            if self.skip_base and question.id not in self._ready:
+                ids = [q.id for q in self._order]
+                start = ids.index(question.id) if question.id in ids else None
+                chunk = self._order[start : start + self.chunk] if start is not None else [question]
+                chunk = [q for q in chunk if q.id not in self._ready] or [question]
+                self._ready.update(self.agent.answer_many(chunk))
+            if question.id in self._ready:
+                return self._ready.pop(question.id)
+            return self.agent.answer(question)
+        except Exception as exc:  # the fallback never turns an abstain into a question error
+            return {
+                "answer": {"id": question.id, "type": "abstain"},
+                "log": {"error": f"{type(exc).__name__}: {exc}"},
+            }
 
     def decide(self, question, *, context) -> dict:
         decision = None
@@ -677,17 +882,14 @@ class FallbackPlanner:
             decision = self.base.decide(question, context=context)
             if decision["answer"]["type"] != "abstain":
                 return decision
-        try:
-            fallback = self.agent.answer(question)
-        except Exception as exc:  # the fallback never turns an abstain into a question error
-            fallback = {"answer": {"id": question.id, "type": "abstain"},
-                        "log": {"error": f"{type(exc).__name__}: {exc}"}}
+        fallback = self._fallback(question)
         plan = dict(decision["plan"]) if decision else {"status": "no_context"}
         plan["fallback"] = fallback["log"]
         return {
             **(decision or {}),
             "answer": fallback["answer"],
             "plan": plan,
-            "execution": "code_fallback" if fallback["answer"]["type"] != "abstain"
+            "execution": "code_fallback"
+            if fallback["answer"]["type"] != "abstain"
             else (decision or {}).get("execution", "not_performed"),
         }
