@@ -496,6 +496,13 @@ def vote_key(answer: dict) -> str:
                       default=str)
 
 
+def suspicious_zero(record: dict) -> bool:
+    """A numeric 0 from generated code is almost always a filter that matched nothing: in the
+    train labels 4 of 2,462 number/percent answers are 0, and the rulebook says missing data
+    is unanswerable, not 0."""
+    return record.get("type") in {"number", "percent"} and record.get("answer") == 0
+
+
 def _short_error(error: str) -> str:
     lines = [line for line in error.strip().splitlines() if line.strip()]
     return "\n".join(lines[-8:])
@@ -640,8 +647,10 @@ class CodeAgent:
             key, count = votes.most_common(1)[0]
             chosen = next(r["record"] for r in runs if "record" in r and vote_key(r["record"]) == key)
             log["top_votes"] = count
-            if count >= self.min_votes and (
-                chosen["type"] != "unanswerable" or self.answer_unanswerable
+            if (
+                count >= self.min_votes
+                and (chosen["type"] != "unanswerable" or self.answer_unanswerable)
+                and not suspicious_zero(chosen)
             ):
                 answer = chosen
         log["chosen"] = answer["type"]

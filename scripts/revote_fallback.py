@@ -15,7 +15,7 @@ import collections
 import json
 from pathlib import Path
 
-from src.agent.code_agent import vote_key
+from src.agent.code_agent import suspicious_zero, vote_key
 from src.evaluation.scorer import compare
 
 
@@ -27,6 +27,8 @@ def fallback_choice(log: dict, min_votes: int, unanswerable: bool) -> dict | Non
     key, count = votes.most_common(1)[0]
     chosen = next(r["record"] for r in runs if vote_key(r["record"]) == key)
     if count < min_votes or (chosen["type"] == "unanswerable" and not unanswerable):
+        return None
+    if suspicious_zero(chosen):
         return None
     return chosen
 

@@ -96,6 +96,13 @@ def test_agent_answers_only_when_enough_samples_agree(tmp_path):
     assert split.answer(question)["answer"]["type"] == "abstain"
 
 
+def test_agent_abstains_on_an_agreed_zero(tmp_path):
+    root = _split(tmp_path)
+    zero = "```python\nANSWER = {'type': 'number', 'answer': 0}\n```"
+    agent = CodeAgent(FakeModel([zero] * 4), root, tmp_path / "c", min_votes=3)
+    assert agent.answer(Question("q1", "s1", "?", "2026-01-05"))["answer"]["type"] == "abstain"
+
+
 def test_agent_keeps_unanswerable_as_abstain_by_default(tmp_path):
     root = _split(tmp_path)
     code = "```python\nANSWER = {'type': 'unanswerable'}\n```"
