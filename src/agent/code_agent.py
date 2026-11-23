@@ -26,7 +26,7 @@ from typing import Any
 from src.contracts import validate_answer
 from src.jsonio import ContractError
 
-PROMPT_VERSION = "code-fallback-v5"
+PROMPT_VERSION = "code-fallback-v6"
 WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ nhật"]
 PREVIEW_CHAR_BUDGET = 18000
 CELL_CHARS = 36
@@ -178,14 +178,19 @@ def _with_header(df, h):
 def _is_sql(name):
     return ".sqlite::" in name.lower()
 
+def _fold(text):
+    import unicodedata
+    text = unicodedata.normalize("NFD", str(text)).replace("đ", "d").replace("Đ", "D")
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn").casefold()
+    return re.sub(r"[^0-9a-z:.]+", "", text)
+
 def _resolve(name, store):
     if name in store:
         return [name]
-    low = str(name).lower().strip()
-    keys = [k for k in store if k.lower() == low or k.split("::")[0].lower() == low
-            or k.split("::")[-1].lower() == low]
+    low = _fold(name)
+    keys = [k for k in store if low in {_fold(k), _fold(k.split("::")[0]), _fold(k.split("::")[-1])}]
     if not keys:
-        keys = [k for k in store if low and low in k.lower()]
+        keys = [k for k in store if low and low in _fold(k)]
     if not keys:
         raise KeyError(f"Không có bảng {name!r}. Các bảng: {list(store)}")
     return keys
@@ -226,7 +231,7 @@ if "__raw__" in _STORE:
 else:
     _TABLES, _CLEAN = _STORE, None
     CALENDAR = _TABLES.pop("__calendar__", None)
-TODAY = date.fromisoformat(sys.argv[2])
+TODAY = pd.Timestamp(sys.argv[2])  # a Timestamp compares with datetime columns
 
 import unicodedata as _ud
 
@@ -288,21 +293,20 @@ def round_half_up(x, digits=0):
 
 def week_range(day, start="mon"):
     """(first, last) date of the week holding `day`; start='mon' or 'sun' as the rulebook says."""
-    day = pd.Timestamp(day).date()
+    day = pd.Timestamp(day).normalize()
     offset = day.weekday() if start == "mon" else (day.weekday() + 1) % 7
-    first = day - timedelta(days=offset)
-    return first, first + timedelta(days=6)
+    first = day - pd.Timedelta(days=offset)
+    return first, first + pd.Timedelta(days=6)
 
 def month_range(year, month):
     """(first, last) date of a calendar month."""
-    first = date(year, month, 1)
-    last = (date(year + (month == 12), month % 12 + 1, 1) - timedelta(days=1))
-    return first, last
+    first = pd.Timestamp(year=int(year), month=int(month), day=1)
+    return first, first + pd.offsets.MonthEnd(0)
 
 def last_n_days(n, end):
     """(first, last) of n consecutive days ending on `end` (TODAY or YESTERDAY per rulebook)."""
-    end = pd.Timestamp(end).date()
-    return end - timedelta(days=n - 1), end
+    end = pd.Timestamp(end).normalize()
+    return end - pd.Timedelta(days=n - 1), end
 
 def solar_to_lunar(day):
     """(lunar_day, lunar_month, lunar_year, leap) of a solar date, from calendar.csv."""
@@ -315,7 +319,7 @@ def lunar_to_solar(lunar_day, lunar_month, lunar_year, leap=False):
     hit = c[(c["lunar_day"] == lunar_day) & (c["lunar_month"] == lunar_month)
             & (c["lunar_year"] == lunar_year)
             & (c["lunar_leap"].astype(str).str.lower() == str(bool(leap)).lower())]
-    return date.fromisoformat(str(hit.iloc[0]["date"])[:10])
+    return pd.Timestamp(str(hit.iloc[0]["date"])[:10])
 
 def between(series, first, last):
     """Mask of rows whose date is within [first, last], whatever the column holds
@@ -537,7 +541,7 @@ API có sẵn (đã import pandas as pd, numpy as np, datetime, re, math):
   (đúng như phần xem trước). name là 'file::sheet'; chỉ ghi 'file' thì ghép mọi sheet (thêm cột 'sheet').
 - raw(name): bảng nguyên trạng, header=None (giữ dòng tiêu đề, dòng tổng).
 - num(x): đổi một ô chữ thành số ('1.250.000', '560,000', '12k'); to_date(x): đổi một ô thành ngày.
-- tables(): danh sách tên bảng. CALENDAR: DataFrame calendar.csv (có thể None). TODAY, YESTERDAY: date.
+- tables(): danh sách tên bảng. CALENDAR: DataFrame calendar.csv (có thể None). TODAY, YESTERDAY: pd.Timestamp.
 - between(series, first, last) / on_day(series, day): lọc theo kỳ, dùng cho MỌI bộ lọc ngày
   (tránh so datetime với date). num(x, money=True) đọc cả tiền nói ('1tr032', '3 củ', '2 xị').
 - round_half_up(x, digits=0): làm tròn nửa lên. week_range(day, start='mon'|'sun'),
@@ -545,13 +549,16 @@ API có sẵn (đã import pandas as pd, numpy as np, datetime, re, math):
 - solar_to_lunar(day) -> (ngày, tháng, năm âm, nhuận); lunar_to_solar(ngày, tháng, năm âm, nhuận=False).
 Ô trống ở các dòng sau của cùng một nhóm dòng (cùng đơn) có thể cần ffill.
 
-Trước khi viết code, tự xác định theo RULEBOOK (ghi ngắn ở comment đầu code):
+Trước khi viết code, tự xác định theo RULEBOOK (ghi ngắn bằng các dòng comment bắt đầu bằng #
+ở đầu code, KHÔNG viết chữ thường ngoài comment):
 1. Shop thuộc ngành nào trong mục "Theo ngành" (nếu có) và luật ngành nào áp cho câu hỏi.
 2. Kỳ thời gian chính xác: tuần bắt đầu thứ mấy, kỳ tới hôm nay dừng ở hết hôm nay hay hết hôm qua,
    "tính đến ngày X" là hết ngày X hay hết ngày trước X, tháng/quý không ghi năm.
 3. Bản ghi nào được tính (trạng thái đơn, dòng tổng, dòng trùng) và cách làm tròn đáp án.
 4. Đếm "số đơn" là đếm mã đơn khác nhau (nunique), không phải số dòng; các dòng cùng mã là một đơn.
 5. Kết quả 0 hoặc rỗng thường là bộ lọc sai (sai giá trị chữ, sai kiểu ngày): kiểm tra lại bộ lọc.
+Code ngắn gọn (dưới 80 dòng), dùng pandas theo cột (filter, groupby), tránh vòng lặp iterrows dài.
+TODAY, YESTERDAY và các helper ngày trả pd.Timestamp, so sánh trực tiếp được với cột ngày.
 Chỉ trả về khối code (comment ngắn ở đầu là được), không giải thích ngoài code."""
 
 
@@ -620,10 +627,40 @@ def extract_code(text: str) -> str | None:
         text = text.rsplit("</think>", 1)[1]
     blocks = re.findall(r"```(?:python|py)?\s*\n(.*?)```", text, flags=re.S)
     if blocks:
-        return max(blocks, key=len)
+        return sanitize_code(max(blocks, key=len))
+    opened = re.search(r"```(?:python|py)?\s*\n(.*)$", text, flags=re.S)
+    if opened and "ANSWER" in opened.group(1):  # block never closed (ran out of tokens)
+        return sanitize_code(opened.group(1))
     if "ANSWER" in text:
-        return text
+        return sanitize_code(text)
     return None
+
+
+def _prose(line: str) -> bool:
+    text = line.strip()
+    return bool(
+        re.match(r"^(\d+[.)]|[-*•]|bước|step|lưu ý|ghi chú)\s", text, flags=re.I)
+        or (re.search(r"[À-ỹ]", text) and not re.search(r"[=()\[\]{}'\"#]", text))
+    )
+
+
+def sanitize_code(code: str, tries: int = 12) -> str:
+    """Comment out prose lines the model left in its code (a numbered checklist without '#')
+    and drop a last statement cut off by the token limit, until the code compiles."""
+    lines = code.splitlines()
+    for _ in range(tries):
+        try:
+            compile("\n".join(lines), "run.py", "exec")
+            return "\n".join(lines) + "\n"
+        except SyntaxError as exc:
+            index = (exc.lineno or 1) - 1
+            if 0 <= index < len(lines) and _prose(lines[index]):
+                lines[index] = "# " + lines[index]
+            elif index >= len(lines) - 2 and len(lines) > 1:
+                lines = lines[:-1]  # truncated tail
+            else:
+                break
+    return "\n".join(lines) + "\n"
 
 
 def run_code(

@@ -226,11 +226,11 @@ def test_rulebook_helpers_for_periods_rounding_and_lunar_dates(tmp_path):
             "answer": [
                 3,
                 2.5,
-                "2026-11-15",
-                "2026-11-16",
-                "2026-02-28",
-                "2026-11-13",
-                "2026-02-17",
+                "2026-11-15 00:00:00",
+                "2026-11-16 00:00:00",
+                "2026-02-28 00:00:00",
+                "2026-11-13 00:00:00",
+                "2026-02-17 00:00:00",
                 [29, 12, 2025, False],
             ],
         }
@@ -284,3 +284,22 @@ def test_industry_rules_picks_the_section_that_matches_the_shop():
     picked = industry_rules(rulebook, shop)
     assert picked.startswith("### Nhà trọ") and "Tiệm hoa" not in picked
     assert industry_rules(rulebook, "bán cà phê sữa đá") == ""
+
+
+def test_prose_lines_and_cut_tails_are_repaired_before_running():
+    from src.agent.code_agent import sanitize_code
+
+    code = "1. Trường học: ĐTB môn\nx = 2\n- Kỳ: cả năm\nANSWER = {'type': 'number', 'answer': x}\ny = (1,"
+    fixed = sanitize_code(code)
+    compile(fixed, "t", "exec")
+    assert "# 1. Trường học" in fixed and "ANSWER" in fixed and "y = (1," not in fixed
+    unclosed = "```python\nANSWER = {'type': 'number', 'answer': 3}\nz = ["
+    assert extract_code(unclosed).strip() == "ANSWER = {'type': 'number', 'answer': 3}"
+
+
+def test_table_names_match_without_accents_or_case(tmp_path):
+    path = tmp_path / "t.pkl"
+    frame = pd.DataFrame([["Mã"], ["A1"], ["A2"]])
+    pickle.dump({"SoDiem_7A1.xlsx::ĐD T5": frame}, path.open("wb"))
+    code = "ANSWER = {'type': 'number', 'answer': len(table('sodiem_7a1.xlsx::dd t5'))}"
+    assert run_code(code, path, "2026-01-05") == {"answer": {"type": "number", "answer": 2}}
