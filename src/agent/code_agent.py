@@ -26,7 +26,7 @@ from typing import Any
 from src.contracts import validate_answer
 from src.jsonio import ContractError
 
-PROMPT_VERSION = "code-fallback-v4"
+PROMPT_VERSION = "code-fallback-v5"
 WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ nhật"]
 PREVIEW_CHAR_BUDGET = 18000
 CELL_CHARS = 36
@@ -40,7 +40,13 @@ _THOUSANDS = re.compile(r"\d{1,3}(?:[.,]\d{3})+")
 _VN_DATE = re.compile(r"^\s*(\d{1,2})\s*thg\s*(\d{1,2})\s*,?\s*(\d{4})", re.I)
 _DATE_HINT = re.compile(r"\d{1,4}\s*[/\-.]\s*\d{1,2}|\d\s*thg\s*\d|\d{4}-\d{2}-\d{2}", re.I)
 
-def _num(v):
+# Money words of spoken Vietnamese (a rulebook may define them, e.g. "củ" = one million);
+# the small units are only read in money columns, where "3 xị" cannot mean 3 bottles.
+_BIG_UNITS = {"tr": 1e6, "triệu": 1e6, "trieu": 1e6, "củ": 1e6}
+_MONEY_UNITS = {"lít": 1e5, "lit": 1e5, "xị": 1e5, "cá": 1e3, "cành": 1e3}
+_THOUSAND = {"k": 1e3, "nghìn": 1e3, "ngàn": 1e3}
+
+def _num(v, money=False):
     """Number from a cell; None when the cell is not a number."""
     if isinstance(v, bool):
         return None
@@ -53,28 +59,45 @@ def _num(v):
         return None
     neg = s.startswith("-") or (s.startswith("(") and s.endswith(")"))
     s = s.strip("()+-")
-    s = re.sub(r"(vnđ|vnd|đ|₫)$", "", s)
-    mult = 1.0
-    if s.endswith("k") and re.fullmatch(r"[\d.,]+k", s):
-        mult, s = 1000.0, s[:-1]
-    if not s or not re.fullmatch(r"[\d.,]+", s) or not re.search(r"\d", s):
+    s = re.sub(r"(vnđ|vnd|đồng|đ|₫)$", "", s)
+    if not s:
+        return None
+    x = _plain_num(s)
+    if x is None:
+        product = re.fullmatch(r"([\d.,]+[a-zà-ỹđ]*)[x×*]([\d.,]+[a-zà-ỹđ]*)", s)
+        if product:  # "199.200 x 6": a price times a quantity
+            a, b = _num(product.group(1), money), _num(product.group(2), money)
+            x = None if a is None or b is None else a * b
+        else:
+            units = {**_BIG_UNITS, **_THOUSAND, **(_MONEY_UNITS if money else {})}
+            spoken = re.fullmatch(r"([\d.,]+)([a-zà-ỹđ]+)(\d*)", s)
+            if spoken and spoken.group(2) in units:  # "1tr032", "12k", "3củ", "1tr5"
+                head = _plain_num(spoken.group(1))
+                if head is not None:
+                    tail = float("0." + spoken.group(3)) if spoken.group(3) else 0.0
+                    x = (head + tail) * units[spoken.group(2)]
+    if x is None:
+        return None
+    return -x if neg else x
+
+def _plain_num(s):
+    if not re.fullmatch(r"[\d.,]+", s) or not re.search(r"\d", s):
         return None
     try:
         if _THOUSANDS.fullmatch(s):
-            x = float(re.sub(r"[.,]", "", s))
-        elif "," in s and "." in s:
-            x = float(s.replace(".", "").replace(",", ".")) if s.rfind(",") > s.rfind(".") \
+            return float(re.sub(r"[.,]", "", s))
+        if "," in s and "." in s:
+            return float(s.replace(".", "").replace(",", ".")) if s.rfind(",") > s.rfind(".") \
                 else float(s.replace(",", ""))
-        elif s.count(",") == 1:
-            x = float(s.replace(",", "."))
-        elif s.count(".") <= 1:
-            x = float(s)
-        else:
-            return None
+        if s.count(",") == 1:
+            return float(s.replace(",", "."))
+        if s.count(".") <= 1:
+            return float(s)
     except ValueError:
         return None
-    x *= mult
-    return -x if neg else x
+    return None
+
+_MONEY_HEADER = re.compile(r"tiền|tien|giá|gia|thành|thanh|\btt\b|đg|thu|chi|nợ|no\b|cọc|coc|phí|phi|lương|luong|doanh|vốn|von|lãi|lai")
 
 _DMY = re.compile(r"^\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})")
 
@@ -116,10 +139,11 @@ def _clean(df):
         vals = [v for v in col.tolist() if v is not None and not (isinstance(v, float) and math.isnan(v)) and str(v).strip() != ""]
         if not vals:
             continue
-        nums = [_num(v) for v in vals]
+        money = _MONEY_HEADER.search(str(c).lower()) is not None
+        nums = [_num(v, money) for v in vals]
         codes = sum(isinstance(v, str) and re.fullmatch(r"0\d{6,}", v.strip() or "x") is not None for v in vals)
         if sum(n is not None for n in nums) >= 0.9 * len(vals) and codes < 0.5 * len(vals):
-            out[c] = pd.to_numeric(col.map(_num), errors="coerce")
+            out[c] = pd.to_numeric(col.map(lambda v: _num(v, money)), errors="coerce")
             continue
         first = _day_first(vals)
         dates = [_date(v, first) for v in vals]
@@ -293,9 +317,23 @@ def lunar_to_solar(lunar_day, lunar_month, lunar_year, leap=False):
             & (c["lunar_leap"].astype(str).str.lower() == str(bool(leap)).lower())]
     return date.fromisoformat(str(hit.iloc[0]["date"])[:10])
 
-def num(v):
-    """Parse one number written as text ('1.250.000', '560,000', '12k'); NaN if not a number."""
-    x = _num(v)
+def between(series, first, last):
+    """Mask of rows whose date is within [first, last], whatever the column holds
+    (datetime, date, text). Use it for every period filter."""
+    d = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    if getattr(d.dt, "tz", None) is not None:
+        d = d.dt.tz_localize(None)
+    d = d.dt.normalize()
+    return (d >= pd.Timestamp(first)) & (d <= pd.Timestamp(last))
+
+def on_day(series, day):
+    """Mask of rows dated `day`."""
+    return between(series, day, day)
+
+def num(v, money=False):
+    """Parse one number written as text ('1.250.000', '560,000', '12k', '1tr032', '199.200 x 6';
+    money=True also reads 'xị', 'lít', 'cá', 'cành' as money words); NaN if not a number."""
+    x = _num(v, money)
     return float("nan") if x is None else x
 
 def to_date(v):
@@ -500,6 +538,8 @@ API có sẵn (đã import pandas as pd, numpy as np, datetime, re, math):
 - raw(name): bảng nguyên trạng, header=None (giữ dòng tiêu đề, dòng tổng).
 - num(x): đổi một ô chữ thành số ('1.250.000', '560,000', '12k'); to_date(x): đổi một ô thành ngày.
 - tables(): danh sách tên bảng. CALENDAR: DataFrame calendar.csv (có thể None). TODAY, YESTERDAY: date.
+- between(series, first, last) / on_day(series, day): lọc theo kỳ, dùng cho MỌI bộ lọc ngày
+  (tránh so datetime với date). num(x, money=True) đọc cả tiền nói ('1tr032', '3 củ', '2 xị').
 - round_half_up(x, digits=0): làm tròn nửa lên. week_range(day, start='mon'|'sun'),
   month_range(y, m), last_n_days(n, end): trả (ngày đầu, ngày cuối), gồm cả hai đầu.
 - solar_to_lunar(day) -> (ngày, tháng, năm âm, nhuận); lunar_to_solar(ngày, tháng, năm âm, nhuận=False).
@@ -510,17 +550,64 @@ Trước khi viết code, tự xác định theo RULEBOOK (ghi ngắn ở commen
 2. Kỳ thời gian chính xác: tuần bắt đầu thứ mấy, kỳ tới hôm nay dừng ở hết hôm nay hay hết hôm qua,
    "tính đến ngày X" là hết ngày X hay hết ngày trước X, tháng/quý không ghi năm.
 3. Bản ghi nào được tính (trạng thái đơn, dòng tổng, dòng trùng) và cách làm tròn đáp án.
+4. Đếm "số đơn" là đếm mã đơn khác nhau (nunique), không phải số dòng; các dòng cùng mã là một đơn.
+5. Kết quả 0 hoặc rỗng thường là bộ lọc sai (sai giá trị chữ, sai kiểu ngày): kiểm tra lại bộ lọc.
 Chỉ trả về khối code (comment ngắn ở đầu là được), không giải thích ngoài code."""
 
 
+def _plain_words(text: str) -> list[str]:
+    import unicodedata
+
+    text = unicodedata.normalize("NFD", text).replace("đ", "d").replace("Đ", "D")
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn").casefold()
+    return re.findall(r"[a-z0-9]+", text)
+
+
+def industry_rules(rulebook: str, shop_text: str, top: int = 2) -> str:
+    """The rulebook's '###' sections (industry rules) that share the most word pairs with the
+    shop's README and tables, for the model to see next to the question."""
+    sections = re.split(r"(?m)^###\s+", rulebook)[1:]
+    if not sections:
+        return ""
+    shop_words = _plain_words(shop_text)
+    shop_pairs = set(zip(shop_words, shop_words[1:]))
+    scored = []
+    for section in sections:
+        body = section.split("\n## ", 1)[0].strip()
+        title, _, rest = body.partition("\n")
+        words = _plain_words(rest)
+        pairs = set(zip(words, words[1:]))
+        title_words = _plain_words(title)
+        title_hit = bool(set(zip(title_words, title_words[1:])) & shop_pairs) or (
+            len(title_words) == 1 and title_words[0] in shop_words
+        )
+        score = len(pairs & shop_pairs) / max(1, len(pairs)) + (0.5 if title_hit else 0)
+        scored.append((score, body))
+    scored.sort(key=lambda x: -x[0])
+    picked = [body for score, body in scored[:top] if score >= 0.15]
+    return "\n\n".join("### " + body for body in picked)
+
+
 def build_messages(
-    question: str, today: str, readme: str, rulebook: str, table_view: str, calendar_head: str
+    question: str,
+    today: str,
+    readme: str,
+    rulebook: str,
+    table_view: str,
+    calendar_head: str,
+    industry: str = "",
 ) -> list[dict]:
     weekday = WEEKDAYS[date.fromisoformat(today).weekday()]
+    focus = (
+        "# LUẬT NGÀNH CÓ THỂ ÁP CHO SHOP NÀY (chọn tự động từ rulebook; luật ngành thắng luật chung)"
+        f"\n{industry}\n\n"
+        if industry
+        else ""
+    )
     user = (
         f"# RULEBOOK\n{rulebook.strip()}\n\n# README của shop\n{readme.strip() or '(trống)'}\n\n"
         f"# CÁC BẢNG (xem trước, đúng như table() trả về)\n{table_view}\n\n"
-        f"# CALENDAR (vài dòng đầu)\n{calendar_head}\n\n"
+        f"# CALENDAR (vài dòng đầu)\n{calendar_head}\n\n{focus}"
         f"# CÂU HỎI\nHôm nay (TODAY) = {today} ({weekday}).\n{question}"
     )
     return [{"role": "system", "content": INSTRUCTIONS}, {"role": "user", "content": user}]
@@ -584,9 +671,20 @@ def _coerce(candidate: dict) -> dict:
         value = value.strip().lower() == "true"
     if kind == "date" and isinstance(value, str) and len(value) > 10 and value[:10].count("-") == 2:
         value = value[:10]
+    if kind == "percent" and isinstance(value, (int, float)) and not isinstance(value, bool):
+        value = _round_half_up(value, 2)  # rulebooks: percentages to 2 decimals
+    if kind == "string" and isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}(-\d{2})?", value):
+        kind = "date"  # a day or month written as text is a date answer
     if kind == "table":
         value = _as_table(value)
-    return {**candidate, "answer": value}
+    return {**candidate, "type": kind, "answer": value}
+
+
+def _round_half_up(value: float, digits: int) -> float | int:
+    from decimal import ROUND_HALF_UP, Decimal
+
+    out = float(Decimal(str(value)).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP))
+    return int(out) if out.is_integer() else out
 
 
 def _as_table(value: Any) -> Any:
@@ -726,6 +824,7 @@ class CodeAgent:
             self._rulebook,
             view,
             self._calendar_head,
+            industry_rules(self._rulebook, readme + "\n" + view),
         )
 
     def _generate(self, conversations, *, n, temperature, thinking) -> list[dict]:

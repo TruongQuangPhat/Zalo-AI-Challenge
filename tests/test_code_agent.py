@@ -235,3 +235,52 @@ def test_rulebook_helpers_for_periods_rounding_and_lunar_dates(tmp_path):
             ],
         }
     }
+
+
+def test_spoken_money_and_period_filters(tmp_path):
+    path = tmp_path / "t.pkl"
+    frame = pd.DataFrame(
+        [
+            ["Ngày", "Thành tiền", "SL"],
+            ["01/03/2025", "1tr032", "2"],
+            ["02/03/2025", "3 xị", "5 cành"],
+            ["05/03/2025", "199.200 x 6", "1"],
+        ]
+    )
+    pickle.dump({"so.xlsx::T3": frame}, path.open("wb"))
+    code = (
+        "df = table('so.xlsx')\n"
+        "m = between(df['Ngày'], date(2025, 3, 1), date(2025, 3, 2))\n"
+        "ANSWER = {'type': 'list', 'answer': [df['Thành tiền'].tolist(), int(m.sum()), "
+        "int(on_day(df['Ngày'], '2025-03-05').sum()), str(df['SL'].dtype)]}"
+    )
+    out = run_code(code, path, "2026-01-05")
+    assert out == {
+        "answer": {"type": "list", "answer": [[1032000, 300000, 1195200], 2, 1, "object"]}
+    }
+
+
+def test_percent_rounding_and_date_strings_are_normalised(tmp_path):
+    root = _split(tmp_path)
+    pct = "```python\nANSWER = {'type': 'percent', 'answer': 12.3456}\n```"
+    day = "```python\nANSWER = {'type': 'string', 'answer': '2025-03-01'}\n```"
+    question = Question("q1", "s1", "?", "2026-01-05")
+    out = CodeAgent(FakeModel([pct] * 3), root, tmp_path / "c", min_votes=3).answer(question)
+    assert out["answer"]["answer"] == 12.35
+    out = CodeAgent(FakeModel([day] * 3), root, tmp_path / "c", min_votes=3).answer(question)
+    assert out["answer"] == {"id": "q1", "type": "date", "answer": "2025-03-01"}
+
+
+def test_industry_rules_picks_the_section_that_matches_the_shop():
+    from src.agent.code_agent import industry_rules
+
+    rulebook = (
+        "# R\n## 5. Theo ngành\n### Nhà trọ\n| Hoá đơn tháng M | thu trong tháng M + 1 |\n"
+        "| Tiền cọc phòng | cọc các lượt thuê phòng |\n"
+        "### Tiệm hoa\n| Đơn vị | hoa lẻ tính theo cành |\n| Hao hụt | cành bỏ so với cành mua |\n"
+        "## 6. Khác\n"
+    )
+    shop = "Sổ thu tiền phòng: tiền cọc phòng, hoá đơn tháng, số phòng, lượt thuê phòng"
+    picked = industry_rules(rulebook, shop)
+    assert picked.startswith("### Nhà trọ") and "Tiệm hoa" not in picked
+    assert industry_rules(rulebook, "bán cà phê sữa đá") == ""
