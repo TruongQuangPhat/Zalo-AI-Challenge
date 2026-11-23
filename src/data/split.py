@@ -160,12 +160,9 @@ def load_split(data_dir: Path) -> Split:
                 directory = (root / "data" / business).resolve()
                 if not inside(directory, root) or not directory.is_dir():
                     raise ContractError("business directory missing or escapes split")
-                if (
-                    not checked(f"data/{business}/README.md")
-                    .read_text(encoding="utf-8-sig")
-                    .strip()
-                ):
-                    raise ContractError("business README is empty")
+                # An empty README only leaves that shop without declared meanings; it must not
+                # stop the other shops (private test 2026: one shop shipped a 0-byte README).
+                checked(f"data/{business}/README.md").read_text(encoding="utf-8-sig")
                 files = [
                     f for f in directory.rglob("*") if f.suffix in {".csv", ".xlsx", ".sqlite"}
                 ]

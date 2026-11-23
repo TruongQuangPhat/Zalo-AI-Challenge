@@ -45,6 +45,20 @@ def main(argv: list[str] | None = None) -> int:
     predict.add_argument(
         "--question-id", action="append", help="explicit subset, input order retained"
     )
+    predict.add_argument(
+        "--fallback",
+        choices=["off", "code", "code-only"],
+        default="code-only",
+        help="code-only (default, the post-hoc solution): model-written pandas code answers "
+        "every question; code: the rule planner first, code for what it abstains on; "
+        "off: rule planner only (the 2026-11-16 submission)",
+    )
+    predict.add_argument("--fallback-samples", type=int, default=8)
+    predict.add_argument("--fallback-min-votes", type=int, default=3)
+    predict.add_argument("--fallback-repairs", type=int, default=2)
+    predict.add_argument("--fallback-thinking", action="store_true")
+    predict.add_argument("--fallback-max-tokens", type=int, default=3000)
+    predict.add_argument("--fallback-chunk", type=int, default=24)
     for command, help_text in [
         ("catalog", "inspect source tables without labels or metrics"),
         ("prepare", "normalize supported sources into exact, traceable local facts"),
@@ -76,11 +90,33 @@ def main(argv: list[str] | None = None) -> int:
                 tensor_parallel=args.tensor_parallel_size,
             )
             try:
+                planner = LocalPlanner(model, timeout=args.question_timeout)
+                if args.fallback != "off":
+                    import tempfile
+
+                    from src.agent.code_agent import CodeAgent, FallbackPlanner
+
+                    agent = CodeAgent(
+                        model,
+                        args.data_dir.resolve(),
+                        args.cache_dir or Path(tempfile.mkdtemp(prefix="code_agent_")),
+                        samples=args.fallback_samples,
+                        min_votes=args.fallback_min_votes,
+                        repairs=args.fallback_repairs,
+                        thinking=args.fallback_thinking,
+                        max_tokens=args.fallback_max_tokens,
+                    )
+                    planner = FallbackPlanner(
+                        planner,
+                        agent,
+                        skip_base=args.fallback == "code-only",
+                        chunk=args.fallback_chunk,
+                    )
                 report = run_inference(
                     args.data_dir,
                     args.output_dir,
                     cache_dir=args.cache_dir,
-                    planner=LocalPlanner(model, timeout=args.question_timeout),
+                    planner=planner,
                     question_ids=args.question_id,
                     resume_from=args.resume_from,
                     resume_tail=args.resume_tail,

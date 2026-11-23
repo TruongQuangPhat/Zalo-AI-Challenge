@@ -6,6 +6,12 @@ values are computed by Python functions over normalised data. A local language m
 Qwen3-14B served by vLLM, reads data that has no README, reformulates questions and plans
 queries. The model never produces a number itself.
 
+Since 2026-11-23 the default run is the **post-hoc code fallback** (section 4): the model
+writes pandas code over the raw shop files, several code samples run in a sandbox and an
+answer is kept only when enough samples agree. It was added after the 2026-11-16 submission
+failed on the private test (see "Version history"); the rule pipeline is still available
+with `--fallback off` or `--fallback code`.
+
 ## Pipeline
 
 ```mermaid
@@ -91,6 +97,30 @@ For each question in `questions.jsonl` (`src/agent/planner.py`):
 Time expressions are resolved against `as_of_date` and `calendar.csv`
 (`src/temporal/resolver.py`). Each answer is written and fsynced as soon as it is ready.
 
+### 4. Code fallback (`src/agent/code_agent.py`, default)
+
+For shops and questions outside the rulebook operators, the model answers by writing code:
+
+1. **Tables.** Every file of the shop is read (every Excel sheet, CSV, SQLite table). Each
+   table gets its header row, numbers written as text (`1.250.000`, `1tr032`, `12k`, money
+   words the rulebook defines such as `củ` or `xị`) and dates (`1 thg 6 2025`, day-first or
+   month-first columns) converted once per shop.
+2. **Prompt.** The split's rulebook, the shop README, a preview of each table (columns with
+   their kind, sample rows, the values of short text columns) and the rulebook's industry
+   sections that match the shop. Helpers are provided for period filters (`between`,
+   `week_range(start=…)`, `last_n_days`), half-up rounding and lunar dates from
+   `calendar.csv`, so the model applies the convention its rulebook states.
+3. **Samples.** Questions are processed in chunks of 24; one vLLM call generates 8 code
+   samples per question (temperature 0.6). Each sample runs in its own subprocess with a
+   40 s limit, in the shop folder, without network. Prose lines and code cut by the token
+   limit are repaired before running; up to 2 distinct failures per question are sent back
+   with their traceback for one repair round.
+4. **Vote.** An answer is kept when at least 3 runs agree on the same typed value; an agreed
+   numeric 0 (a filter that matched nothing) and an agreed "unanswerable" are written as
+   `abstain`. Every sample, its code and its result are in the question's log.
+
+An empty shop README no longer stops the run; that shop is answered from its files only.
+
 ## Models
 
 | Field | Value |
@@ -109,8 +139,9 @@ Inference settings (fixed defaults in `src/cli.py` and `src/agent/local.py`):
 |---|---|
 | Runtime | vLLM 0.10.1.1, PyTorch 2.7.1+cu128 (`vllm/vllm-openai:v0.10.1.1`) |
 | GPUs | 2 (`tensor_parallel_size=2`), `NCCL_P2P_DISABLE=1`, `nvidia-nccl-cu12==2.27.7` |
-| Context length | 16384 tokens, `gpu_memory_utilization` 0.85 |
-| Decoding | greedy (temperature 0), seed 0, guided JSON, 256/384 output tokens |
+| Context length | 24576 tokens, `gpu_memory_utilization` 0.85 |
+| Decoding (rule pipeline) | greedy (temperature 0), seed 0, guided JSON, 256/384 output tokens |
+| Decoding (code fallback) | 8 samples, temperature 0.6, top-p 0.95, seed 0, 3000 output tokens; repairs at temperature 0.3 |
 | Thinking mode | disabled (`enable_thinking=False`); logs record `thinking: null` |
 | Time limits | 120 s per question, 900 s for model loading |
 
@@ -127,6 +158,14 @@ other everyday wordings, 1,682 questions), with no model and no randomness. The 
 questions, the generator and the rebuild command are in `training_code/`; the rebuild is
 byte-identical. Details are in `training_code/README.md` and
 `training_code/data_manifest.json`.
+
+## Version history
+
+| Date | Commit | Change |
+|---|---|---|
+| 2026-11-16 | `4781e6a` | Submitted image: rule pipeline only. Public score 0.949 (949 correct, 0 wrong). |
+| 2026-11-20 | — | Private test: the run stopped on an empty shop README and wrote no submission; with that README filled, all 14 shops were unsupported (new rulebook and industries) and all 500 questions abstained. |
+| 2026-11-21 to 23 | this commit | Post-hoc code fallback. Developed after seeing the private results; the rulebook helpers and money words were added after reading the private rulebook. Not the competition submission. |
 
 ## Input and output
 

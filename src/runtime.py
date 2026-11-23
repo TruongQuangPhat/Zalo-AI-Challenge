@@ -176,6 +176,8 @@ def run_inference(
             predictions.flush()
             os.fsync(predictions.fileno())
             checkpoint()
+            if hasattr(adapter, "plan_ahead"):
+                adapter.plan_ahead(questions[len(prefix) :])
             for index, question in enumerate(questions[len(prefix) :], len(prefix)):
                 question_start = time.perf_counter()
                 error, execution, decision = None, "not_performed", None
@@ -225,7 +227,9 @@ def run_inference(
                 phase_start = time.perf_counter()
                 try:
                     context = contexts[question.business_id]
-                    if context is None:
+                    if context is None and not getattr(
+                        adapter, "accepts_missing_context", False
+                    ):
                         raise ContractError("business preparation failed; see catalog diagnostic")
                     called_planner = True
                     decision = adapter.decide(question, context=context)

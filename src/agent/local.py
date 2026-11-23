@@ -14,7 +14,7 @@ from src.data.cache import fingerprint
 from src.data.catalog import digest
 from src.jsonio import ContractError
 
-MAX_MODEL_LEN = 16384  # mapping prompts list every column of a shop
+MAX_MODEL_LEN = 24576  # mapping prompts list every column; code fallback adds rulebook + previews
 GPU_MEMORY_UTILIZATION = 0.85
 REQUIRED_FILES = ("config.json", "tokenizer.json", "tokenizer_config.json")
 
@@ -83,6 +83,45 @@ def _worker(
             request = pipe.recv()
             if request is None:
                 break
+            if request.get("free"):
+                # Free-text samples (code fallback): no grammar, n samples per conversation;
+                # "conversations" sends many prompts in one call so vLLM batches them.
+                try:
+                    started = time.monotonic()
+                    params = SamplingParams(
+                        n=request.get("n", 1),
+                        temperature=request.get("temperature", 0.0),
+                        top_p=0.95 if request.get("temperature") else 1.0,
+                        top_k=20 if request.get("thinking") else -1,
+                        seed=request.get("seed", 0),
+                        max_tokens=request["max_tokens"],
+                    )
+                    conversations = request.get("conversations") or [request["messages"]]
+                    outputs = model.chat(
+                        conversations,
+                        params,
+                        use_tqdm=False,
+                        chat_template_kwargs={"enable_thinking": bool(request.get("thinking"))},
+                    )
+                    results = [
+                        {
+                            "texts": [o.text for o in result.outputs],
+                            "finish_reasons": [o.finish_reason for o in result.outputs],
+                            "usage": {
+                                "prompt_tokens": len(result.prompt_token_ids or []),
+                                "completion_tokens": sum(len(o.token_ids) for o in result.outputs),
+                            },
+                        }
+                        for result in outputs
+                    ]
+                    seconds = time.monotonic() - started
+                    if request.get("conversations"):
+                        pipe.send({"results": results, "seconds": seconds})
+                    else:
+                        pipe.send({**results[0], "seconds": seconds})
+                except Exception as exc:
+                    pipe.send({"request_error": f"{type(exc).__name__}: {exc}"})
+                continue
             try:
                 started = time.monotonic()
                 # Two aggregates plus refs need more JSON than the S1 scalar draft.
@@ -119,6 +158,15 @@ def _worker(
                     }
                 )
             except Exception as exc:  # one bad request (e.g. prompt too long) keeps the engine
+                # A grammar that fails to compile can stay queued in the engine and fail every
+                # later request (seen on the 2026 private test); abort what is left of it.
+                try:
+                    engine = model.llm_engine
+                    states = getattr(getattr(engine, "output_processor", None), "request_states", None)
+                    if states:
+                        engine.abort_request(list(states))
+                except Exception:  # noqa: BLE001 - best effort only
+                    pass
                 pipe.send({"request_error": f"{type(exc).__name__}: {exc}"})
     except Exception as exc:
         pipe.send({"error": f"{type(exc).__name__}: {exc}"})
@@ -212,6 +260,56 @@ class LocalModel:
             raise ContractError("local_model_worker_unavailable")
         self.pipe.send({"messages": messages, "schema": schema, "max_tokens": max_tokens})
         return self._receive(timeout)
+
+    def sample(
+        self,
+        messages: list[dict],
+        timeout: float,
+        *,
+        n: int,
+        temperature: float,
+        max_tokens: int,
+        thinking: bool = False,
+    ) -> dict:
+        """n free-text completions of one prompt (no JSON grammar)."""
+        if not self.process.is_alive():
+            raise ContractError("local_model_worker_unavailable")
+        self.pipe.send(
+            {
+                "free": True,
+                "messages": messages,
+                "n": n,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "thinking": thinking,
+            }
+        )
+        return self._receive(timeout)
+
+    def sample_batch(
+        self,
+        conversations: list[list[dict]],
+        timeout: float,
+        *,
+        n: int,
+        temperature: float,
+        max_tokens: int,
+        thinking: bool = False,
+    ) -> list[dict]:
+        """n free-text completions for each conversation, generated together."""
+        if not self.process.is_alive():
+            raise ContractError("local_model_worker_unavailable")
+        self.pipe.send(
+            {
+                "free": True,
+                "conversations": conversations,
+                "n": n,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "thinking": thinking,
+            }
+        )
+        return self._receive(timeout)["results"]
 
     def close(self) -> None:
         if self.process.is_alive():
