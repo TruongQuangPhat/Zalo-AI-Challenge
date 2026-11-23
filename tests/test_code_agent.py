@@ -197,3 +197,41 @@ def test_code_only_planner_generates_a_chunk_in_one_batch(tmp_path):
     planner.plan_ahead(questions)
     answers = [planner.decide(q, context=object())["answer"] for q in questions]
     assert [a["answer"] for a in answers] == [5, 5, 5, 5] and Batch.calls == 1
+
+
+def test_rulebook_helpers_for_periods_rounding_and_lunar_dates(tmp_path):
+    path = tmp_path / "t.pkl"
+    calendar = pd.DataFrame(
+        {
+            "date": ["2026-02-16", "2026-02-17"],
+            "weekday": [1, 2],
+            "lunar_day": [29, 1],
+            "lunar_month": [12, 1],
+            "lunar_year": [2025, 2026],
+            "lunar_leap": ["false", "false"],
+            "holiday": ["", ""],
+        }
+    )
+    pickle.dump({"__raw__": {}, "__clean__": {}, "__calendar__": calendar}, path.open("wb"))
+    code = (
+        "ANSWER = {'type': 'list', 'answer': [round_half_up(2.5), round_half_up(2.45, 1), "
+        "str(week_range(date(2026, 11, 18), 'sun')[0]), str(week_range(date(2026, 11, 18))[0]), "
+        "str(month_range(2026, 2)[1]), str(last_n_days(7, YESTERDAY)[0]), "
+        "str(lunar_to_solar(1, 1, 2026)), list(solar_to_lunar('2026-02-16'))]}"
+    )
+    out = run_code(code, path, "2026-11-20")
+    assert out == {
+        "answer": {
+            "type": "list",
+            "answer": [
+                3,
+                2.5,
+                "2026-11-15",
+                "2026-11-16",
+                "2026-02-28",
+                "2026-11-13",
+                "2026-02-17",
+                [29, 12, 2025, False],
+            ],
+        }
+    }

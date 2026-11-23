@@ -26,7 +26,7 @@ from typing import Any
 from src.contracts import validate_answer
 from src.jsonio import ContractError
 
-PROMPT_VERSION = "code-fallback-v3"
+PROMPT_VERSION = "code-fallback-v4"
 WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ nhật"]
 PREVIEW_CHAR_BUDGET = 18000
 CELL_CHARS = 36
@@ -253,6 +253,46 @@ def table(name, header_row=None, clean=True):
     without '::sheet' joins all its sheets (column 'sheet')."""
     return Frame(_table(_TABLES, name, header_row, clean, _CLEAN))
 
+YESTERDAY = TODAY - timedelta(days=1)
+
+def round_half_up(x, digits=0):
+    """Round half away from zero (2.5 -> 3, 2.45 -> 2.5 with digits=1)."""
+    from decimal import Decimal, ROUND_HALF_UP
+    q = Decimal(1).scaleb(-digits)
+    out = float(Decimal(str(x)).quantize(q, rounding=ROUND_HALF_UP))
+    return int(out) if digits == 0 else out
+
+def week_range(day, start="mon"):
+    """(first, last) date of the week holding `day`; start='mon' or 'sun' as the rulebook says."""
+    day = pd.Timestamp(day).date()
+    offset = day.weekday() if start == "mon" else (day.weekday() + 1) % 7
+    first = day - timedelta(days=offset)
+    return first, first + timedelta(days=6)
+
+def month_range(year, month):
+    """(first, last) date of a calendar month."""
+    first = date(year, month, 1)
+    last = (date(year + (month == 12), month % 12 + 1, 1) - timedelta(days=1))
+    return first, last
+
+def last_n_days(n, end):
+    """(first, last) of n consecutive days ending on `end` (TODAY or YESTERDAY per rulebook)."""
+    end = pd.Timestamp(end).date()
+    return end - timedelta(days=n - 1), end
+
+def solar_to_lunar(day):
+    """(lunar_day, lunar_month, lunar_year, leap) of a solar date, from calendar.csv."""
+    row = CALENDAR[CALENDAR["date"] == pd.Timestamp(day).strftime("%Y-%m-%d")].iloc[0]
+    return int(row["lunar_day"]), int(row["lunar_month"]), int(row["lunar_year"]), str(row["lunar_leap"]).lower() == "true"
+
+def lunar_to_solar(lunar_day, lunar_month, lunar_year, leap=False):
+    """Solar date of a lunar date, from calendar.csv."""
+    c = CALENDAR
+    hit = c[(c["lunar_day"] == lunar_day) & (c["lunar_month"] == lunar_month)
+            & (c["lunar_year"] == lunar_year)
+            & (c["lunar_leap"].astype(str).str.lower() == str(bool(leap)).lower())]
+    return date.fromisoformat(str(hit.iloc[0]["date"])[:10])
+
 def num(v):
     """Parse one number written as text ('1.250.000', '560,000', '12k'); NaN if not a number."""
     x = _num(v)
@@ -459,9 +499,18 @@ API có sẵn (đã import pandas as pd, numpy as np, datetime, re, math):
   (đúng như phần xem trước). name là 'file::sheet'; chỉ ghi 'file' thì ghép mọi sheet (thêm cột 'sheet').
 - raw(name): bảng nguyên trạng, header=None (giữ dòng tiêu đề, dòng tổng).
 - num(x): đổi một ô chữ thành số ('1.250.000', '560,000', '12k'); to_date(x): đổi một ô thành ngày.
-- tables(): danh sách tên bảng. CALENDAR: DataFrame calendar.csv (có thể None). TODAY: date.
+- tables(): danh sách tên bảng. CALENDAR: DataFrame calendar.csv (có thể None). TODAY, YESTERDAY: date.
+- round_half_up(x, digits=0): làm tròn nửa lên. week_range(day, start='mon'|'sun'),
+  month_range(y, m), last_n_days(n, end): trả (ngày đầu, ngày cuối), gồm cả hai đầu.
+- solar_to_lunar(day) -> (ngày, tháng, năm âm, nhuận); lunar_to_solar(ngày, tháng, năm âm, nhuận=False).
 Ô trống ở các dòng sau của cùng một nhóm dòng (cùng đơn) có thể cần ffill.
-Chỉ trả về khối code, không giải thích."""
+
+Trước khi viết code, tự xác định theo RULEBOOK (ghi ngắn ở comment đầu code):
+1. Shop thuộc ngành nào trong mục "Theo ngành" (nếu có) và luật ngành nào áp cho câu hỏi.
+2. Kỳ thời gian chính xác: tuần bắt đầu thứ mấy, kỳ tới hôm nay dừng ở hết hôm nay hay hết hôm qua,
+   "tính đến ngày X" là hết ngày X hay hết ngày trước X, tháng/quý không ghi năm.
+3. Bản ghi nào được tính (trạng thái đơn, dòng tổng, dòng trùng) và cách làm tròn đáp án.
+Chỉ trả về khối code (comment ngắn ở đầu là được), không giải thích ngoài code."""
 
 
 def build_messages(
