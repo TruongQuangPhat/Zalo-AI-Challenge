@@ -5,7 +5,9 @@ threshold needs no new model run. With --answers (labelled split) it prints, per
 how many fallback answers are correct / wrong; with --write it writes a new submission.
 
 usage: python -m scripts.revote_fallback --output-dir RUN [--answers answers.jsonl]
-           [--min-votes 3] [--write new_submission.jsonl]
+           [--min-votes 3] [--write new_submission.jsonl] [--extra-logs OTHER_RUN/logs ...]
+
+--extra-logs pools the samples of other runs on the same questions into the vote.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ def main() -> None:
     parser.add_argument("--min-votes", type=int, default=3)
     parser.add_argument("--unanswerable", action="store_true")
     parser.add_argument("--write", type=Path)
+    parser.add_argument("--extra-logs", type=Path, nargs="*", default=[])
     args = parser.parse_args()
 
     records = []
@@ -47,6 +50,14 @@ def main() -> None:
         records.append(json.loads(path.read_text()))
     order = [json.loads(line)["id"] for line in (args.output_dir / "submission.jsonl").open()]
     by_id = {r["id"]: r for r in records}
+    for folder in args.extra_logs:
+        for path in sorted(folder.glob("*.json")):
+            other = json.loads(path.read_text())
+            mine = by_id.get(other["id"])
+            extra = ((other.get("plan") or {}).get("fallback") or {}).get("runs", [])
+            log = ((mine or {}).get("plan") or {}).get("fallback")
+            if log is not None and extra:
+                log["runs"] = log.get("runs", []) + extra
     gold = (
         {json.loads(line)["id"]: json.loads(line) for line in args.answers.open()}
         if args.answers
@@ -62,7 +73,7 @@ def main() -> None:
     if gold:
         print("min_votes unanswerable | fallback answered correct wrong | total correct wrong pa")
         for unanswerable in (False, True):
-            for threshold in range(1, 9):
+            for threshold in range(1, 17):
                 fb = collections.Counter()
                 total = collections.Counter()
                 for qid in order:
