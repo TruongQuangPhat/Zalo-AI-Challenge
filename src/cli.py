@@ -20,14 +20,20 @@ def main(argv: list[str] | None = None) -> int:
     args_list = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    predict = commands.add_parser("predict", help="offline local LLM planner and execution")
+    predict = commands.add_parser(
+        "predict", help="offline local LLM planner and execution"
+    )
     predict.add_argument("--data-dir", type=Path, default=Path("/data"))
     predict.add_argument("--output-dir", type=Path, default=Path("/result"))
     predict.add_argument("--cache-dir", type=Path)
     predict.add_argument(
-        "--resume-from", type=Path, help="verify immutable prior run; output must be fresh"
+        "--resume-from",
+        type=Path,
+        help="verify immutable prior run; output must be fresh",
     )
-    predict.add_argument("--resume-tail", choices=["reject", "discard"], default="reject")
+    predict.add_argument(
+        "--resume-tail", choices=["reject", "discard"], default="reject"
+    )
     predict.add_argument(
         "--model",
         type=Path,
@@ -48,10 +54,10 @@ def main(argv: list[str] | None = None) -> int:
     predict.add_argument(
         "--fallback",
         choices=["off", "code", "code-only"],
-        default="code-only",
-        help="code-only (default, the post-hoc solution): model-written pandas code answers "
-        "every question; code: the rule planner first, code for what it abstains on; "
-        "off: rule planner only (the 2026-11-16 submission)",
+        default="code",
+        help="code (default): the rule planner first, model-written pandas code for what it "
+        "abstains on; code-only: code for every question; off: rule planner only (the "
+        "2026-11-16 submission)",
     )
     predict.add_argument("--fallback-samples", type=int, default=8)
     predict.add_argument("--fallback-min-votes", type=int, default=3)
@@ -66,15 +72,21 @@ def main(argv: list[str] | None = None) -> int:
         catalog = commands.add_parser(command, help=help_text)
         catalog.add_argument("--data-dir", type=Path, required=True)
         catalog.add_argument("--output-dir", type=Path, required=True)
-        catalog.add_argument("--business", action="append", help="repeat to select businesses")
+        catalog.add_argument(
+            "--business", action="append", help="repeat to select businesses"
+        )
         catalog.add_argument("--cache-dir", type=Path)
         catalog.add_argument("--encoding", default="utf-8-sig")
         catalog.add_argument("--delimiter", choices=[",", ";", "\t", "|"])
         catalog.add_argument("--max-distinct", type=int, default=100000)
         catalog.add_argument("--counter-memory-mib", type=int, default=32)
-    validate = commands.add_parser("validate", help="validate split structure without labels")
+    validate = commands.add_parser(
+        "validate", help="validate split structure without labels"
+    )
     validate.add_argument("--data-dir", type=Path, required=True)
-    score = commands.add_parser("evaluate", help="explicit, separate ground-truth evaluation")
+    score = commands.add_parser(
+        "evaluate", help="explicit, separate ground-truth evaluation"
+    )
     score.add_argument("--answers", type=Path, required=True)
     score.add_argument("--predictions", type=Path, required=True)
     score.add_argument("--report", type=Path)
@@ -170,7 +182,8 @@ def main(argv: list[str] | None = None) -> int:
                 "businesses": results,
                 "read_complete": all(r["read_complete"] for r in results.values()),
                 "normalization_blocked": sum(
-                    r.get("normalization", {}).get("status") == "blocked" for r in results.values()
+                    r.get("normalization", {}).get("status") == "blocked"
+                    for r in results.values()
                 ),
             }
         elif args.command == "validate":
@@ -180,10 +193,15 @@ def main(argv: list[str] | None = None) -> int:
 
             report = evaluate(args.answers, args.predictions)
             if args.report:
-                if args.report.resolve() in {args.answers.resolve(), args.predictions.resolve()}:
+                if args.report.resolve() in {
+                    args.answers.resolve(),
+                    args.predictions.resolve(),
+                }:
                     raise ContractError("report cannot overwrite labels or predictions")
                 if args.report.resolve().is_relative_to(args.answers.parent.resolve()):
-                    raise ContractError("report must be outside the ground-truth directory")
+                    raise ContractError(
+                        "report must be outside the ground-truth directory"
+                    )
                 args.report.parent.mkdir(parents=True, exist_ok=True)
                 write_json(args.report, report)
         print(dumps(report))
@@ -193,7 +211,9 @@ def main(argv: list[str] | None = None) -> int:
             or report.get("normalization_blocked", 0) > 0
         )
     except (ContractError, OSError, UnicodeError) as exc:
-        print(dumps({"error": type(exc).__name__, "message": str(exc)}), file=sys.stderr)
+        print(
+            dumps({"error": type(exc).__name__, "message": str(exc)}), file=sys.stderr
+        )
         return 2
 
 

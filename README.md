@@ -6,11 +6,12 @@ values are computed by Python functions over normalised data. A local language m
 Qwen3-14B served by vLLM, reads data that has no README, reformulates questions and plans
 queries. The model never produces a number itself.
 
-Since 2026-11-23 the default run is the **post-hoc code fallback** (section 4): the model
-writes pandas code over the raw shop files, several code samples run in a sandbox and an
-answer is kept only when enough samples agree. It was added after the 2026-11-16 submission
-failed on the private test (see "Version history"); the rule pipeline is still available
-with `--fallback off` or `--fallback code`.
+Since 2026-11-23 the rule pipeline is followed by a **post-hoc code fallback** (section 4):
+questions the rule pipeline abstains on are answered by pandas code the model writes over
+the raw shop files; several code samples run in a sandbox and an answer is kept only when
+enough samples agree. It was added after the 2026-11-16 submission failed on the private
+test (see "Version history"). `--fallback off` runs the rule pipeline alone and
+`--fallback code-only` the code fallback alone.
 
 ## Pipeline
 
@@ -97,9 +98,10 @@ For each question in `questions.jsonl` (`src/agent/planner.py`):
 Time expressions are resolved against `as_of_date` and `calendar.csv`
 (`src/temporal/resolver.py`). Each answer is written and fsynced as soon as it is ready.
 
-### 4. Code fallback (`src/agent/code_agent.py`, default)
+### 4. Code fallback (`src/agent/code_agent.py`)
 
-For shops and questions outside the rulebook operators, the model answers by writing code:
+For questions the steps above answer `abstain` (shops and questions outside the rulebook
+operators), the model answers by writing code:
 
 1. **Tables.** Every file of the shop is read (every Excel sheet, CSV, SQLite table). Each
    table gets its header row, numbers written as text (`1.250.000`, `1tr032`, `12k`, money
@@ -110,8 +112,10 @@ For shops and questions outside the rulebook operators, the model answers by wri
    sections that match the shop. Helpers are provided for period filters (`between`,
    `week_range(start=…)`, `last_n_days`), half-up rounding and lunar dates from
    `calendar.csv`, so the model applies the convention its rulebook states.
-3. **Samples.** Questions are processed in chunks of 24; one vLLM call generates 8 code
-   samples per question (temperature 0.6). Each sample runs in its own subprocess with a
+3. **Samples.** One vLLM call generates 8 code samples per question (temperature 0.6).
+   A shop whose facts the rule pipeline marks unsupported skips the rule steps entirely: its
+   questions go to the fallback in chunks of 24 per vLLM call (as for every shop with
+   `--fallback code-only`). Each sample runs in its own subprocess with a
    40 s limit, in the shop folder, without network. Prose lines and code cut by the token
    limit are repaired before running; up to 2 distinct failures per question are sent back
    with their traceback for one repair round.
