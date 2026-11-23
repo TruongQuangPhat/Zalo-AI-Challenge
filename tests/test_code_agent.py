@@ -2,6 +2,7 @@ import json
 import pickle
 
 import pandas as pd
+from types import SimpleNamespace
 
 from src.agent.code_agent import CodeAgent, FallbackPlanner, extract_code, run_code, vote_key
 from src.data.split import Question
@@ -142,8 +143,8 @@ def test_fallback_planner_keeps_rule_answers_and_falls_back_on_abstain(tmp_path)
 
     question = Question("q1", "s1", "?", "2026-01-05")
     ruled = FallbackPlanner(Base({"type": "number", "answer": 1}), agent)
-    assert ruled.decide(question, context=object())["answer"]["answer"] == 1
-    fell = FallbackPlanner(Base({"type": "abstain"}), agent).decide(question, context=object())
+    assert ruled.decide(question, context=READY)["answer"]["answer"] == 1
+    fell = FallbackPlanner(Base({"type": "abstain"}), agent).decide(question, context=READY)
     assert fell["answer"]["answer"] == 5 and fell["execution"] == "code_fallback"
     assert json.dumps(fell["plan"]["fallback"]["votes"])
     missing = FallbackPlanner(Base({"type": "number", "answer": 1}), agent)
@@ -303,3 +304,37 @@ def test_table_names_match_without_accents_or_case(tmp_path):
     pickle.dump({"SoDiem_7A1.xlsx::ĐD T5": frame}, path.open("wb"))
     code = "ANSWER = {'type': 'number', 'answer': len(table('sodiem_7a1.xlsx::dd t5'))}"
     assert run_code(code, path, "2026-01-05") == {"answer": {"type": "number", "answer": 2}}
+
+
+READY = SimpleNamespace(prepared=SimpleNamespace(summary={"status": "ready"}))
+
+
+def test_unsupported_shops_skip_the_rule_planner_and_batch(tmp_path):
+    root = _split(tmp_path)
+    code = "```python\nANSWER = {'type': 'number', 'answer': 5}\n```"
+
+    class Batch(FakeModel):
+        calls = 0
+
+        def sample_batch(self, conversations, timeout, **kwargs):
+            Batch.calls += 1
+            return [{"texts": self.texts, "usage": {}} for _ in conversations]
+
+    class Base:
+        name, metadata, asked = "base", {}, 0
+
+        def decide(self, question, *, context):
+            Base.asked += 1
+            return {"answer": {"id": question.id, "type": "abstain"}, "plan": {}}
+
+    agent = CodeAgent(Batch([code] * 3), root, tmp_path / "c", min_votes=3)
+    planner = FallbackPlanner(Base(), agent, chunk=10)
+    unsupported = SimpleNamespace(prepared=SimpleNamespace(summary={"status": "unsupported"}))
+    questions = [Question(f"q{i}", "s1", "?", "2026-01-05") for i in range(3)]
+    planner.plan_ahead(questions)
+    answers = [planner.decide(q, context=unsupported) for q in questions]
+    assert [a["answer"]["answer"] for a in answers] == [5, 5, 5]
+    assert Base.asked == 0 and Batch.calls == 1
+    assert answers[0]["plan"]["status"] == "rules_skipped_unsupported_shop"
+    planner.decide(Question("q9", "s1", "?", "2026-01-05"), context=READY)
+    assert Base.asked == 1
